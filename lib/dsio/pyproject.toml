@@ -12,13 +12,16 @@ dependencies = [
     "pydantic>=2.12",
     "typer>=0.15",
     "pyyaml>=6.0",
+    "numpy>=2.1",
 ]
 
 [project.optional-dependencies]
 tabular = ["scikit-learn>=1.9", "xgboost>=3.4", "polars>=1.30", "pyarrow>=18"]
 forecast = ["statsforecast>=2.1", "mlforecast>=1.1"]
 torch = ["torch>=2.6", "lightning>=2.5", "torchmetrics>=1.6"]
-data = ["fsspec>=2025.1", "zarr>=3.0", "numpy>=2.1", "pyarrow>=18"]
+data = ["fsspec>=2025.1", "pyarrow>=18"]
+# zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
+legacy = ["zarr>=3.0"]
 search = ["optuna>=4.5"]
 mlflow = ["mlflow>=3.0"]
 wandb = ["wandb>=0.19"]

@@ -1,7 +1,11 @@
 # Data and run artifacts.
 # Anchored with a leading slash on purpose: a bare `runs/` also matches
 # `src/dsio/runs/` and `tests/runs/`, which would silently exclude source.
-/stores/
+# Payloads are gitignored; manifests are committed, so a store is described in git
+# and fetched by content hash. git needs the dir un-ignored to reach the negations.
+/stores/*/*
+!/stores/*/manifest.yaml
+!/stores/*/entities.jsonl
 /views/
 /cache/
 /runs/
