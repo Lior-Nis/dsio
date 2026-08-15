@@ -83,6 +83,54 @@ N-dimensional data sampled as sub-volumes, where its chunking earns its cost; no
 v1 modalities qualifies. Versioning stays in the manifest layer, where ADR 0002 already put
 it.
 
+## Does it hold with DataLoader workers?
+
+The bake-off above measured one reader. Training uses N worker processes reading
+concurrently, and the two candidates have different bottlenecks — Zarr's cost is CPU-side
+Python work, which parallelises across processes, while memmap is page-cache memcpy, which
+contends on memory bandwidth. So the ranking was not obviously stable.
+
+Measured with the `fork` start method, which is what a PyTorch DataLoader uses on Linux, on
+a 24-core machine. Aggregate windows/s, with pool startup excluded from the timing:
+
+| Format | 1 worker | 2 | 4 | 8 | CPU-seconds per 1M windows |
+|---|---|---|---|---|---|
+| np.memmap | 405,034 | 811,832 | 1,466,876 | 2,866,337 | **2.7** |
+| Arrow IPC mmap | 262,615 | 511,889 | 909,825 | 1,901,997 | **4.0** |
+| Zarr v3 | 3,054 | 6,745 | 13,621 | 26,104 | **~320** |
+
+All three scale close to linearly (7–8.5× at 8 workers), so **the ranking is stable** and
+Zarr stays roughly two orders of magnitude behind.
+
+**The decisive number is the last column, not the throughput.** Zarr burns ~120× more CPU
+per window. Expressed as cores needed to sustain a fixed 50,000 windows/s — a modest
+pretraining feed — that is **0.14 cores for memmap, 0.2 for Arrow, and 16 for Zarr**. Those
+sixteen cores are not spare: they are the cores you wanted for augmentation, collation, and
+the masking sampler. A reader that consumes the machine to feed the GPU has not solved the
+problem, and this is a far stronger argument than raw throughput.
+
+### The correctness half: handles must be per-worker
+
+Opening lazily inside the worker is not an optimisation, it is required.
+
+A `np.memmap` created in the parent and handed to a **spawn**-based worker is pickled *by
+value* — it serialises the array rather than the mapping. Linux DataLoaders default to
+`fork` and inherit the mapping harmlessly, so this bug hides until someone runs on macOS or
+Windows, or sets `multiprocessing_context="spawn"` to dodge a CUDA fork issue. FORGE hit the
+same class of bug with Zarr and fixed it the same way: a per-worker handle opened on first
+use (`data/dataset/base.py:374-391`).
+
+Two properties that make memmap behave well here, and are worth stating because they are not
+obvious:
+
+- **Read-only mappings share the page cache across processes**, so eight workers reading one
+  file do not multiply resident memory. Per-worker decode buffers do.
+- **The canonical store is immutable once built**, so readers never contend with a writer.
+  Concurrency control is needed only in the manifest layer, which already has it.
+
+Seeding must also be per-worker — `dsio.runs.seeding.dataloader_kwargs()` supplies the
+seeded generator and `worker_init_fn`, without which shuffle order depends on worker count.
+
 ## Consequences
 
 The `StorageBackend` ABC from ADR 0004 is now load-bearing rather than tidy. These numbers
