@@ -1,0 +1,26 @@
+# Data and run artifacts.
+# Anchored with a leading slash on purpose: a bare `runs/` also matches
+# `src/dsio/runs/` and `tests/runs/`, which would silently exclude source.
+/stores/
+/views/
+/cache/
+/runs/
+/models/
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+
+# Local env
+.env

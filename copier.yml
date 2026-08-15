@@ -1,0 +1,96 @@
+# Copier template definition.
+#
+# This repo is a template. It is not itself a runnable project — there is no root
+# pyproject.toml, because `pyproject.toml.jinja` owns that name. Note that Copier matches
+# `_exclude` against the *rendered destination* path, so a literal file and its `.jinja`
+# twin cannot coexist; the twin silently loses.
+#
+# The spine at `lib/dsio/` is a real, standalone, installable package with its own
+# pyproject.toml and test suite, so it is developed and tested directly:
+#
+#   cd lib/dsio && uv sync && uv run pytest
+#
+#   copier copy gh:<you>/dsio my-project      # create
+#   copier update                             # pull spine improvements later
+#
+# `copier update` is the point of all this. A plain fork can only merge; a Copier project
+# records its answers in .copier-answers.yml and can re-apply template changes on top of
+# local edits, which is the difference between spine improvements reaching every project
+# and rotting in whichever repo they were written.
+
+_min_copier_version: "9.4.0"
+
+_exclude:
+  # Version control and generated state
+  - ".git"
+  - ".github/ISSUE_TEMPLATE"
+  - "uv.lock"
+  - "__pycache__"
+  - "*.py[co]"
+  - ".venv"
+  - ".*_cache"
+  # Anchored with a leading slash on purpose. A bare `runs` also matches
+  # lib/dsio/src/dsio/runs/, which silently drops the run ledger from every generated
+  # project — the same trap an unanchored .gitignore entry sets.
+  - "/runs"
+  - "/stores"
+  - "/views"
+  - "/cache"
+  - "/models"
+  - "/data"
+  # Template machinery itself
+  - "copier.yml"
+  - "docs/superpowers"
+
+_answers_file: .copier-answers.yml
+
+_message_after_copy: |
+  Created {{ project_name }}.
+
+      cd {{ _copier_conf.dst_path }}
+      uv sync
+      uv run dsio run {{ module_name }}_baseline --summary
+
+  lib/dsio/ is the shared spine — treat it as read-only and send fixes upstream.
+  Your code goes in src/{{ module_name }}/. Run `copier update` to pull spine changes.
+
+_message_after_update: |
+  Spine updated. Re-run `uv sync`, then `uv run pytest` before trusting the result.
+
+project_name:
+  type: str
+  help: Project name (human readable, e.g. "Predictive Maintenance")
+  default: My Project
+
+module_name:
+  type: str
+  help: Python package name (importable, lowercase, no spaces)
+  default: "{{ project_name|lower|replace(' ', '_')|replace('-', '_') }}"
+  validator: >-
+    {% if not module_name.replace('_', '').isalnum() or module_name[0].isdigit() %}
+    module_name must be a valid Python identifier: letters, digits and underscores,
+    not starting with a digit.
+    {% endif %}
+
+description:
+  type: str
+  help: One-line description
+  default: A dsio project.
+
+modality:
+  type: str
+  help: Primary modality — decides which dsio extra is installed
+  choices:
+    Tabular (scikit-learn, XGBoost): tabular
+    Time series / forecasting (Nixtla): forecast
+    Deep learning (torch, Lightning): torch
+  default: tabular
+
+tracker:
+  type: str
+  help: Optional tracking sink. The local run ledger is authoritative either way.
+  choices:
+    None — local ledger only: none
+    MLflow: mlflow
+    Weights & Biases: wandb
+  default: none

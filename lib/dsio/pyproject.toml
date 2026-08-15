@@ -1,0 +1,107 @@
+[project]
+name = "dsio"
+version = "0.1.0"
+description = "Reproducible ML/DL experimentation spine: config, data staging, splits, runs, evaluation."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+# Spine only. Heavy modality dependencies live in optional groups so a fresh clone
+# installs in seconds and a Kaggle kernel can install just what it needs.
+dependencies = [
+    "pydantic>=2.12",
+    "typer>=0.15",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+tabular = ["scikit-learn>=1.9", "xgboost>=3.4", "polars>=1.30", "pyarrow>=18"]
+forecast = ["statsforecast>=2.1", "mlforecast>=1.1"]
+torch = ["torch>=2.6", "lightning>=2.5", "torchmetrics>=1.6"]
+data = ["fsspec>=2025.1", "zarr>=3.0", "numpy>=2.1", "pyarrow>=18"]
+search = ["optuna>=4.5"]
+mlflow = ["mlflow>=3.0"]
+wandb = ["wandb>=0.19"]
+
+[project.scripts]
+dsio = "dsio.cli.main:main"
+
+# The spine is developed and tested standalone: `cd lib/dsio && uv sync && uv run pytest`.
+# A generated project pulls it in as a workspace member and brings its own dev group.
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "import-linter>=2.1",
+    "types-pyyaml>=6.0",
+    "scikit-learn>=1.9",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "BLE", "SIM", "RUF"]
+# BLE is load-bearing: FORGE's swallowed callback exceptions silently disabled
+# checkpointing for multi-hour runs. A broad except is a correctness bug, not a style one.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B", "BLE", "SIM", "RUF"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dsio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+# ---------------------------------------------------------------------------
+# The spine is held to a stricter bar than project code. See docs/adr/.
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/dsio"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+# ---------------------------------------------------------------------------
+# Import contracts — each encodes a specific leak, not generic layering.
+# ---------------------------------------------------------------------------
+
+[tool.importlinter]
+root_packages = ["dsio"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+# config/runs/artifacts are leaves. If one grows an upward import, the dependency
+# direction has inverted and every downstream module becomes untestable in isolation.
+name = "Foundation modules import no other dsio module"
+type = "independence"
+modules = ["dsio.config", "dsio.runs", "dsio.artifacts"]
+
+[[tool.importlinter.contracts]]
+# The spine must never depend on a specific project. In the workspace layout this is
+# also enforced by packaging — dsio does not declare the project as a dependency — but
+# the contract catches an accidental import before it reaches a lockfile.
+name = "dsio never imports project code"
+type = "forbidden"
+source_modules = ["dsio"]
+forbidden_modules = ["project"]
+
+[[tool.importlinter.contracts]]
+# CLI command modules must not import each other. algua added this contract after command
+# modules started reaching into each other's private helpers, which is how gating logic
+# drifts apart between subcommands.
+name = "CLI command modules are mutually independent"
+type = "independence"
+modules = ["dsio.cli.run_cmd", "dsio.cli.runs_cmd", "dsio.cli.artifacts_cmd"]

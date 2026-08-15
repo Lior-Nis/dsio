@@ -1,0 +1,61 @@
+# Workspace root, and the {{ project_name }} project package.
+#
+# Two distributions, one repo. `{{ module_name }}` depends on `dsio`; `dsio` does not and
+# cannot depend on it. That direction is enforced by packaging, not by convention.
+#
+# `lib/dsio/` is the shared spine. Treat it as read-only: send fixes upstream so every
+# project gets them, and pull them back with `copier update`.
+
+[project]
+name = "{{ module_name }}"
+version = "0.1.0"
+description = "{{ description }}"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "dsio[{{ modality }}{% if tracker != 'none' %},{{ tracker }}{% endif %}]",
+]
+
+# How dsio finds your presets. Without this, `dsio run` sees nothing.
+[project.entry-points."dsio.presets"]
+{{ module_name }} = "{{ module_name }}.presets"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/{{ module_name }}"]
+
+[tool.uv.workspace]
+members = ["lib/dsio"]
+
+[tool.uv.sources]
+dsio = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "import-linter>=2.1",
+    "types-pyyaml>=6.0",
+    "copier>=9.4",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "lib/dsio/src", "lib/dsio/tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "BLE", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Your code is deliberately unpoliced beyond basic hygiene. The spine is not.
+"src/{{ module_name }}/**" = ["B", "BLE", "SIM", "RUF"]
+"tests/**" = ["B", "BLE", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["lib/dsio/tests", "tests"]
+addopts = "-q"

@@ -1,0 +1,20 @@
+"""Tests for {{ project_name }}.
+
+The one check worth keeping: every preset still composes. Cheapest possible guard against
+config rot. Everything else here is yours.
+"""
+
+from __future__ import annotations
+
+from dsio.config import PRESETS, RunConfig, load_preset_modules, resolve
+from dsio.train import check, load_runners
+
+
+def test_every_preset_composes_and_preflights() -> None:
+    load_runners()
+    load_preset_modules()
+    assert PRESETS.names(), "no presets registered; discovery is broken"
+    for name in PRESETS.names():
+        config = resolve(name)
+        assert isinstance(config, RunConfig)
+        check(config)

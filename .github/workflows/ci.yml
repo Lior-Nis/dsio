@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  spine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Provenance tests need real history; a shallow clone breaks rev-parse.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Tests
+        run: uv run pytest
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Types
+        run: uv run mypy --config-file lib/dsio/pyproject.toml
+
+      - name: Import contracts
+        working-directory: lib/dsio
+        run: uv run --project .. lint-imports
+
+  fork-drift:
+    # A fork is expected to merge from upstream, not to edit the spine in place.
+    # This warns rather than fails: the boundary is a working agreement, and a fork
+    # that genuinely needs a local core change should not be blocked from shipping.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Warn on local changes to src/dsio
+        run: |
+          base="origin/${{ github.base_ref }}"
+          changed=$(git diff --name-only "$base"...HEAD -- lib/dsio || true)
+          if [ -n "$changed" ]; then
+            echo "::warning::This branch modifies the shared spine:"
+            echo "$changed" | sed 's/^/  /'
+            echo "::warning::Send spine fixes upstream so every project gets them."
+          fi
