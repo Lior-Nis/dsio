@@ -30,6 +30,7 @@ import yaml
 from pydantic import Field, model_validator
 
 from dsio.contracts import DsioModel, short_digest
+from dsio.splits.stratify import BalanceReport, StratifyKey
 
 SCHEMA = "dsio.split/1"
 
@@ -61,9 +62,16 @@ class SplitSpec(DsioModel):
     )
     k: int = Field(default=1, ge=1, description="Number of folds. 1 for holdout.")
     seed: int = Field(default=42, ge=0)
+    stratify: tuple[StratifyKey, ...] = Field(
+        default=(),
+        description=(
+            "Features to balance across folds — label, protocol, site, device, whatever "
+            "you know matters. Balanced jointly, not one at a time."
+        ),
+    )
     stratify_by: str | None = Field(
         default=None,
-        description="Entity attribute to balance across folds, e.g. a positive-event count.",
+        description="Shorthand for a single numeric key; expands into `stratify`.",
     )
     val_fraction: float = Field(default=0.2, ge=0.0, lt=1.0)
     test_fraction: float = Field(default=0.2, ge=0.0, lt=1.0)
@@ -81,9 +89,29 @@ class SplitSpec(DsioModel):
             )
         if self.scheme in {"kfold", "stratified_kfold"} and self.k < 2:
             raise ValueError(f"{self.scheme} needs k >= 2, got {self.k}")
-        if self.scheme == "stratified_kfold" and not self.stratify_by:
-            raise ValueError("stratified_kfold requires stratify_by")
+        if self.scheme == "stratified_kfold" and not (self.stratify or self.stratify_by):
+            raise ValueError(
+                "stratified_kfold requires stratify=[...] or the stratify_by shorthand"
+            )
+        names = [key.name for key in self.stratify]
+        duplicates = {n for n in names if names.count(n) > 1}
+        if duplicates:
+            raise ValueError(
+                f"stratify names a key more than once: {', '.join(sorted(duplicates))}"
+            )
         return self
+
+    @property
+    def keys(self) -> list[StratifyKey]:
+        """All stratification keys, with the shorthand expanded.
+
+        The shorthand exists because one numeric key is the common case; it must not become
+        a second code path, so it expands into the general form immediately.
+        """
+        keys = list(self.stratify)
+        if self.stratify_by and self.stratify_by not in {k.name for k in keys}:
+            keys.append(StratifyKey(name=self.stratify_by, kind="numeric"))
+        return keys
 
     @property
     def digest(self) -> str:
@@ -105,6 +133,10 @@ class SplitFile(DsioModel):
     fold: int | None = None
     spec: SplitSpec | None = None
     counts: dict[str, int] = Field(default_factory=dict)
+    balance: BalanceReport | None = Field(
+        default=None,
+        description="What stratification achieved. Recorded so a split can be judged.",
+    )
     notes: str | None = None
     parts: dict[str, list[str]]
 
@@ -171,6 +203,8 @@ class SplitFile(DsioModel):
         header.append(
             "# counts: " + ", ".join(f"{part}={n}" for part, n in sorted(self.counts.items()))
         )
+        if self.balance is not None:
+            header.extend(self.balance.summary_lines())
         if self.notes:
             header.append(f"# {self.notes}")
         body = yaml.safe_dump(self.model_dump(mode="json"), sort_keys=True, width=100)

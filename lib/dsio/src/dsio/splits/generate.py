@@ -19,6 +19,7 @@ import numpy as np
 
 from dsio.data.store import SignalStore
 from dsio.splits.models import SplitError, SplitFile, SplitSpec
+from dsio.splits.stratify import BalanceReport, stratified_partition
 
 
 def group_values(store: SignalStore, attr: str | None) -> dict[str, float]:
@@ -31,16 +32,6 @@ def group_values(store: SignalStore, attr: str | None) -> dict[str, float]:
     for entity in store.entities:
         totals[entity.group] += 0.0 if attr is None else float(entity.attrs.get(attr, 0.0))
     return dict(totals)
-
-
-def _serpentine(groups: list[str], values: dict[str, float], k: int) -> list[list[str]]:
-    """Deal groups into k buckets, alternating direction to balance the totals."""
-    ordered = sorted(groups, key=lambda g: (-values.get(g, 0.0), g))
-    buckets: list[list[str]] = [[] for _ in range(k)]
-    for i, group in enumerate(ordered):
-        lap, pos = divmod(i, k)
-        buckets[pos if lap % 2 == 0 else k - 1 - pos].append(group)
-    return buckets
 
 
 def _shuffled(groups: list[str], seed: int, k: int) -> list[list[str]]:
@@ -79,7 +70,6 @@ def generate(
     except Exception:  # noqa: BLE001 - a store without a manifest is still splittable
         manifest_sha = None
 
-    values = group_values(store, spec.stratify_by)
     files: list[SplitFile] = []
 
     if spec.scheme == "leave_one_group_out":
@@ -93,11 +83,12 @@ def generate(
         return files
 
     if spec.scheme == "holdout":
-        buckets = (
-            _serpentine(poolable, values, 5)
-            if spec.stratify_by
-            else _shuffled(poolable, spec.seed, 5)
-        )
+        if spec.keys:
+            buckets, hold_report = stratified_partition(
+                poolable, store.entities, spec.keys, 5, seed=spec.seed
+            )
+        else:
+            buckets, hold_report = _shuffled(poolable, spec.seed, 5), None
         flat = [g for bucket in buckets for g in bucket]
         n_test = max(1, round(len(flat) * spec.test_fraction))
         n_val = max(1, round(len(flat) * spec.val_fraction))
@@ -106,7 +97,7 @@ def generate(
             "val": sorted(flat[n_test : n_test + n_val]),
             "train": sorted(flat[n_test + n_val :] + pinned),
         }
-        return [_build(store, spec, name, None, parts, manifest_sha)]
+        return [_build(store, spec, name, None, parts, manifest_sha, hold_report)]
 
     k = spec.k
     if k > len(poolable):
@@ -114,11 +105,13 @@ def generate(
             f"cannot make {k} folds from {len(poolable)} splittable groups in "
             f"{store.path.name!r}"
         )
-    buckets = (
-        _serpentine(poolable, values, k)
-        if spec.scheme == "stratified_kfold"
-        else _shuffled(poolable, spec.seed, k)
-    )
+    report: BalanceReport | None = None
+    if spec.scheme == "stratified_kfold":
+        buckets, report = stratified_partition(
+            poolable, store.entities, spec.keys, k, seed=spec.seed
+        )
+    else:
+        buckets = _shuffled(poolable, spec.seed, k)
     for fold in range(k):
         test = buckets[fold]
         val = buckets[(fold + 1) % k] if k > 2 else []
@@ -127,7 +120,7 @@ def generate(
         parts = {"train": sorted(train + pinned), "test": sorted(test)}
         if val:
             parts["val"] = sorted(val)
-        files.append(_build(store, spec, name, fold, parts, manifest_sha))
+        files.append(_build(store, spec, name, fold, parts, manifest_sha, report))
     return files
 
 
@@ -138,6 +131,7 @@ def _build(
     fold: int | None,
     parts: dict[str, list[str]],
     manifest_sha: str | None,
+    balance: BalanceReport | None = None,
 ) -> SplitFile:
     covered = {g for groups in parts.values() for g in groups}
     missing = set(store.groups) - covered
@@ -154,6 +148,7 @@ def _build(
         fold=fold,
         spec=spec,
         counts={part: len(groups) for part, groups in parts.items()},
+        balance=balance,
         parts=parts,
     )
 

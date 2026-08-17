@@ -85,6 +85,46 @@ artificially — a check that never fails proves nothing. But it materialises ev
 row, so it belongs in tests and an explicit check command, not on the training path where
 it would be O(windows × length) on 42M windows.
 
+## Stratification is multi-key
+
+One-key stratification is the easy half. The case that actually recurs in research is that
+several metadata features matter at once — the label, plus protocol, site, device, sex —
+and any of them confounded with the fold invalidates the result. Balancing them jointly
+over ~100 groups is a combinatorial problem with no exact solution.
+
+`SplitSpec.stratify` takes a list of `StratifyKey`, each with a kind (categorical or
+numeric), a weight, and an explicit `aggregate` reducing an entity attribute to a
+group-level value — summing an event count across a subject's recordings is right, summing
+their age is not, so the reduction is never implicit. `stratify_by` remains as shorthand
+for a single numeric key and expands into the general form immediately, so it does not
+become a second code path.
+
+Three properties worth stating:
+
+**Numeric keys are balanced on distribution *and* mass.** A fold can hold the right number
+of high-event subjects while holding the wrong total number of events. Both are in the
+objective. Numeric levels come from quantile bins, not equal-width — a long-tailed event
+count puts nearly every subject in one equal-width bin and balances nothing.
+
+**Assignment is greedy by rarity, then refined by pairwise local search.** Groups carrying
+the rarest level are placed first, while there is still freedom to place them. This
+replaces the earlier serpentine dealer, which handled exactly one key.
+
+**The result reports what it could not balance.** With twelve subjects and five keys,
+perfect balance is impossible; `BalanceReport` records per-key level and mass deviation,
+flags keys it could not bring within 15%, and warns when a level has fewer groups than
+folds. The report is written into the split file header, so a reviewer sees what
+stratification achieved without rerunning anything:
+
+```
+# stratify ok   events: levels dev 8%, mass dev 3%
+# stratify POOR device: levels dev 50%
+# WARNING device: level 'z' has fewer than 3 groups, so it cannot appear in every fold
+```
+
+Silently returning an unbalanced split is how a confound reaches a paper. Reporting it is
+the difference between a split that can be judged and one that has to be trusted.
+
 ## Consequences
 
 Splits survive as reviewable artifacts, LOOCV is one scheme rather than a special case, and
