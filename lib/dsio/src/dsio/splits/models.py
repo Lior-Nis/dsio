@@ -31,6 +31,7 @@ from pydantic import Field, model_validator
 
 from dsio.contracts import DsioModel, short_digest
 from dsio.splits.stratify import BalanceReport, StratifyKey
+from dsio.splits.temporal import TemporalBounds
 
 SCHEMA = "dsio.split/1"
 
@@ -138,7 +139,14 @@ class SplitFile(DsioModel):
         description="What stratification achieved. Recorded so a split can be judged.",
     )
     notes: str | None = None
-    parts: dict[str, list[str]]
+    parts: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Group IDs per part. Empty for a purely temporal split.",
+    )
+    temporal: TemporalBounds | None = Field(
+        default=None,
+        description="Time spans per part, with purge and embargo. Composes with `parts`.",
+    )
 
     @model_validator(mode="after")
     def _validate_parts(self) -> SplitFile:
@@ -149,8 +157,10 @@ class SplitFile(DsioModel):
         train and test would have passed silently — and that is the single most damaging
         thing a split file can get wrong.
         """
-        if not self.parts:
-            raise ValueError("a split must define at least one part")
+        if not self.parts and self.temporal is None:
+            raise ValueError(
+                "a split must define group parts, temporal bounds, or both"
+            )
 
         for part, groups in self.parts.items():
             duplicates = [g for g, n in Counter(groups).items() if n > 1]
@@ -205,6 +215,15 @@ class SplitFile(DsioModel):
         )
         if self.balance is not None:
             header.extend(self.balance.summary_lines())
+        if self.temporal is not None:
+            header.append(
+                f"# temporal: unit={self.temporal.time_unit}, "
+                f"label_horizon={self.temporal.label_horizon:g}, "
+                f"embargo={self.temporal.embargo:g}"
+            )
+            for part, spans in sorted(self.temporal.spans.items()):
+                rendered = ", ".join(f"[{s.start:g}, {s.end:g})" for s in spans)
+                header.append(f"#   {part}: {rendered}")
         if self.notes:
             header.append(f"# {self.notes}")
         body = yaml.safe_dump(self.model_dump(mode="json"), sort_keys=True, width=100)

@@ -25,6 +25,8 @@ import numpy as np
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex
 from dsio.splits.models import SplitError, SplitFile
+from dsio.splits.temporal import apply as apply_temporal
+from dsio.splits.temporal import window_times
 
 
 def resolve(
@@ -38,7 +40,8 @@ def resolve(
 
     ``require_total`` rejects a split that does not account for every group present in the
     index. Silently dropping windows is how a fold quietly trains on less data than its
-    name claims.
+    name claims — but it applies to the *group* partition only. A temporal split
+    deliberately discards the purged and embargoed band, and that is the point of it.
     """
     if store is not None and split.store != store.path.name:
         raise SplitError(
@@ -54,6 +57,12 @@ def resolve(
                 f"{actual[:12]}; regenerate the split or restore the store"
             )
 
+    if split.temporal is not None and store is None:
+        raise SplitError(
+            f"split {split.name!r} has temporal bounds, which need the store to place "
+            "windows in time; pass store="
+        )
+
     present = set(index.entity_groups)
     named = split.all_groups
 
@@ -63,7 +72,7 @@ def resolve(
             f"split {split.name!r} names {len(unknown)} group(s) absent from the index: "
             f"{', '.join(sorted(unknown)[:5])}"
         )
-    if require_total:
+    if require_total and split.parts:
         unassigned = present - named
         if unassigned:
             raise SplitError(
@@ -72,9 +81,21 @@ def resolve(
             )
 
     groups = index.groups
+    parts = set(split.parts) | set(split.temporal.spans if split.temporal else ())
+
+    times: tuple[np.ndarray, np.ndarray] | None = None
+    if split.temporal is not None and store is not None:
+        times = window_times(store, index, unit=split.temporal.time_unit)
+
     out: dict[str, WindowIndex] = {}
-    for part, members in split.parts.items():
-        mask = np.isin(groups, list(members))
+    for part in sorted(parts):
+        mask = np.ones(len(index), dtype=bool)
+        # A part named only in `temporal` spans every group; the time bounds alone
+        # decide it. That is what makes a purely temporal split expressible.
+        if split.parts and part in split.parts:
+            mask &= np.isin(groups, list(split.parts[part]))
+        if split.temporal is not None and times is not None and part in split.temporal.spans:
+            mask &= apply_temporal(split.temporal, *times, part=part)
         out[part] = index.subset(mask)
     return out
 

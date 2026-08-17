@@ -62,8 +62,9 @@ def test_duplicates_within_a_part_are_rejected() -> None:
         SplitFile(store="s", name="bad", parts={"train": ["p1", "p1"]})
 
 
-def test_empty_split_is_rejected() -> None:
-    with pytest.raises(ValueError, match="at least one part"):
+def test_split_with_neither_groups_nor_time_is_rejected() -> None:
+    """A split must divide something; empty is not a valid partition."""
+    with pytest.raises(ValueError, match="group parts, temporal bounds, or both"):
         SplitFile(store="s", name="bad", parts={})
 
 

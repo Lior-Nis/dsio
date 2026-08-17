@@ -132,6 +132,34 @@ cross-validation over a single store costs masks rather than copies. Regeneratin
 corpus grows is a deliberate act that produces a git diff — which is the correct amount of
 friction for changing what "test set" means.
 
-Temporal splits with purge and embargo do not fit a list of group IDs and are **not yet
-implemented**. They need row or time boundaries rather than group membership, and will be a
-distinct scheme in the same file format.
+## Temporal splits are the other half
+
+A group list cannot express a temporal split, because the unit being divided is *time*. So
+`SplitFile` carries an optional `temporal` section alongside `parts`, and a split may be
+group-based, time-based, or both — the last being a purged walk-forward *within* a held-out
+cohort, which is what a strategy needs when it must generalise over symbols and over time.
+
+A naive time cut is wrong in two named ways, both of which silently inflate results:
+
+**Purging.** A training window whose *label* extends into the test period has seen the test
+period. With a label horizon of 5 bars, a window ending one bar before the test opens still
+resolves inside it. Those windows are dropped, not merely ordered earlier.
+
+**Embargo.** Serial correlation means a training window starting immediately after the test
+period leaks the same autocorrelated regime. A gap is required, not optional.
+
+The band removed by purge and embargo belongs to **neither** part and is genuinely
+discarded — reassigning it to train reintroduces exactly the leak it was meant to remove.
+The discarded count is reported in the file header, because if it is large the label
+horizon is eating the dataset, and that should be a knowing decision rather than something
+inferred from a training curve.
+
+Time is measured **relative to each entity**, not by global row offset. Entity 2's row 1000
+is not simultaneous with entity 1's row 1000, and cutting on global offsets would slice
+every recording at a different point in its own history. `time_unit="epoch_s"` derives
+absolute time from per-entity `t_start` and `sample_rate`, and fails loudly when they are
+absent rather than falling back to row order and producing a plausible, wrong split.
+
+Irregular per-row timestamps are **not** supported; both units assume a fixed rate within
+an entity. That covers sensors and bar data. Tick data would need a per-row time array,
+which is a further storage decision rather than a split one.

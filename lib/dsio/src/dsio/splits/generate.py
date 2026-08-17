@@ -18,8 +18,10 @@ from pathlib import Path
 import numpy as np
 
 from dsio.data.store import SignalStore
+from dsio.data.views import WindowIndex
 from dsio.splits.models import SplitError, SplitFile, SplitSpec
 from dsio.splits.stratify import BalanceReport, stratified_partition
+from dsio.splits.temporal import TemporalSpec, describe, walk_forward, window_times
 
 
 def group_values(store: SignalStore, attr: str | None) -> dict[str, float]:
@@ -165,6 +167,70 @@ def write_splits(
     for split in generate(store, spec, name=name):
         filename = "split.yaml" if split.fold is None else f"fold{split.fold}.yaml"
         path = root / name / filename
+        split.save(path)
+        paths.append(path)
+    return paths
+
+
+def generate_temporal(
+    store: SignalStore,
+    index: WindowIndex,
+    spec: TemporalSpec,
+    *,
+    name: str,
+    groups: dict[str, list[str]] | None = None,
+) -> list[SplitFile]:
+    """Produce one walk-forward :class:`SplitFile` per fold.
+
+    Needs the index as well as the store, because a temporal split divides *time*, and
+    where a window sits in time is a property of the index rather than of the corpus.
+
+    ``groups`` optionally composes a group partition on top, which is how you get a
+    purged walk-forward *within* a held-out cohort — the correct design for a strategy
+    that must generalise across both symbols and time.
+    """
+    t_start, t_end = window_times(store, index, unit=spec.time_unit)
+    manifest_sha = None
+    try:
+        manifest_sha = store.manifest().signal_sha256
+    except Exception:  # noqa: BLE001 - a store without a manifest is still splittable
+        manifest_sha = None
+
+    files: list[SplitFile] = []
+    for fold, bounds in enumerate(walk_forward(t_start, t_end, spec)):
+        counts = describe(bounds, t_start, t_end)
+        files.append(
+            SplitFile(
+                store=store.path.name,
+                store_manifest_sha256=manifest_sha,
+                name=name,
+                fold=fold,
+                counts=counts,
+                parts=groups or {},
+                temporal=bounds,
+                notes=(
+                    f"{counts['discarded']} window(s) discarded by purge and embargo"
+                    if counts.get("discarded")
+                    else None
+                ),
+            )
+        )
+    return files
+
+
+def write_temporal_splits(
+    store: SignalStore,
+    index: WindowIndex,
+    spec: TemporalSpec,
+    *,
+    name: str,
+    root: Path,
+    groups: dict[str, list[str]] | None = None,
+) -> list[Path]:
+    """Generate and write walk-forward split files under ``root/<name>/``."""
+    paths: list[Path] = []
+    for split in generate_temporal(store, index, spec, name=name, groups=groups):
+        path = root / name / f"fold{split.fold}.yaml"
         split.save(path)
         paths.append(path)
     return paths
