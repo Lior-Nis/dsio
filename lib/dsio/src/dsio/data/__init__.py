@@ -5,6 +5,23 @@ configuration is an index of offsets over it. See docs/adr/0005 for why the payl
 flat binary rather than a chunked format.
 """
 
+from dsio.data.cache import (
+    CACHE_ROOT_ENV,
+    BytesCodec,
+    CacheEntry,
+    CacheError,
+    CachePolicy,
+    Codec,
+    CodePolicy,
+    ConfigPolicy,
+    EnvPolicy,
+    ExplicitVersionPolicy,
+    JsonCodec,
+    NpzCodec,
+    NumpyCodec,
+    StageCache,
+    cache_root,
+)
 from dsio.data.format import DTypeCode, IndexFormatError, IndexHeader
 from dsio.data.readers import ReadError, SignalReader, open_reader
 from dsio.data.store import (
@@ -26,21 +43,36 @@ from dsio.data.views import (
 )
 
 __all__ = [
+    "CACHE_ROOT_ENV",
     "DATA_ROOT_ENV",
+    "BytesCodec",
+    "CacheEntry",
+    "CacheError",
+    "CachePolicy",
+    "CodePolicy",
+    "Codec",
+    "ConfigPolicy",
     "DTypeCode",
     "Entity",
+    "EnvPolicy",
+    "ExplicitVersionPolicy",
     "IndexFormatError",
     "IndexHeader",
+    "JsonCodec",
+    "NpzCodec",
+    "NumpyCodec",
     "ReadError",
     "SignalReader",
     "SignalStore",
     "SignalStoreBuilder",
+    "StageCache",
     "StoreError",
     "StoreManifest",
     "WindowIndex",
     "WindowSpec",
     "WindowView",
     "build_index",
+    "cache_root",
     "data_root",
     "list_stores",
     "load_or_build",

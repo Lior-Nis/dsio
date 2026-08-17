@@ -46,6 +46,14 @@ class WindowSpec(DsioModel):
     label_policy: LabelPolicy = "none"
     label_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     drop_last_partial: bool = True
+    min_metrics: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-window metric floors, e.g. {'purity': 0.9}. Part of the digest.",
+    )
+    max_metrics: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-window metric ceilings.",
+    )
 
     @model_validator(mode="after")
     def _check(self) -> WindowSpec:
@@ -84,6 +92,7 @@ class WindowIndex:
         spec: WindowSpec,
         store_name: str,
         labels: np.ndarray | None = None,
+        metrics: dict[str, np.ndarray] | None = None,
     ) -> None:
         self.starts = np.ascontiguousarray(starts, dtype=np.int64)
         self.entity_codes = np.ascontiguousarray(entity_codes, dtype=np.int32)
@@ -92,6 +101,7 @@ class WindowIndex:
         self.spec = spec
         self.store_name = store_name
         self.labels = labels
+        self.metrics = dict(metrics or {})
         if self.starts.size != self.entity_codes.size:
             raise ValueError("starts and entity_codes must be the same length")
         if len(self.entity_names) != len(self.entity_groups):
@@ -132,6 +142,7 @@ class WindowIndex:
             spec=self.spec,
             store_name=self.store_name,
             labels=None if self.labels is None else self.labels[mask],
+            metrics={name: values[mask] for name, values in self.metrics.items()},
         )
 
     def covered_rows(self) -> np.ndarray:
@@ -150,6 +161,8 @@ class WindowIndex:
         arrays: dict[str, Any] = {"starts": self.starts, "entity_codes": self.entity_codes}
         if self.labels is not None:
             arrays["labels"] = self.labels
+        for name, values in self.metrics.items():
+            arrays[f"metric__{name}"] = values
         np.savez_compressed(path, **arrays)
         path.with_suffix(".json").write_text(
             json.dumps(
@@ -174,6 +187,11 @@ class WindowIndex:
                 entity_names=meta["entity_names"],
                 entity_groups=meta["entity_groups"],
                 labels=data.get("labels"),
+                metrics={
+                    key.removeprefix("metric__"): data[key]
+                    for key in data.files
+                    if key.startswith("metric__")
+                },
                 spec=WindowSpec.model_validate(meta["spec"]),
                 store_name=meta["store"],
             )
@@ -192,6 +210,7 @@ def build_index(
     *,
     dense_mask: np.ndarray | None = None,
     labels: np.ndarray | None = None,
+    row_metrics: dict[str, np.ndarray] | None = None,
 ) -> WindowIndex:
     """Enumerate window starts for every entity in ``store``.
 
@@ -201,6 +220,13 @@ def build_index(
     ``dense_mask`` is a per-row boolean over the whole store marking regions worth sampling
     more tightly (rare positives). ``labels`` is a per-row array used to derive a window
     label under the spec's policy.
+
+    ``row_metrics`` are per-row arrays — annotation purity, sensor validity — averaged over
+    each window and then filtered by the spec's ``min_metrics`` / ``max_metrics``. Filtering
+    belongs in the spec rather than applied afterwards so it is part of the index digest:
+    two indices differing only in a purity floor are different indices, and must not share
+    a cache entry. This is the seam FORGE used to keep 38,758 of 52,870 stride-aligned
+    windows.
     """
     starts: list[int] = []
     codes: list[int] = []
@@ -227,19 +253,54 @@ def build_index(
             starts.append(offset)
             codes.append(code)
 
+    start_array = np.array(starts, dtype=np.int64)
+    code_array = np.array(codes, dtype=np.int32)
+
     window_labels = None
     if labels is not None and spec.label_policy != "none":
-        window_labels = _derive_labels(np.asarray(labels), np.array(starts, np.int64), spec)
+        window_labels = _derive_labels(np.asarray(labels), start_array, spec)
+
+    window_metrics = {
+        name: _window_means(np.asarray(values, dtype=np.float64), start_array, spec.length)
+        for name, values in (row_metrics or {}).items()
+    }
+
+    keep = np.ones(start_array.size, dtype=bool)
+    for name, floor in spec.min_metrics.items():
+        if name not in window_metrics:
+            raise ValueError(
+                f"spec filters on metric {name!r}, but it was not supplied in row_metrics; "
+                f"available: {', '.join(sorted(window_metrics)) or 'none'}"
+            )
+        keep &= window_metrics[name] >= floor
+    for name, ceiling in spec.max_metrics.items():
+        if name not in window_metrics:
+            raise ValueError(
+                f"spec filters on metric {name!r}, but it was not supplied in row_metrics; "
+                f"available: {', '.join(sorted(window_metrics)) or 'none'}"
+            )
+        keep &= window_metrics[name] <= ceiling
 
     return WindowIndex(
-        starts=np.array(starts, dtype=np.int64),
-        entity_codes=np.array(codes, dtype=np.int32),
+        starts=start_array[keep],
+        entity_codes=code_array[keep],
         entity_names=entity_names,
         entity_groups=entity_groups,
         spec=spec,
         store_name=store.path.name,
-        labels=window_labels,
+        labels=None if window_labels is None else window_labels[keep],
+        metrics={name: values[keep] for name, values in window_metrics.items()},
     )
+
+
+def _window_means(values: np.ndarray, starts: np.ndarray, length: int) -> np.ndarray:
+    """Mean of a per-row array over each window, via a cumulative sum.
+
+    O(rows + windows) rather than O(windows x length): at 42M windows the naive loop is
+    the difference between seconds and an afternoon.
+    """
+    cumulative = np.concatenate([[0.0], np.cumsum(values)])
+    return (cumulative[starts + length] - cumulative[starts]) / length
 
 
 def _derive_labels(labels: np.ndarray, starts: np.ndarray, spec: WindowSpec) -> np.ndarray:
@@ -297,12 +358,15 @@ def load_or_build(
     *,
     dense_mask: np.ndarray | None = None,
     labels: np.ndarray | None = None,
+    row_metrics: dict[str, np.ndarray] | None = None,
     root: Path | None = None,
 ) -> WindowIndex:
     """Return the index for ``spec``, building and caching it if absent."""
     path = index_path(store, spec, root)
     if path.is_file():
         return WindowIndex.load(path)
-    index = build_index(store, spec, dense_mask=dense_mask, labels=labels)
+    index = build_index(
+        store, spec, dense_mask=dense_mask, labels=labels, row_metrics=row_metrics
+    )
     index.save(path)
     return index
