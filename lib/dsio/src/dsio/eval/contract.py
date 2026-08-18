@@ -59,6 +59,11 @@ class Fold:
     split files — group parts are validated disjoint there — but folds built from a
     sklearn splitter, or by hand in a notebook, get no such guarantee, and this is the last
     place to catch it before a leaked row silently inflates a score.
+
+    ``evaluation_only`` permits an empty train part. Evaluating something that was not
+    trained here — a benchmark pass, a shipped model, an agent behind an API — is a real
+    shape, and the alternative is inventing a token training set that both lies and
+    violates the disjointness the class exists to enforce.
     """
 
     index: int
@@ -66,6 +71,7 @@ class Fold:
     test: np.ndarray
     val: np.ndarray | None = None
     name: str = ""
+    evaluation_only: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "train", np.asarray(self.train, dtype=np.int64))
@@ -92,8 +98,12 @@ class Fold:
                     )
         if self.test.size == 0:
             raise EvalError(f"{self.name}: test is empty; there is nothing to score")
-        if self.train.size == 0:
-            raise EvalError(f"{self.name}: train is empty; there is nothing to fit")
+        if self.train.size == 0 and not self.evaluation_only:
+            raise EvalError(
+                f"{self.name}: train is empty; there is nothing to fit. If this is an "
+                "evaluation of something already trained — a benchmark pass, a shipped "
+                "model, an agent — set evaluation_only=True to say so."
+            )
 
     @property
     def sizes(self) -> dict[str, int]:

@@ -64,6 +64,19 @@ def test_an_empty_test_part_is_rejected() -> None:
         Fold(index=0, train=np.array([0, 1]), test=np.array([], dtype=int))
 
 
+def test_an_empty_train_part_needs_saying_so_explicitly() -> None:
+    """Evaluating something that was not trained here is a real shape — a benchmark pass,
+    a shipped model, an agent behind an API — and the alternative is inventing a token
+    training set that both lies and violates the disjointness this class enforces."""
+    with pytest.raises(EvalError, match="evaluation_only=True"):
+        Fold(index=0, train=np.array([], dtype=int), test=np.array([1, 2]))
+
+    fold = Fold(
+        index=0, train=np.array([], dtype=int), test=np.array([1, 2]), evaluation_only=True
+    )
+    assert fold.sizes["train"] == 0
+
+
 def test_a_fold_names_itself_when_unnamed() -> None:
     assert Fold(index=3, train=np.array([0]), test=np.array([1])).name == "fold3"
 
