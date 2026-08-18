@@ -9,7 +9,15 @@ from __future__ import annotations
 
 import typer
 
-from dsio.cli import artifacts_cmd, data_cmd, eval_cmd, run_cmd, runs_cmd, splits_cmd
+from dsio.cli import (
+    artifacts_cmd,
+    data_cmd,
+    eval_cmd,
+    matrix_cmd,
+    run_cmd,
+    runs_cmd,
+    splits_cmd,
+)
 from dsio.cli.envelope import emit, failure
 
 app = typer.Typer(
@@ -24,6 +32,8 @@ app.add_typer(artifacts_cmd.app, name="models")
 app.add_typer(data_cmd.app, name="data")
 app.add_typer(splits_cmd.app, name="splits")
 app.add_typer(eval_cmd.app, name="eval")
+# matrix_cmd's commands sit at the top level: `dsio matrix`, `dsio search`.
+app.registered_commands.extend(matrix_cmd.app.registered_commands)
 # run_cmd's commands sit at the top level: `dsio run`, `dsio presets`.
 app.registered_commands.extend(run_cmd.app.registered_commands)
 

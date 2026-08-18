@@ -48,6 +48,8 @@ dev = [
     # below to get CUDA wheels — uv sources are not propagated to consumers of dsio.
     "torch>=2.6",
     "lightning>=2.5",
+    # Same reasoning again: the search path must run in CI or its resumability is a claim.
+    "optuna>=4.5",
 ]
 
 [[tool.uv.index]]
@@ -149,4 +151,5 @@ modules = [
     "dsio.cli.data_cmd",
     "dsio.cli.splits_cmd",
     "dsio.cli.eval_cmd",
+    "dsio.cli.matrix_cmd",
 ]
