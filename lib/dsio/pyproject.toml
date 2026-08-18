@@ -43,7 +43,20 @@ dev = [
     # push/pull path must be exercised in CI against a local filesystem, or the fresh-clone
     # reproduction test is only a claim.
     "fsspec>=2025.1",
+    # CPU torch, for the same reason as fsspec: the component chain and the Lightning
+    # runner must run in CI, which has no GPU. A generated project overrides the source
+    # below to get CUDA wheels — uv sources are not propagated to consumers of dsio.
+    "torch>=2.6",
+    "lightning>=2.5",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
 
 [tool.ruff]
 line-length = 100

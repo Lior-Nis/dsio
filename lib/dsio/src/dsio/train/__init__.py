@@ -12,7 +12,7 @@ __all__ = [
     "runner",
 ]
 
-_BUILTIN_RUNNER_MODULES = ("dsio.train.tabular",)
+_BUILTIN_RUNNER_MODULES = ("dsio.train.tabular", "dsio.train.torch_task")
 
 
 def load_runners() -> list[str]:

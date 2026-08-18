@@ -120,6 +120,36 @@ def test_leave_one_group_out_yields_one_fold_per_group(store: SignalStore) -> No
         assert len(split.parts["test"]) == 1
 
 
+def test_training_is_the_largest_part_even_at_k_equals_three(store: SignalStore) -> None:
+    """Validation is carved out of the training portion, never given its own fold.
+
+    An earlier version handed val a whole rotation bucket, making train (k-2)/k. At k=3
+    that is a 33% training set against 67% of test-plus-validation — smaller than what it
+    is evaluated on, which is not what anyone means by "3-fold cross-validation". Nothing
+    in the split file's shape reveals it; the only symptom is a model that will not learn,
+    which reads as a modelling problem rather than a splitting one.
+    """
+    for k in (3, 4, 5):
+        for split in generate(store, SplitSpec(scheme="kfold", k=k), name=f"k{k}"):
+            train = len(split.parts["train"])
+            other = sum(len(v) for p, v in split.parts.items() if p != "train")
+            assert train > other, f"k={k} fold {split.fold}: train {train} vs rest {other}"
+
+
+def test_validation_is_present_and_disjoint(store: SignalStore) -> None:
+    for split in generate(store, SplitSpec(scheme="kfold", k=4), name="k4"):
+        assert split.parts["val"], "a fold with no validation set cannot early-stop"
+        assert not (set(split.parts["val"]) & set(split.parts["train"]))
+        assert not (set(split.parts["val"]) & set(split.parts["test"]))
+
+
+def test_validation_can_be_switched_off(store: SignalStore) -> None:
+    """Some protocols want every non-test group training; val_fraction=0 says so."""
+    for split in generate(store, SplitSpec(scheme="kfold", k=3, val_fraction=0.0), name="k3"):
+        assert "val" not in split.parts
+        assert len(split.parts["train"]) + len(split.parts["test"]) == len(store.groups)
+
+
 def test_always_train_groups_are_pinned(store: SignalStore) -> None:
     """FORGE pinned zero-event subjects to train; they carry no test signal."""
     spec = SplitSpec(scheme="kfold", k=3, always_train=("p0", "p1"))

@@ -116,7 +116,7 @@ def generate(
         buckets = _shuffled(poolable, spec.seed, k)
     for fold in range(k):
         test = buckets[fold]
-        val = buckets[(fold + 1) % k] if k > 2 else []
+        val = _carve_validation(buckets, fold, k, spec.val_fraction)
         used = set(test) | set(val)
         train = [g for g in poolable if g not in used]
         parts = {"train": sorted(train + pinned), "test": sorted(test)}
@@ -124,6 +124,45 @@ def generate(
             parts["val"] = sorted(val)
         files.append(_build(store, spec, name, fold, parts, manifest_sha, report))
     return files
+
+
+def _carve_validation(
+    buckets: list[list[str]], fold: int, k: int, val_fraction: float
+) -> list[str]:
+    """Take the validation groups out of the *training* portion, spread across buckets.
+
+    An earlier version handed validation a whole rotation bucket, which made train
+    ``(k-2)/k``. At k=3 that is a 33% training set against a 67% test-plus-validation
+    — smaller than what it is evaluated on, which is not what anyone means by "3-fold
+    cross-validation", and it silently starves the model. Nothing in the split file's shape
+    reveals it; you only notice because the model does not learn.
+
+    Groups are taken one at a time round-robin from the non-test buckets, so whatever
+    balance stratification achieved across buckets survives into the validation set instead
+    of being concentrated in whichever bucket happened to be next.
+    """
+    if val_fraction <= 0.0:
+        return []
+    remaining = [buckets[(fold + offset) % k] for offset in range(1, k)]
+    available = sum(len(bucket) for bucket in remaining)
+    wanted = min(available - 1, max(1, round(available * val_fraction)))
+    if wanted <= 0:
+        return []
+
+    validation: list[str] = []
+    cursors = [0] * len(remaining)
+    while len(validation) < wanted:
+        progressed = False
+        for i, bucket in enumerate(remaining):
+            if len(validation) >= wanted:
+                break
+            if cursors[i] < len(bucket):
+                validation.append(bucket[cursors[i]])
+                cursors[i] += 1
+                progressed = True
+        if not progressed:  # pragma: no cover - wanted is bounded by available
+            break
+    return validation
 
 
 def _build(
