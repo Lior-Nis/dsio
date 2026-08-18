@@ -125,4 +125,11 @@ forbidden_modules = [
 # drifts apart between subcommands.
 name = "CLI command modules are mutually independent"
 type = "independence"
-modules = ["dsio.cli.run_cmd", "dsio.cli.runs_cmd", "dsio.cli.artifacts_cmd"]
+modules = [
+    "dsio.cli.run_cmd",
+    "dsio.cli.runs_cmd",
+    "dsio.cli.artifacts_cmd",
+    "dsio.cli.data_cmd",
+    "dsio.cli.splits_cmd",
+    "dsio.cli.eval_cmd",
+]

@@ -23,6 +23,10 @@ from pydantic import ValidationError
 from dsio.artifacts.store import RegistryIntegrityError
 from dsio.config.overrides import OverrideError
 from dsio.config.registry import DuplicateComponentError, UnknownComponentError
+from dsio.data.cache import CacheError
+from dsio.data.store import StoreError
+from dsio.eval.contract import EvalError
+from dsio.splits.models import SplitError
 
 T = TypeVar("T")
 
@@ -34,6 +38,7 @@ class ErrorCode(StrEnum):
     DUPLICATE_COMPONENT = "duplicate_component"
     NOT_FOUND = "not_found"
     INTEGRITY = "integrity"
+    LEAKAGE = "leakage"
     BLOCKED = "blocked"
     INTERNAL = "internal"
 
@@ -42,12 +47,23 @@ class BlockedError(RuntimeError):
     """Raised when an action is refused by a gate, such as promotion of a dirty run."""
 
 
+# Order matters: the first match wins, so specific types precede the ValueError and
+# OSError catch-alls they inherit from.
 _CODES: list[tuple[type[BaseException], ErrorCode, bool]] = [
     (UnknownComponentError, ErrorCode.UNKNOWN_COMPONENT, False),
     (DuplicateComponentError, ErrorCode.DUPLICATE_COMPONENT, False),
     (OverrideError, ErrorCode.BAD_OVERRIDE, False),
     (ValidationError, ErrorCode.INVALID_CONFIG, False),
+    # Integrity is its own code because a caller must be able to tell "your bytes changed"
+    # from "dsio has a bug". The first is actionable — restore the store, regenerate the
+    # split — and the second is a bug report.
     (RegistryIntegrityError, ErrorCode.INTEGRITY, False),
+    (StoreError, ErrorCode.INTEGRITY, False),
+    (CacheError, ErrorCode.INTEGRITY, False),
+    # Leakage is separated from ordinary invalid input because it is the one failure class
+    # that must never be retried around or suppressed by an automated caller.
+    (SplitError, ErrorCode.LEAKAGE, False),
+    (EvalError, ErrorCode.LEAKAGE, False),
     (BlockedError, ErrorCode.BLOCKED, False),
     (FileNotFoundError, ErrorCode.NOT_FOUND, False),
     (ValueError, ErrorCode.INVALID_CONFIG, False),

@@ -1,0 +1,311 @@
+"""The data, splits and eval command surfaces.
+
+Driven as subprocesses through the real entrypoint, because the thing under test is the
+envelope contract as a caller actually sees it — an in-process call would bypass the
+argument parsing and the exit code, which is where two of the CLI's past bugs lived.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from dsio.config.schema import RunConfig
+from dsio.data import SignalStore
+from dsio.runs import RunLedger
+from dsio.runs.record import RUNS_ROOT_ENV
+from dsio.train import execute, load_runners
+
+
+def dsio(*args: str, cwd: Path, env_extra: dict[str, str] | None = None) -> tuple[int, dict]:
+    env = {**os.environ, **(env_extra or {})}
+    completed = subprocess.run(
+        [sys.executable, "-m", "dsio.cli.main", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(completed.stdout) if completed.stdout.strip() else {}
+    return completed.returncode, payload
+
+
+@pytest.fixture
+def workdir(tmp_path: Path) -> Path:
+    """A scratch project with one store under ``stores/``."""
+    root = tmp_path / "project"
+    root.mkdir()
+    rng = np.random.default_rng(0)
+    with SignalStore.builder(root / "stores" / "cohort", channels=3) as builder:
+        for subject in range(9):
+            for session in range(2):
+                builder.add(
+                    f"p{subject}_s{session}",
+                    rng.standard_normal((1500, 3)).astype("float32"),
+                    group=f"p{subject}",
+                    attrs={"t_start": 0.0, "sample_rate": 100.0, "fog_count": subject * 10},
+                )
+    return root
+
+
+# --- dsio data ----------------------------------------------------------------------
+
+
+def test_data_ls_finds_the_store(workdir: Path) -> None:
+    code, payload = dsio("data", "ls", cwd=workdir)
+    assert code == 0 and payload["ok"] is True
+    assert payload["count"] == 1
+    assert payload["stores"][0]["name"] == "cohort"
+    assert payload["stores"][0]["groups"] == 9
+
+
+def test_data_ls_on_an_empty_root_is_success_not_failure(tmp_path: Path) -> None:
+    """Nothing to list is an answer, not an error. An agent branching on `ok` needs that."""
+    code, payload = dsio("data", "ls", cwd=tmp_path)
+    assert code == 0 and payload["ok"] is True and payload["count"] == 0
+
+
+def test_data_show_projects_by_default(workdir: Path) -> None:
+    code, payload = dsio("data", "show", "stores/cohort", cwd=workdir)
+    assert code == 0
+    assert payload["entities"] == 18
+    assert "entity_list" not in payload, "detail must be opt-in"
+
+
+def test_data_show_can_include_entities(workdir: Path) -> None:
+    code, payload = dsio("data", "show", "stores/cohort", "--entities", "--limit", "5", cwd=workdir)
+    assert code == 0
+    assert len(payload["entity_list"]) == 5
+    assert payload["entity_list_truncated"] is True
+
+
+def test_data_verify_passes_on_an_intact_store(workdir: Path) -> None:
+    code, payload = dsio("data", "verify", "stores/cohort", cwd=workdir)
+    assert code == 0 and payload["verified"] is True
+
+
+def test_data_verify_fails_closed_on_corruption(workdir: Path) -> None:
+    """Existence is not integrity. A store that silently lost bytes must not read as valid."""
+    signal = workdir / "stores" / "cohort" / "signal.bin"
+    data = bytearray(signal.read_bytes())
+    data[1000:1010] = b"\x00" * 10
+    signal.write_bytes(bytes(data))
+
+    code, payload = dsio("data", "verify", "stores/cohort", cwd=workdir)
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["code"] == "integrity"
+
+
+def test_data_index_builds_a_view(workdir: Path) -> None:
+    code, payload = dsio(
+        "data", "index", "stores/cohort", "--length", "500", "--stride", "200", cwd=workdir
+    )
+    assert code == 0
+    assert payload["windows"] == 108
+    assert payload["written"] is True
+    assert (workdir / payload["path"]).is_file()
+
+
+def test_data_index_dry_run_writes_nothing(workdir: Path) -> None:
+    code, payload = dsio("data", "index", "stores/cohort", "--dry-run", cwd=workdir)
+    assert code == 0 and payload["written"] is False
+    assert not (workdir / payload["path"]).exists()
+
+
+# --- dsio splits --------------------------------------------------------------------
+
+
+def test_splits_make_writes_committable_files(workdir: Path) -> None:
+    code, payload = dsio(
+        "splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir
+    )
+    assert code == 0 and payload["count"] == 3
+    for path in payload["paths"]:
+        assert (workdir / path).is_file()
+        assert (workdir / path).read_text().startswith("# dsio split:")
+
+
+def test_splits_make_stratifies_on_a_named_key(workdir: Path) -> None:
+    code, payload = dsio(
+        "splits", "make", "stores/cohort",
+        "--name", "strat", "--scheme", "stratified_kfold", "--k", "3",
+        "--stratify", "fog_count:numeric",
+        cwd=workdir,
+    )
+    assert code == 0
+    assert payload["folds"][0]["balance"] is not None
+
+
+def test_splits_make_rejects_an_unknown_stratify_kind(workdir: Path) -> None:
+    code, payload = dsio(
+        "splits", "make", "stores/cohort",
+        "--name", "bad", "--scheme", "stratified_kfold", "--stratify", "fog_count:guess",
+        cwd=workdir,
+    )
+    assert code == 1
+    assert "categorical" in payload["error"]
+
+
+def test_splits_check_proves_no_row_overlap(workdir: Path) -> None:
+    """The guarantee the whole layer exists for, verified rather than asserted."""
+    dsio("splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir)
+    code, payload = dsio(
+        "splits", "check", "stores/cohort", "--name", "k3",
+        "--length", "500", "--stride", "200", cwd=workdir,
+    )
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["rows_proved_disjoint"] is True
+    assert payload["coverage"] == 1.0
+    assert len(payload["per_fold"]) == 3
+
+
+def test_splits_check_catches_a_hand_edited_overlap(workdir: Path) -> None:
+    """Split files are meant to be read and edited by humans, so an edit that breaks the
+    guarantee is a realistic failure — and it must be caught before a model is fitted.
+
+    Here a group tested by fold 0 is also given to fold 1's test part. Each file is still
+    individually valid, so only comparing them across folds reveals the double-count.
+    """
+    import yaml
+
+    dsio("splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir)
+    first_path = workdir / "splits" / "k3" / "fold0.yaml"
+    second_path = workdir / "splits" / "k3" / "fold1.yaml"
+
+    borrowed = yaml.safe_load(first_path.read_text())["parts"]["test"][0]
+    second = yaml.safe_load(second_path.read_text())
+    second["parts"]["train"] = [g for g in second["parts"]["train"] if g != borrowed]
+    second["parts"]["val"] = [g for g in second["parts"]["val"] if g != borrowed]
+    second["parts"]["test"] = [*second["parts"]["test"], borrowed]
+    second_path.write_text(yaml.safe_dump(second))
+
+    code, payload = dsio(
+        "splits", "check", "stores/cohort", "--name", "k3",
+        "--length", "500", "--stride", "200", cwd=workdir,
+    )
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["code"] == "leakage"
+    assert "test part of both" in payload["error"]
+
+
+def test_splits_show_projects_group_lists_by_default(workdir: Path) -> None:
+    dsio("splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir)
+    code, payload = dsio("splits", "show", "splits/k3/fold0.yaml", cwd=workdir)
+    assert code == 0
+    assert payload["parts"]["test"] == 3
+    assert "group_lists" not in payload
+
+
+def test_splits_check_says_how_to_make_missing_files(workdir: Path) -> None:
+    code, payload = dsio("splits", "check", "stores/cohort", "--name", "nope", cwd=workdir)
+    assert code == 1
+    assert "dsio splits make" in payload["error"]
+
+
+# --- dsio eval ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_runs(tmp_path: Path) -> tuple[Path, str, str]:
+    """Two runs over identical folds, so the paired comparison is available."""
+    root = tmp_path / "evalproject"
+    root.mkdir()
+    runs_root = root / "runs"
+    os.environ[RUNS_ROOT_ENV] = str(runs_root)
+    load_runners()
+    from dsio.train.tabular import TabularTask
+
+    ledger = RunLedger(runs_root)
+    ids = []
+    for estimator in ("logreg", "random_forest"):
+        config = RunConfig(
+            name=estimator,
+            task=TabularTask(
+                dataset="breast_cancer",
+                estimator=estimator,
+                folds=5,
+                metrics=("accuracy", "average_precision"),
+                keep_model=False,
+            ),
+        )
+        run = ledger.start(
+            name=config.name,
+            config=config.to_dict(),
+            config_hash=config.config_hash,
+            seed=config.seed,
+        )
+        with run:
+            run.finish(metrics=execute(config, run))
+        ids.append(run.run_id)
+    return root, ids[0], ids[1]
+
+
+def test_eval_show_reports_coverage_and_spread(two_runs) -> None:
+    root, first, _ = two_runs
+    code, payload = dsio(
+        "eval", "show", first, cwd=root, env_extra={RUNS_ROOT_ENV: str(root / "runs")}
+    )
+    assert code == 0
+    assert payload["coverage"] == 1.0
+    assert payload["per_fold_std"]["accuracy"] > 0
+    assert payload["fold_fingerprint"]
+
+
+def test_eval_verdict_pairs_identical_folds(two_runs) -> None:
+    """Both runs used the same splitter and seed, so the sharper test is available."""
+    root, first, second = two_runs
+    code, payload = dsio(
+        "eval", "verdict", second, "--baseline", first, "--metric", "accuracy",
+        cwd=root, env_extra={RUNS_ROOT_ENV: str(root / "runs")},
+    )
+    assert code == 0
+    assert payload["method"] == "paired"
+    assert payload["outcome"] in {"win", "neutral", "regression"}
+    assert payload["noise_floor"] is not None
+
+
+def test_eval_rank_orders_runs(two_runs) -> None:
+    root, first, _ = two_runs
+    code, payload = dsio(
+        "eval", "rank", "--metric", "accuracy", "--baseline", first,
+        cwd=root, env_extra={RUNS_ROOT_ENV: str(root / "runs")},
+    )
+    assert code == 0
+    assert payload["count"] == 2
+    values = [row["value"] for row in payload["runs"]]
+    assert values == sorted(values, reverse=True)
+    assert "not a claim" in payload["note"]
+
+
+def test_eval_noise_answers_before_the_experiment(tmp_path: Path) -> None:
+    code, payload = dsio("eval", "noise", "--n-rows", "569", "--delta", "0.005", cwd=tmp_path)
+    assert code == 0
+    assert payload["detectable"] is False
+    assert payload["rows_needed"] == 10_000
+
+
+def test_eval_noise_needs_something_to_compute(tmp_path: Path) -> None:
+    code, payload = dsio("eval", "noise", cwd=tmp_path)
+    assert code == 1
+    assert "--n-rows" in payload["error"]
+
+
+def test_eval_show_on_a_run_without_a_report_fails_closed(tmp_path: Path) -> None:
+    root = tmp_path / "empty"
+    ledger = RunLedger(root / "runs")
+    run = ledger.start(name="bare", config={}, config_hash="0" * 64, seed=1)
+    code, payload = dsio(
+        "eval", "show", run.run_id, cwd=tmp_path,
+        env_extra={RUNS_ROOT_ENV: str(root / "runs")},
+    )
+    assert code == 1
+    assert payload["ok"] is False
