@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from pydantic import Field, model_validator
 
+from dsio.artifacts.store import ModelRef, ModelRegistry
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.contracts import DsioModel
 from dsio.data.store import SignalStore, data_root
@@ -70,6 +71,34 @@ class Component(DsioModel):
 
     name: str
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class EncoderRef(DsioModel):
+    """A pinned pretrained encoder, plus what to do with it.
+
+    Wraps :class:`~dsio.artifacts.store.ModelRef`, which cannot express "latest". FORGE's
+    classification checkpoints reloaded their MAE encoder from a hardcoded absolute path,
+    so a fresh clone failed and — worse — a reproduction on the original machine silently
+    picked up whatever had been written there since. A name, a version and a digest cannot
+    do either.
+
+    ``freeze`` distinguishes the two experiments people conflate: a *probe* measures what
+    the representation already contains, while a *finetune* measures what it is a good
+    starting point for. Reporting one as the other is how a pretraining result gets
+    overstated.
+    """
+
+    name: str
+    version: int
+    digest: str
+    freeze: bool = True
+    strict: bool = Field(
+        default=True,
+        description="Require every encoder weight to load. Off only for deliberate surgery.",
+    )
+
+    def as_model_ref(self) -> ModelRef:
+        return ModelRef(name=self.name, version=self.version, digest=self.digest)
 
 
 class TrainerConfig(DsioModel):
@@ -113,6 +142,11 @@ class TorchTask(TaskConfig):
     preprocessor: Component | None = None
     augmentor: Component | None = None
     spectral_augmentor: Component | None = None
+
+    encoder: EncoderRef | None = Field(
+        default=None,
+        description="A pretrained encoder to start from, pinned by name, version and digest.",
+    )
 
     lr: float = Field(default=1e-3, gt=0.0)
     weight_decay: float = Field(default=0.0, ge=0.0)
@@ -191,11 +225,15 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
     if out_dim is not None:
         head_params.setdefault("in_dim", out_dim)
 
+    transform = _optional(task.transform, TRANSFORMS)
+    if task.encoder is not None:
+        load_encoder(task.encoder, backbone=backbone, transform=transform)
+
     return DsioModule(
         backbone=backbone,
         head=HEADS.get(task.head.name)(**head_params),
         loss=LOSSES.get(task.loss.name)(**task.loss.params),
-        transform=_optional(task.transform, TRANSFORMS),
+        transform=transform,
         preprocessor=_optional(task.preprocessor, PREPROCESSORS),
         augmentor=_optional(task.augmentor, AUGMENTORS),
         spectral_augmentor=_optional(task.spectral_augmentor, AUGMENTORS),
@@ -228,6 +266,58 @@ def _accepted(factory: Any, shape: dict[str, Any]) -> dict[str, Any]:
         # decide. Registering the class itself gives a real signature and avoids this.
         return shape
     return {key: value for key, value in shape.items() if key in signature.parameters}
+
+
+def load_encoder(
+    reference: EncoderRef, *, backbone: Any, transform: Any = None
+) -> dict[str, int]:
+    """Load a pinned encoder into a freshly built chain, verifying it first.
+
+    The registry re-hashes the artifact on load and refuses a digest mismatch, so a
+    corrupted or swapped encoder cannot be silently trained on top of. Freezing, when
+    asked, also puts the backbone in eval mode: a frozen BatchNorm whose running statistics
+    keep updating is not frozen, and the difference shows up as a probe that mysteriously
+    outperforms its own linear separability.
+    """
+    import io
+
+    import torch
+
+    registry = ModelRegistry()
+    payload = registry.load(reference.as_model_ref())
+    bundle = torch.load(io.BytesIO(payload), map_location="cpu", weights_only=False)
+
+    components: dict[str, Any] = {"backbone": backbone}
+    if transform is not None:
+        components["transform"] = transform
+
+    loaded = 0
+    for prefix, component in components.items():
+        subset = {
+            key.removeprefix(f"{prefix}."): value
+            for key, value in bundle["state_dict"].items()
+            if key.startswith(f"{prefix}.")
+        }
+        if not subset:
+            continue
+        component.load_state_dict(subset, strict=reference.strict)
+        loaded += len(subset)
+
+    if reference.strict and loaded == 0:
+        raise ValueError(
+            f"encoder {reference.name}:v{reference.version} contained no weights for the "
+            "configured components; the backbone almost certainly differs from the one "
+            "that was pretrained"
+        )
+
+    frozen = 0
+    if reference.freeze:
+        for component in components.values():
+            component.eval()
+            for parameter in component.parameters():
+                parameter.requires_grad_(False)
+                frozen += 1
+    return {"loaded_tensors": loaded, "frozen_parameters": frozen}
 
 
 def sanitise_metric(name: str) -> str:
