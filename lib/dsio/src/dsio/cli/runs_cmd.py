@@ -1,8 +1,8 @@
 """``dsio runs`` — inspect and compare the ledger.
 
-Every listing command has a projected form. algua had to retrofit ``--summary`` onto its
-sweep output because full JSON overwhelmed an agent's context window; shipping the
-projection from the start is cheaper than discovering the need at 200 runs.
+Every listing command has a projected form. Full JSON overwhelms an agent's context window
+long before it overwhelms a human's screen, and retrofitting ``--summary`` at 200 runs is
+more expensive than shipping it now.
 """
 
 from __future__ import annotations

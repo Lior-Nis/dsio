@@ -1,13 +1,12 @@
 """Turn committed split files into folds the loop can run.
 
-This is the seam that joins the two halves of dsio: the store, the window index and the
-split YAMLs on one side, the fold loop and the artifact contract on the other. Everything
-either side of it was independently tested before this module existed; this is where the
-design is actually load-bearing.
+This is the seam that joins the two halves of dsio: a dataset and its committed split
+files on one side, the fold loop and the artifact contract on the other. Neither side knows
+what modality it is handling.
 
-A fold is integer positions into a :class:`~dsio.data.views.WindowIndex`, so nothing is
-copied — a five-fold cross-validation over 42M windows costs five pairs of index arrays,
-not five datasets.
+A fold is integer positions into an :class:`~dsio.data.examples.Examples`, so nothing is
+copied: cross-validating a large corpus costs one position array per part, not one dataset
+per fold.
 """
 
 from __future__ import annotations
@@ -17,8 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dsio.data.store import SignalStore
-from dsio.data.views import WindowIndex
+from dsio.data.examples import Examples
 from dsio.eval.contract import Fold
 from dsio.splits.models import SplitError, SplitFile
 from dsio.splits.resolve import resolve_masks
@@ -29,10 +27,9 @@ VAL_PART = "val"
 
 
 def folds_from_splits(
-    index: WindowIndex,
+    examples: Examples,
     splits: Sequence[SplitFile],
     *,
-    store: SignalStore | None = None,
     train_part: str = TRAIN_PART,
     test_part: str = TEST_PART,
     val_part: str | None = VAL_PART,
@@ -50,7 +47,7 @@ def folds_from_splits(
 
     folds: list[Fold] = []
     for position, split in enumerate(splits):
-        masks = resolve_masks(index, split, store=store, require_total=require_total)
+        masks = resolve_masks(examples, split, require_total=require_total)
         for required in (train_part, test_part):
             if required not in masks:
                 raise SplitError(
@@ -74,15 +71,13 @@ def folds_from_splits(
 
 
 def load_folds(
-    index: WindowIndex,
+    examples: Examples,
     paths: Sequence[Path | str],
-    *,
-    store: SignalStore | None = None,
     **kwargs: object,
 ) -> list[Fold]:
     """Load split files from disk in the order given and build folds from them."""
     files = [SplitFile.load(Path(path)) for path in paths]
-    return folds_from_splits(index, files, store=store, **kwargs)  # type: ignore[arg-type]
+    return folds_from_splits(examples, files, **kwargs)  # type: ignore[arg-type]
 
 
 def fold_paths(root: Path | str, name: str) -> list[Path]:
@@ -114,8 +109,8 @@ def _assert_test_parts_are_disjoint(folds: Sequence[Fold]) -> None:
     """No window may be tested by two folds.
 
     Within a fold, disjointness is checked by ``Fold`` itself. Across folds it is a
-    different property, and the one that corrupts a pooled out-of-fold metric: a window
-    tested twice is counted twice, which quietly reweights the score toward whichever rows
+    different property, and the one that corrupts a pooled out-of-fold metric: an example
+    tested twice is counted twice, which quietly reweights the score toward whichever ones
     were duplicated. The loop would catch this too, but catching it here means it fails
     before anything is fitted rather than after the last fold.
     """
@@ -124,7 +119,7 @@ def _assert_test_parts_are_disjoint(folds: Sequence[Fold]) -> None:
         for position in fold.test.tolist():
             if position in seen:
                 raise SplitError(
-                    f"window {position} is in the test part of both {seen[position]!r} "
-                    f"and {fold.name!r}; folds must test disjoint windows"
+                    f"example {position} is in the test part of both {seen[position]!r} "
+                    f"and {fold.name!r}; folds must test disjoint examples"
                 )
             seen[position] = fold.name

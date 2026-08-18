@@ -1,8 +1,7 @@
 """The component chain, as one LightningModule with one step implementation.
 
-Ported from FORGE's `pipeline/base.py`, which is the best pattern in that repo: a fixed
-chain of slots with declared always-present / maybe-present invariants, so every training
-paradigm is the same object with different pieces in it.
+A fixed chain of slots with declared always-present / maybe-present invariants, so every
+training paradigm is the same object with different pieces in it.
 
 ```
 x -> preprocessor? -> augmentor? -> transform -> spectral_augmentor? -> backbone -> head
@@ -10,15 +9,14 @@ x -> preprocessor? -> augmentor? -> transform -> spectral_augmentor? -> backbone
 
 Three changes from the original, each fixing something that cost real time there:
 
-**Augmentation is training-only, enforced rather than documented.** FORGE's chain applies
-whatever is configured, whenever it is called. Augmenting during validation makes the
-metric noisy and irreproducible while looking entirely normal, and it is invisible in a
-config file. Here the two stochastic slots are skipped unless ``self.training``, and
-``test_augmentation_is_skipped_outside_training`` pins it.
+**Augmentation is training-only, enforced rather than documented.** A chain that applies
+whatever is configured whenever it is called will augment during validation, which makes the
+metric noisy *and* irreproducible while looking entirely normal — and it is invisible in a
+config file. The two stochastic slots are skipped unless ``self.training``.
 
-**One step implementation, not three.** FORGE's `_common_step(batch, stage, ...)` already
-solved the train/val/test triplication; it is kept, because the alternative is three
-near-identical methods that drift.
+**One step implementation, not three.** ``_common_step(batch, stage)`` removes the
+train/val/test triplication, because the alternative is three near-identical methods that
+drift apart.
 
 **Predictions carry their row positions.** The batch dict carries ``row``, so predictions
 can be aligned back to the fold that produced them by identity rather than by trusting

@@ -27,7 +27,7 @@ def test_config_is_frozen(config: RunConfig) -> None:
 
 
 def test_unknown_field_is_rejected() -> None:
-    """FORGE's extra='allow' leaves silently discarded typos. This is that fix."""
+    """A schema that accepts unknown keys turns a typo into a silently ignored setting."""
     from dsio.train.tabular import TabularTask
 
     load_runners()
@@ -128,7 +128,7 @@ def test_dotted_token_reaches_the_config() -> None:
 
 
 def test_every_preset_composes_validates_and_preflights() -> None:
-    """The cheapest guard against config rot. FORGE proved its value at 340 YAMLs."""
+    """The cheapest guard against config rot: every registered preset must still build."""
     load_runners()
     load_preset_modules()
     assert PRESETS.names(), "no presets registered; discovery is broken"

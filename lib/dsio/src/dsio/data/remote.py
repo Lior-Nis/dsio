@@ -2,8 +2,8 @@
 
 The property this exists to deliver is the fresh-clone test: clone into an empty directory,
 ``uv sync --locked``, ``dsio data pull``, ``dsio reproduce <run_id>`` — with no manual steps.
-That is the test FORGE failed, because its checkpoints reached for a hardcoded encoder path
-that existed on exactly one machine.
+It is the test a project fails the moment any artifact reaches for a hardcoded path that
+exists on exactly one machine.
 
 **The manifest is the index, so there is no remote index to keep in step.** ``manifest.yaml``
 is committed to git and already names every file with its sha256. Pull reads the local

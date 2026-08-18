@@ -29,14 +29,14 @@ from dsio.data.format import (
 
 @pytest.fixture
 def store(tmp_path: Path) -> SignalStore:
-    """Three patients, two sessions each, 1200 rows per session."""
+    """Three groups, two sessions each, 1200 rows per session."""
     path = tmp_path / "demo"
     with SignalStore.builder(path, channels=3, dtype="float32") as builder:
-        for patient in range(3):
+        for group in range(3):
             for session in range(2):
                 signal = np.arange(1200 * 3, dtype="float32").reshape(1200, 3)
                 builder.add(
-                    f"p{patient}_s{session}", signal + patient * 1000, group=f"p{patient}"
+                    f"p{group}_s{session}", signal + group * 1000, group=f"p{group}"
                 )
     return SignalStore(path)
 
@@ -210,7 +210,7 @@ def test_index_is_cached_by_spec(store: SignalStore, tmp_path: Path) -> None:
 
 
 def test_dense_stride_oversamples_only_marked_regions(store: SignalStore) -> None:
-    """FORGE's fog_stride, at index time: rare positives get more windows, not more bytes."""
+    """A denser stride over rare regions: more windows there, not more bytes anywhere."""
     mask = np.zeros(store.n_rows, dtype=bool)
     entity = store.entity("p0_s0")
     mask[entity.start_row + 300 : entity.start_row + 800] = True

@@ -43,13 +43,13 @@ def workdir(tmp_path: Path) -> Path:
     root.mkdir()
     rng = np.random.default_rng(0)
     with SignalStore.builder(root / "stores" / "cohort", channels=3) as builder:
-        for subject in range(9):
+        for group in range(9):
             for session in range(2):
                 builder.add(
-                    f"p{subject}_s{session}",
+                    f"p{group}_s{session}",
                     rng.standard_normal((1500, 3)).astype("float32"),
-                    group=f"p{subject}",
-                    attrs={"t_start": 0.0, "sample_rate": 100.0, "fog_count": subject * 10},
+                    group=f"p{group}",
+                    attrs={"t_start": 0.0, "sample_rate": 100.0, "events": group * 10},
                 )
     return root
 
@@ -191,7 +191,7 @@ def test_splits_make_stratifies_on_a_named_key(workdir: Path) -> None:
     code, payload = dsio(
         "splits", "make", "stores/cohort",
         "--name", "strat", "--scheme", "stratified_kfold", "--k", "3",
-        "--stratify", "fog_count:numeric",
+        "--stratify", "events:numeric",
         cwd=workdir,
     )
     assert code == 0
@@ -201,7 +201,7 @@ def test_splits_make_stratifies_on_a_named_key(workdir: Path) -> None:
 def test_splits_make_rejects_an_unknown_stratify_kind(workdir: Path) -> None:
     code, payload = dsio(
         "splits", "make", "stores/cohort",
-        "--name", "bad", "--scheme", "stratified_kfold", "--stratify", "fog_count:guess",
+        "--name", "bad", "--scheme", "stratified_kfold", "--stratify", "events:guess",
         cwd=workdir,
     )
     assert code == 1

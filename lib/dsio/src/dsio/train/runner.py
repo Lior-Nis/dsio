@@ -1,7 +1,7 @@
 """Task dispatch: one entrypoint, many runners.
 
-FORGE had eight near-identical training scripts that differed only in a class name and a
-tag list. There is exactly one entrypoint here; the task kind selects the runner.
+Near-identical training scripts that differ only in a class name and a tag list are the
+thing this replaces. There is exactly one entrypoint; the task kind selects the runner.
 
 A runner receives a validated config and a live :class:`~dsio.runs.record.Run`, and
 returns its summary metrics. It owns nothing about provenance, seeding, or recording —

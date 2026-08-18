@@ -7,14 +7,14 @@ smallest unit that may be assigned to one side of a split.
 
 Naming the groups rather than deriving them is deliberate:
 
-**Stratification needs deliberate assignment.** Hashing a subject ID into a fold cannot
-balance a rare-event rate across folds. FORGE stratified 128 patients serpentine by FOG
-count precisely because random assignment produced badly imbalanced folds.
+**Stratification needs deliberate assignment.** Hashing a group id into a fold cannot
+balance a rare-event rate across folds; with few groups, random assignment reliably
+produces imbalanced ones.
 
-**Leave-one-group-out is not expressible as a hash.** "Leave patient *i* out" is a list.
+**Leave-one-group-out is not expressible as a hash.** "Leave group *i* out" is a list.
 
-**A split is scientific provenance.** A paper has to state which subjects were in test. A
-YAML file in git is that statement, diffable and reviewable.
+**A split is provenance.** A result has to state which groups were held out. A YAML file in
+git is that statement, diffable and reviewable.
 
 The file binds itself to a store by manifest digest, so a split cannot be silently applied
 to a corpus it was not computed for.
@@ -123,7 +123,7 @@ class SplitFile(DsioModel):
     """One materialised split: named parts, each a list of group IDs.
 
     Parts are conventionally train/val/test, but the shape is open so a project can add
-    its own (a calibration cohort, an external validation set).
+    its own (a calibration set, an external validation cohort).
     """
 
     schema_version: str = SCHEMA
@@ -150,12 +150,12 @@ class SplitFile(DsioModel):
 
     @model_validator(mode="after")
     def _validate_parts(self) -> SplitFile:
-        """Reject the failure FORGE could not catch.
+        """Reject the most damaging thing a split file can get wrong.
 
-        FORGE's SplitsConfig validated that no patient appeared twice *within* a list, but
-        never that the three lists were disjoint from each other. A subject present in both
-        train and test would have passed silently — and that is the single most damaging
-        thing a split file can get wrong.
+        Validating that no group appears twice *within* a part is the obvious check and the
+        insufficient one. A group present in both train and test passes that check and
+        silently invalidates every number the split produces, so disjointness is verified
+        *across* parts as well.
         """
         if not self.parts and self.temporal is None:
             raise ValueError(
@@ -197,7 +197,11 @@ class SplitFile(DsioModel):
         return None
 
     def to_yaml(self) -> str:
-        """Render with a human-readable provenance header, as FORGE's split files had."""
+        """Render with a human-readable provenance header.
+
+        A split is meant to be read in a diff without parsing it, so the header states what
+        it is and what stratification achieved.
+        """
         header = [
             f"# dsio split: {self.name}"
             + (f" (fold {self.fold})" if self.fold is not None else ""),

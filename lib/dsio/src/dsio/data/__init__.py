@@ -5,6 +5,12 @@ configuration is an index of offsets over it. See docs/adr/0005 for why the payl
 flat binary rather than a chunked format.
 """
 
+from dsio.data.adapters import (
+    KeyedExamples,
+    SignalExamples,
+    TableExamples,
+    entity_examples,
+)
 from dsio.data.cache import (
     CACHE_ROOT_ENV,
     BytesCodec,
@@ -22,6 +28,7 @@ from dsio.data.cache import (
     StageCache,
     cache_root,
 )
+from dsio.data.examples import Examples, ExamplesError, assert_consistent, group_attribute
 from dsio.data.format import DTypeCode, IndexFormatError, IndexHeader
 from dsio.data.readers import ReadError, SignalReader, open_reader
 from dsio.data.remote import (
@@ -67,28 +74,36 @@ __all__ = [
     "DTypeCode",
     "Entity",
     "EnvPolicy",
+    "Examples",
+    "ExamplesError",
     "ExplicitVersionPolicy",
     "IndexFormatError",
     "IndexHeader",
     "JsonCodec",
+    "KeyedExamples",
     "NpzCodec",
     "NumpyCodec",
     "ReadError",
     "RemoteError",
     "RemoteIntegrityError",
+    "SignalExamples",
     "SignalReader",
     "SignalStore",
     "SignalStoreBuilder",
     "StageCache",
     "StoreError",
     "StoreManifest",
+    "TableExamples",
     "Transfer",
     "WindowIndex",
     "WindowSpec",
     "WindowView",
+    "assert_consistent",
     "build_index",
     "cache_root",
     "data_root",
+    "entity_examples",
+    "group_attribute",
     "list_stores",
     "load_or_build",
     "open_reader",

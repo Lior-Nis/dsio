@@ -18,7 +18,7 @@ from dsio.ssl.budget import (
 def cohort() -> dict[str, float]:
     """A realistic rate distribution: a long tail of near-zero groups.
 
-    About 16% of DeFOG patients have almost no FOG. That tail is what makes a uniform draw
+    About 16% of DeFOG groups have almost no FOG. That tail is what makes a uniform draw
     dangerous, so it is what the fixture reproduces.
     """
     rng = np.random.default_rng(0)
@@ -34,7 +34,7 @@ def test_the_same_seed_and_budget_select_the_same_groups(cohort: dict[str, float
     """The property that makes a budget curve a fair comparison.
 
     Probe, random-init and scratch arms must train on identical groups at a given budget;
-    otherwise the gap between two arms partly measures which subjects each of them got.
+    otherwise the gap between two arms partly measures which groups each of them got.
     """
     first = select_groups(cohort, 8, seed=7)
     second = select_groups(cohort, 8, seed=7)
@@ -102,7 +102,7 @@ def test_the_realised_rate_is_recorded_not_assumed(cohort: dict[str, float]) -> 
 
 def test_budgets_are_nested_by_default(cohort: dict[str, float]) -> None:
     """Without nesting, a dip in the curve is ambiguous: it could be the budget, or it
-    could be that a different and harder set of subjects was drawn. Resolving that
+    could be that a different and harder set of groups was drawn. Resolving that
     ambiguity costs a full re-run at every budget with several seeds.
     """
     selections = budget_curve(cohort, [2, 4, 8, 16], seed=0)
@@ -111,7 +111,7 @@ def test_budgets_are_nested_by_default(cohort: dict[str, float]) -> None:
 
 
 def test_nesting_can_be_switched_off(cohort: dict[str, float]) -> None:
-    """The unnested draw is FORGE's original and remains a valid, different experiment."""
+    """The unnested draw is a valid, different experiment."""
     selections = budget_curve(cohort, [2, 4, 8, 16], seed=0, nested=False)
     with pytest.raises(BudgetError, match="drops"):
         assert_nested(selections)
@@ -168,6 +168,6 @@ def test_a_group_with_no_windows_rates_zero() -> None:
 
 
 def test_soft_labels_are_binarised_for_the_rate() -> None:
-    """The budget is about how many positives a subject carries, not their average ratio."""
+    """The budget is about how many positives a group carries, not their average ratio."""
     groups = np.array(["a", "a"])
     assert group_rates(["a"], np.array([0.6, 0.4]), groups)["a"] == pytest.approx(0.5)

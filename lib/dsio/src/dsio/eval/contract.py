@@ -1,8 +1,8 @@
 """The fixed artifact contract every run produces, whatever the modality.
 
-Both `kaggler` and FORGE state this contract in prose and then re-implement it by hand in
-every script — which is why comparing two of their runs means reading two scripts first.
-Here it is one shape, written by framework code:
+Stating this contract in prose and then re-implementing it per script is the norm, and it
+is why comparing two runs usually means reading two scripts first. Here it is one shape,
+written by framework code:
 
 ```
 artifacts/
@@ -189,11 +189,11 @@ class CVReport(DsioModel):
 def fold_fingerprint(folds: Sequence[Fold]) -> str:
     """Digest of an exact fold assignment.
 
-    `kaggler` states the doctrine in prose — *the fold assignment is the single source of
-    truth; comparing runs on different folds is meaningless* — and then has no way to
-    check it, because nothing records which folds a number came from. Recording this makes
-    the doctrine enforceable: :func:`dsio.eval.verdict.compare` refuses two runs whose
-    fingerprints differ, instead of returning a confident and worthless delta.
+The fold assignment is the single source of truth: comparing runs on different folds
+    measures the folds, not the models. That is easy to state and impossible to enforce
+    unless something records which folds a number came from. Recording it makes the rule
+    checkable — :func:`dsio.eval.verdict.compare` refuses two runs whose fingerprints
+    differ, instead of returning a confident and worthless delta.
 
     Only the held-out positions matter. Two runs that hold out identical rows are
     comparable even if one of them trained on less, which is exactly the situation when a

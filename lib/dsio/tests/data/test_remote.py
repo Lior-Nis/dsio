@@ -36,11 +36,11 @@ def project(tmp_path: Path) -> Path:
     root = tmp_path / "project"
     rng = np.random.default_rng(0)
     with SignalStore.builder(root / "stores" / "cohort", channels=2) as builder:
-        for subject in range(4):
+        for group in range(4):
             builder.add(
-                f"p{subject}",
+                f"p{group}",
                 rng.standard_normal((500, 2)).astype("float32"),
-                group=f"p{subject}",
+                group=f"p{group}",
             )
     (tmp_path / "remote").mkdir()
     return root
@@ -122,8 +122,8 @@ def test_dry_run_reports_without_sending(project: Path, remote: str) -> None:
 def test_fresh_clone_pulls_and_verifies(project: Path, remote: str, tmp_path: Path) -> None:
     """The headline test. Clone with only the committed manifest, pull, and have a store.
 
-    This is the property FORGE lacked: its checkpoints reached for a hardcoded encoder path
-    that existed on one machine, so a fresh clone could not reproduce anything.
+    This is the property a project loses the moment any artifact reaches for a hardcoded path
+    that exists on exactly one machine.
     """
     push(project / "stores" / "cohort", remote=remote)
     original = SignalStore(project / "stores" / "cohort").read(0, 500)
@@ -229,13 +229,13 @@ def test_an_old_manifest_still_resolves_after_reingest(
     old_manifest = (project / "stores" / "cohort" / MANIFEST_FILE).read_bytes()
     old_digest = SignalStore(project / "stores" / "cohort").manifest().signal_sha256
 
-    # Re-ingest the same corpus with an extra subject, and push again.
+    # Re-ingest the same corpus with an extra group, and push again.
     shutil.rmtree(project / "stores" / "cohort")
     rng = np.random.default_rng(1)
     with SignalStore.builder(project / "stores" / "cohort", channels=2) as builder:
-        for subject in range(5):
+        for group in range(5):
             builder.add(
-                f"p{subject}", rng.standard_normal((500, 2)).astype("float32"), group=f"p{subject}"
+                f"p{group}", rng.standard_normal((500, 2)).astype("float32"), group=f"p{group}"
             )
     push(project / "stores" / "cohort", remote=remote)
     new_digest = SignalStore(project / "stores" / "cohort").manifest().signal_sha256

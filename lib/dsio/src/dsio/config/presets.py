@@ -1,9 +1,8 @@
 """Presets: functions that build a validated :class:`RunConfig`.
 
 A preset is the unit a user launches. Variants are *arguments*, never files — there must
-be no path by which ``lr=1e-6`` becomes something you check in. FORGE reached 340 YAMLs
-despite a written policy against exactly that, because the system made a new file the
-easy way to express a new value.
+be no path by which ``lr=1e-6`` becomes something you check in. A written policy against
+config sprawl does not survive contact with a deadline; removing the mechanism does.
 
 Override resolution follows one rule: a dotless token matching a preset parameter sets
 that argument; anything else is a dotted path into the resulting config.

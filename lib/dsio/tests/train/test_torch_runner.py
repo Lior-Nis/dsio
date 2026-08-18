@@ -1,4 +1,4 @@
-"""The torch runner: Lightning's loop inside one fold, and the FORGE bugs it must not repeat.
+"""The torch runner: Lightning's loop inside one fold, and the failures it must not repeat.
 
 Trains real models on a tiny synthetic corpus. Slow relative to a unit test and worth it —
 the claim being made is that cross-validation and Lightning compose, and only running both
@@ -16,7 +16,7 @@ pytest.importorskip("torch")
 pytest.importorskip("lightning")
 
 from dsio.config.schema import RunConfig  # noqa: E402
-from dsio.data import SignalStore, WindowSpec  # noqa: E402
+from dsio.data import SignalStore, WindowSpec, entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV  # noqa: E402
 from dsio.eval import read_report  # noqa: E402
 from dsio.nn import LABELS, labels  # noqa: E402
@@ -35,19 +35,19 @@ from dsio.train.torch_task import (  # noqa: E402
 
 @pytest.fixture
 def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Eight subjects; half carry a tone in channel 0, and that is the label."""
+    """Eight groups; half carry a tone in channel 0, and that is the label."""
     root = tmp_path / "stores"
     monkeypatch.setenv(DATA_ROOT_ENV, str(root))
     rng = np.random.default_rng(0)
     with SignalStore.builder(root / "tone", channels=2) as builder:
-        for subject in range(8):
-            positive = subject % 2 == 0
+        for group in range(8):
+            positive = group % 2 == 0
             t = np.arange(1200) / 100.0
             signal = (rng.standard_normal((1200, 2)) * 0.5).astype("float32")
             if positive:
                 signal[:, 0] += (np.sin(2 * np.pi * 5 * t) * 2.0).astype("float32")
             builder.add(
-                f"p{subject}", signal, group=f"p{subject}", attrs={"positive": int(positive)}
+                f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
             )
 
     if "tone" not in LABELS:
@@ -61,7 +61,7 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     store = SignalStore(root / "tone")
     write_splits(
-        store,
+        entity_examples(store),
         SplitSpec(
             scheme="stratified_kfold",
             k=3,
@@ -96,7 +96,7 @@ def make_task(root: Path, **overrides) -> TorchTask:  # type: ignore[no-untyped-
 
 
 def test_preflight_catches_a_typo_before_any_data_is_read(corpus: Path) -> None:
-    """FORGE's typos surfaced inside instantiate(), after the corpus had already loaded."""
+    """Deferred validation surfaces a typo only after the corpus has loaded."""
     config = RunConfig(
         name="typo", task=make_task(corpus, backbone=Component(name="conv1D"))
     )
@@ -122,11 +122,11 @@ def test_an_unknown_metric_is_caught_before_training(corpus: Path) -> None:
         check(config)
 
 
-# --- the three FORGE bugs -------------------------------------------------------------
+# --- three failures that cost real time ----------------------------------------------
 
 
 def test_metric_names_are_sanitised_for_filenames() -> None:
-    """`ap{metrics/val_ap:.3f}` made six stray directories, because / is a path separator."""
+    """A / inside a format field is a path separator, so a metric name creates directories."""
     assert sanitise_metric("val/loss") == "val_loss"
     assert sanitise_metric("metrics/val_ap") == "metrics_val_ap"
     assert "/" not in sanitise_metric("a/b\\c=d")
@@ -135,7 +135,7 @@ def test_metric_names_are_sanitised_for_filenames() -> None:
 def test_a_failing_callback_is_never_swallowed(
     corpus: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """FORGE wraps callback construction in a bare except and logs a warning, so a broken
+    """Catching everything and logging a warning means a broken
     ModelCheckpoint silently disables checkpointing for a multi-hour run and the loss of
     the weights is discovered days later.
 
@@ -230,6 +230,7 @@ def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> N
 
 def test_no_group_is_both_trained_on_and_tested(corpus: Path, tmp_path: Path) -> None:
     """The leakage guarantee, verified at the level the runner actually consumes."""
+    from dsio.data import SignalExamples
     from dsio.data.views import load_or_build
     from dsio.splits import fold_paths, load_folds
 
@@ -237,7 +238,7 @@ def test_no_group_is_both_trained_on_and_tested(corpus: Path, tmp_path: Path) ->
     task = make_task(corpus)
     row_labels = LABELS.get("tone")(store)
     index = load_or_build(store, task.window, labels=row_labels)
-    folds = load_folds(index, fold_paths(task.splits_root, task.split), store=store)
+    folds = load_folds(SignalExamples(store, index), fold_paths(task.splits_root, task.split))
 
     groups = index.groups
     for fold in folds:

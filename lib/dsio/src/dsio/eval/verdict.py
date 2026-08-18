@@ -1,23 +1,19 @@
 """Is this result real? Baseline-relative verdicts, filtered by a noise floor.
 
-Ported from `kaggler`'s ``self_model.verdict`` — the most transferable code in any of the
-surveyed repos — and strengthened by something dsio has that kaggler did not.
-
 **The rule.** An experiment is a win only if its improvement over its baseline exceeds the
 noise floor. Otherwise it is neutral, however good the number looks. Chasing improvements
 below the floor is how a week disappears into variance.
 
-**The strengthening.** kaggler estimated the floor from the candidate's own fold spread,
-which is the best you can do when you cannot be sure two runs used the same folds. dsio
-commits its folds to YAML and fingerprints the assignment, so when two runs *provably* held
-out the same rows the far sharper paired comparison is available: the standard error of the
-per-fold *differences*. Fold-to-fold variation that both models share — one fold simply
-being harder — cancels out, and a real 0.002 improvement becomes visible where the unpaired
-floor would have buried it under a 0.02 fold spread.
+**The paired floor.** Estimating the floor from the candidate's own fold spread is the
+best available when you cannot be sure two runs used the same folds. dsio commits its folds
+and fingerprints the assignment, so when two runs *provably* held out the same examples the
+far sharper comparison is available: the standard error of the per-fold *differences*.
+Fold-to-fold variation the two models share — one fold simply being harder — cancels, and a
+real 0.002 improvement becomes visible where the unpaired floor would have buried it under a
+0.02 fold spread.
 
-**The refusal.** Two runs with different fold assignments are not compared at all. kaggler
-states this doctrine in prose and cannot check it; here the fingerprint makes it
-enforceable, and a refusal is worth far more than a confident, meaningless delta.
+**The refusal.** Two runs with different fold assignments are not compared at all. A
+refusal is worth far more than a confident, meaningless delta.
 """
 
 from __future__ import annotations
@@ -127,7 +123,7 @@ def verdict(
 ) -> Comparison:
     """Classify a candidate against a baseline using the unpaired floor.
 
-    The kaggler-compatible entry point, for when all you have is two numbers and a fold
+    The entry point for when all you have is two numbers and a fold
     spread. Prefer :func:`compare`, which takes the reports and can pair the folds.
     """
     if _missing(candidate) or _missing(baseline):
@@ -264,8 +260,7 @@ def compare_all(
 def sampling_noise(n_rows: int, p: float = 0.5) -> float:
     """Sampling sigma of a proportion metric measured on ``n_rows``.
 
-    Ported from `kaggler`'s ``lb_noise_sigma``, generalised away from leaderboards: it
-    applies to any finite held-out set. A difference below this is invisible in the
+    Applies to any finite held-out set. A difference below this is invisible in the
     measurement regardless of how many folds agree on it, which is the second, independent
     floor — a 200-row test set cannot resolve a 0.01 accuracy difference no matter how
     stable cross-validation looks.

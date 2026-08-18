@@ -1,9 +1,9 @@
 """Windowed views: an index of offsets, never a copy of the data.
 
 Changing a window length costs seconds and megabytes here, not hours and tens of
-gigabytes. FORGE's 229 GB across 29 Zarr stores was one corpus materialised once per
-(length, stride, labelling policy); the same configurations are a few index files over one
-store.
+gigabytes. Materialising one corpus once per (length, stride, labelling policy) is how a
+store reaches hundreds of gigabytes; the same configurations are a few index files over one
+copy.
 
 The index is content-addressed by its spec, so a view either already exists for exactly
 these parameters or is rebuilt — the same rule the run ledger uses for identity.
@@ -35,9 +35,9 @@ LabelPolicy = Literal["any", "majority", "ratio", "none"]
 class WindowSpec(DsioModel):
     """How to slice a store into windows.
 
-    ``dense_stride`` reproduces FORGE's ``fog_stride_len``: a tighter stride applied only
-    where a mask marks rare positives, so class imbalance is addressed at *index* time
-    rather than by duplicating data. It costs offsets, not gigabytes.
+    ``dense_stride`` applies a tighter stride only where a mask marks rare positives, so
+    class imbalance is addressed at *index* time rather than by duplicating data. It costs
+    offsets, not gigabytes.
     """
 
     length: int = Field(gt=0)
@@ -73,10 +73,10 @@ class WindowIndex:
     """Window start offsets plus the provenance needed to split them safely.
 
     Entities are stored as integer codes into a name table rather than as repeated
-    strings. That is not micro-optimisation: FORGE's unlabelled corpus is 42.2M windows,
-    and holding an entity id and a group string per window costs ~72 bytes each — about
-    3 GB of index, which would defeat the entire point of not materialising the windows.
-    Codes plus a table cost 12 bytes per window.
+    strings. That is not micro-optimisation: at tens of millions of windows, holding an
+    entity id and a group string per window costs ~72 bytes each — gigabytes of index, which
+    would defeat the entire point of not materialising the windows. Codes plus a table cost
+    12 bytes per window.
 
     Group is derived from entity rather than stored, because an entity belongs to exactly
     one group by construction. Storing both would let them disagree.
@@ -225,8 +225,7 @@ def build_index(
     each window and then filtered by the spec's ``min_metrics`` / ``max_metrics``. Filtering
     belongs in the spec rather than applied afterwards so it is part of the index digest:
     two indices differing only in a purity floor are different indices, and must not share
-    a cache entry. This is the seam FORGE used to keep 38,758 of 52,870 stride-aligned
-    windows.
+    a cache entry, which is what lets a quality floor discard part of a view reproducibly.
     """
     starts: list[int] = []
     codes: list[int] = []

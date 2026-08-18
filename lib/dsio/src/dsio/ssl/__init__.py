@@ -2,8 +2,8 @@
 
 The workflow this package exists for is pretrain on a large unlabelled corpus, probe or
 finetune on a small labelled one, and evaluate on a third held-out cohort — with the three
-having different schemas and different split logic. FORGE's ratio was roughly 100:1
-unlabelled to labelled by hours, which is the normal situation and the reason SSL is
+having different schemas and different split logic. Unlabelled data typically outnumbers
+labelled by two orders of magnitude, which is the normal situation and the reason SSL is
 first-class here rather than an add-on.
 """
 

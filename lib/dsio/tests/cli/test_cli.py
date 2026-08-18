@@ -120,7 +120,7 @@ def test_run_then_list_then_promote(workdir: Path, preset_env: dict[str, str]) -
 def test_summary_projection_omits_the_config(
     workdir: Path, preset_env: dict[str, str]
 ) -> None:
-    """Output projection ships from day one; algua had to retrofit it."""
+    """Output projection ships from day one; prior work had to retrofit it."""
     env = {**preset_env, "DSIO_RUNS_ROOT": str(workdir / "runs")}
     _, full = dsio("run", "spine_baseline", "--dry-run", cwd=workdir, env_extra=env)
     _, brief = dsio(

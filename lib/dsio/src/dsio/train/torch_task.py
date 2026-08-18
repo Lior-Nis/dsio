@@ -7,20 +7,19 @@ inside that call. The outer loop never learns what a Trainer is, and the runner 
 learns how out-of-fold predictions are accumulated or scored.
 
 The consequence is that this file is short, and almost all of it is configuration. The
-parts that are not configuration are three bugs FORGE paid for:
+parts that are not configuration guard three failures that cost real time:
 
-**Callbacks are never instantiated inside a bare ``except``.** FORGE's
-``instantiate_callbacks`` catches everything and logs a warning, so a misconfigured
-``ModelCheckpoint`` silently disables checkpointing for a multi-hour run and nobody learns
-until they go looking for the weights.
+**Callbacks are never instantiated inside a bare ``except``.** Catching everything and
+logging a warning means a misconfigured ``ModelCheckpoint`` silently disables checkpointing
+for a multi-hour run, and nobody learns until they go looking for the weights.
 
 **Metric names in filename templates are sanitised.** ``ap{metrics/val_ap:.3f}`` produced
 six stray ``checkpoints/checkpoint-epoch=NN-metrics/`` *directories*, because the ``/``
 inside the format field became a path separator.
 
-**Checkpoints close over their lineage.** A FORGE classification checkpoint reloaded its
-MAE encoder from a hardcoded path and failed on a fresh clone. An encoder here is named by
-run id and digest, resolved through the ledger, and verified on load.
+**Checkpoints close over their lineage.** A checkpoint that reloads its encoder from a
+hardcoded path fails on a fresh clone. An encoder here is named by run id and digest,
+resolved through the ledger, and verified on load.
 """
 
 from __future__ import annotations
@@ -35,6 +34,7 @@ from pydantic import Field, model_validator
 from dsio.artifacts.store import ModelRef, ModelRegistry
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.contracts import DsioModel
+from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
 from dsio.eval import Fold, FoldPrediction, cross_validate, write_report
@@ -65,8 +65,8 @@ class Component(DsioModel):
     """A registered component plus its keyword arguments.
 
     Name and parameters travel together so a config records exactly what was built. The
-    alternative — a name here and a parameter block somewhere else — is how FORGE ended up
-    with `adamw_differential_lr_1e{5,6,7}.yaml`.
+    alternative — a name here and a parameter block somewhere else — is how a config
+    directory fills with files that differ only in one exponent.
     """
 
     name: str
@@ -76,11 +76,10 @@ class Component(DsioModel):
 class EncoderRef(DsioModel):
     """A pinned pretrained encoder, plus what to do with it.
 
-    Wraps :class:`~dsio.artifacts.store.ModelRef`, which cannot express "latest". FORGE's
-    classification checkpoints reloaded their MAE encoder from a hardcoded absolute path,
-    so a fresh clone failed and — worse — a reproduction on the original machine silently
-    picked up whatever had been written there since. A name, a version and a digest cannot
-    do either.
+    Wraps :class:`~dsio.artifacts.store.ModelRef`, which cannot express "latest". An
+    encoder loaded from a hardcoded absolute path fails on a fresh clone and — worse — a
+    reproduction on the original machine silently picks up whatever has been written there
+    since. A name, a version and a digest cannot do either.
 
     ``freeze`` distinguishes the two experiments people conflate: a *probe* measures what
     the representation already contains, while a *finetune* measures what it is a good
@@ -179,10 +178,9 @@ class TorchTask(TaskConfig):
 def check_torch(config: RunConfig) -> None:
     """Resolve every name before a single byte of the corpus is read.
 
-    FORGE's leaf schemas were ``extra="allow"`` with a bare ``_target_: str``, so a typo
-    surfaced inside ``hydra.utils.instantiate`` after the data had already loaded. On a
-    42M-window corpus that is the difference between a typo costing microseconds and
-    costing twenty minutes.
+    A schema that accepts unknown keys, or a component named by a bare string resolved at
+    instantiation time, surfaces a typo only after the data has loaded. On a large corpus
+    that is the difference between a typo costing microseconds and costing twenty minutes.
     """
     task = config.task
     assert isinstance(task, TorchTask)
@@ -323,9 +321,9 @@ def load_encoder(
 def sanitise_metric(name: str) -> str:
     """Make a metric name safe inside a checkpoint filename template.
 
-    ``val/loss`` in a template becomes a directory separator, which is how FORGE grew six
-    stray ``checkpoints/checkpoint-epoch=NN-metrics/`` directories that looked like a
-    corrupted run. Lightning offers no escaping, so the substitution happens here.
+    A ``/`` inside a format field becomes a directory separator, so ``val/loss`` in a
+    template silently creates nested directories that look like a corrupted run. Lightning
+    offers no escaping, so the substitution happens here.
     """
     return name.replace("/", "_").replace("\\", "_").replace("=", "-")
 
@@ -333,10 +331,10 @@ def sanitise_metric(name: str) -> str:
 def build_callbacks(task: TorchTask, directory: Path) -> list[Any]:
     """Construct the callbacks a fold needs, letting any failure propagate.
 
-    FORGE wraps this in a bare ``except`` that logs a warning. A ModelCheckpoint that fails
-    to construct then silently disables checkpointing for a multi-hour run, and the loss of
-    the weights is discovered days later. A misconfigured callback is a configuration bug
-    and must stop the run.
+    Wrapping this in a bare ``except`` that logs a warning means a ModelCheckpoint which
+    fails to construct silently disables checkpointing for a multi-hour run, and the loss of
+    the weights is discovered days later. A misconfigured callback is a configuration bug and
+    must stop the run.
     """
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
@@ -384,7 +382,8 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         )
 
     index = load_or_build(store, task.window, labels=row_labels)
-    folds = load_folds(index, fold_paths(task.splits_root, task.split), store=store)
+    examples = SignalExamples(store, index)
+    folds = load_folds(examples, fold_paths(task.splits_root, task.split))
     if task.folds:
         wanted = set(task.folds)
         folds = [fold for fold in folds if fold.index in wanted]

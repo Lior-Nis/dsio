@@ -2,7 +2,7 @@
 
 The two settings here are load-bearing, not stylistic.
 
-``extra="forbid"`` — FORGE declared every leaf schema ``extra="allow"`` with a bare
+``extra="forbid"`` — a schema that accepts unknown keys turns a typo into a
 ``_target_: str``, so a typo like ``deph: 12`` was silently discarded and training
 proceeded with the default. Forbidding extras turns that into an error at construction.
 

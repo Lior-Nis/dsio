@@ -176,7 +176,7 @@ def test_the_probe_needs_labelled_loaders(module: DsioModule) -> None:
 
 
 def test_the_probe_fires_on_schedule(module: DsioModule, loader: DataLoader) -> None:
-    """FORGE polled a checkpoint directory every fifteen minutes from bash to get this."""
+    """The alternative is a loop that polls a checkpoint directory from outside the run."""
     from lightning import Trainer
 
     probe = OnlineProbe(loader, loader, every_n_epochs=2)

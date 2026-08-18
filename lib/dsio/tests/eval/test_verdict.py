@@ -50,7 +50,7 @@ def report(
     )
 
 
-# --- the kaggler-compatible verdict --------------------------------------------------
+# --- the hand-written scripts-compatible verdict --------------------------------------------------
 
 
 def test_an_improvement_below_the_fold_spread_is_neutral() -> None:
@@ -144,8 +144,10 @@ def test_an_inconsistent_improvement_is_not_a_win_even_when_paired() -> None:
 
 
 def test_comparing_different_fold_assignments_is_refused() -> None:
-    """kaggler states this doctrine in prose and cannot check it. The fingerprint makes
-    it enforceable, and a refusal beats a confident, meaningless delta."""
+    """The doctrine is easy to state and impossible to enforce without a fingerprint.
+
+    A refusal beats a confident, meaningless delta.
+    """
     with pytest.raises(EvalError, match="single source of truth"):
         compare(
             report([0.9, 0.9], fingerprint="one"),

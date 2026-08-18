@@ -9,7 +9,7 @@ Every reader is opened **per process**. This is not an optimisation. A ``np.memm
 created in a parent process and handed to a ``spawn``-based DataLoader worker is pickled
 *by value*: it serialises the whole array instead of the mapping. Linux forks and inherits
 the mapping harmlessly, so the bug stays hidden until someone runs on macOS, or sets
-``multiprocessing_context="spawn"`` to dodge a CUDA fork issue. FORGE hit the same class of
+``multiprocessing_context="spawn"`` to dodge a CUDA fork issue. This is the same class of
 bug with Zarr handles and fixed it the same way.
 """
 

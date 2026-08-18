@@ -3,7 +3,7 @@
 Two rules make this different from a directory of checkpoints.
 
 **References are pinned, never "latest".** A :class:`ModelRef` carries name, version and
-digest. FORGE's classification checkpoints silently reloaded their encoder from a
+digest. A checkpoint that reloads a dependency from a
 hardcoded path, so reproduction failed on a fresh clone; a checkpoint that names a moving
 target is not a reproducible artifact.
 

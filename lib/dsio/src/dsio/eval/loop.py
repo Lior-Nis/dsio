@@ -1,8 +1,8 @@
 """The fold loop: framework code, not user code.
 
-``for fold: fit -> predict -> accumulate -> score -> log``. Four scripts in `kaggler`
-re-implement this by hand, and each one gets a slightly different definition of what "the
-score" means — averaged per fold in one, pooled in another. Writing it once is the point.
+``for fold: fit -> predict -> accumulate -> score -> log``. Hand-written per script, this
+loop acquires a slightly different definition of "the score" in each one — averaged per fold
+here, pooled there. Writing it once is the point.
 
 The loop knows nothing about models, data or frameworks. It receives folds as row
 positions and a ``fit_predict`` callable, which is what lets the same code drive an sklearn

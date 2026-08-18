@@ -8,9 +8,9 @@ Three methods rather than seven, chosen to span the families rather than to be e
   explicit variance term.
 
 Each is a small object with one method, ``step(module, x) -> (loss, logs)``, so the encoder,
-the augmentations and the training loop are shared and only the objective differs. FORGE
-carried seven near-duplicate pipeline classes; the cost it documented was that adding one
-meant touching seven places.
+the augmentations and the training loop are shared and only the objective differs. The
+alternative — one pipeline class per objective — makes adding an objective a change in every
+one of them.
 
 **Every method logs the diagnostic that reveals its own failure mode**, because in SSL the
 loss does not. A collapsed SimCLR encoder that maps everything to one point has a *low*

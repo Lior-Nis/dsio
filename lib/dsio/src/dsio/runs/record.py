@@ -1,8 +1,8 @@
 """The Run ledger: dsio's authoritative record of what happened.
 
 Authority lives here, on disk, in plain files — not in MLflow or W&B, which are sinks.
-FORGE's worst failure mode was that run identity was never modelled, so which run
-produced a published number had to be recovered months later from log-filename globs.
+The failure this prevents is run identity never being modelled at all, so that which run
+produced a published number has to be recovered later from filenames and timestamps.
 A run record is written the moment a run starts, so identity exists even for a run that
 crashes.
 

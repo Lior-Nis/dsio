@@ -4,20 +4,20 @@ The question SSL exists to answer is not "is the pretrained model better" but "h
 labelled data does it save". Answering it means training the same downstream task at several
 budgets, for each arm — pretrained, random-init, scratch — and comparing the curves.
 
-Ported from FORGE's ``data/dataset/base.py::_subset_n_patients``, which gets two things
-right that a naive implementation does not:
+Two things a naive implementation gets wrong:
 
 **The budget is a number of groups, not a number of windows.** Sampling windows would draw
 from all subjects at every budget, so "10% of labels" would still mean *every* subject was
 labelled. Real labelling effort is per-subject, and a model that has seen a little of
 everyone is in a much easier position than one that has seen a few people completely.
 
-**The draw is stratified over the positive rate, not uniform.** About 16% of DeFOG patients
-have almost no FOG, so a small uniform draw is routinely positive-starved — and the
-resulting budget curve measures the luck of the draw rather than the value of a label.
-Groups are ranked by rate and drawn so the subset spans the cohort's full range — FORGE's
-K-contiguous-strata draw when ``nested=False``, and a breadth-first bisection of the ranking
-when nested, which gives the same spread while making every budget a prefix of the next.
+**The draw is stratified over the positive rate, not uniform.** Rare-event datasets
+usually have a long tail of groups with almost no positives, so a small uniform draw is
+routinely positive-starved — and the resulting budget curve measures the luck of the draw
+rather than the value of a label. Groups are ranked by rate and drawn so the subset spans the
+full range: K contiguous strata when ``nested=False``, and a breadth-first bisection of the
+ranking when nested, which gives the same spread while making every budget a prefix of the
+next.
 
 **Every arm gets the same groups at the same budget.** That is what makes the comparison
 fair; otherwise the gap between two arms partly measures which subjects each of them got.
@@ -105,7 +105,7 @@ def select_groups(
 
 
 def _stratified(order: np.ndarray, budget: int, seed: int) -> list[str]:
-    """FORGE's draw: split the rate-ordered groups into K strata, take one from each."""
+    """Split the rate-ordered groups into K strata and take one from each."""
     rng = np.random.default_rng(seed)
     strata = np.array_split(np.arange(order.size), budget)
     return [str(order[stratum[rng.integers(len(stratum))]]) for stratum in strata]

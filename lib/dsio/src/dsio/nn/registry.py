@@ -1,9 +1,9 @@
 """Registries for the pieces a torch model is assembled from.
 
-One registry per slot in the component chain, rather than one registry of "models". FORGE's
-change-amplification cost was documented and real: adding a pretext task meant touching
-seven places. When each slot is independently registered, a new backbone is one decorator
-and a new loss is one decorator, and neither knows the other exists.
+One registry per slot in the component chain, rather than one registry of "models". A
+single model registry forces every new objective to touch every place that knows how models
+are built. When each slot is independently registered, a new backbone is one decorator and a
+new loss is one decorator, and neither knows the other exists.
 
 Every factory takes keyword arguments only and returns an ``nn.Module``. Keyword-only is
 deliberate — positional arguments in a config file are unreadable six months later, and

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.data import SignalStore, WindowSpec, build_index
+from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index
 from dsio.splits import (
     SplitFile,
     TemporalBounds,
@@ -207,26 +207,34 @@ def test_embargo_fraction_scales_with_the_span(market: SignalStore, index) -> No
 
 def test_generated_temporal_split_resolves(market: SignalStore, index) -> None:
     spec = TemporalSpec(n_splits=3, test_fraction=0.2, label_horizon=20, embargo_fraction=0.02)
-    folds = generate_temporal(market, index, spec, name="wf")
+    folds = generate_temporal(SignalExamples(market, index), spec, name="wf")
     assert len(folds) == 3
 
-    parts = resolve(index, folds[0], store=market)
+    parts = resolve(SignalExamples(market, index), folds[0])
     assert set(parts) == {"train", "test"}
     assert len(parts["train"]) > 0 and len(parts["test"]) > 0
     assert len(parts["train"]) + len(parts["test"]) < len(index)  # the band was discarded
 
 
-def test_temporal_split_needs_the_store_to_resolve(market: SignalStore, index) -> None:
-    folds = generate_temporal(market, index, TemporalSpec(n_splits=1), name="wf")
+def test_a_temporal_split_needs_a_dataset_with_a_clock(market: SignalStore, index) -> None:
+    """Returning None from times() is what makes purged splitting unavailable rather than
+    silently wrong on data that has an order but no meaningful clock."""
+    from dsio.data import TableExamples
     from dsio.splits import SplitError
 
-    with pytest.raises(SplitError, match="need the store"):
-        resolve(index, folds[0])
+    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=1), name="wf")
+    timeless = TableExamples(
+        name=market.path.name,
+        groups=[str(g) for g in index.groups],
+        digest=SignalExamples(market, index).digest,
+    )
+    with pytest.raises(SplitError, match="no time coordinates"):
+        resolve(timeless, folds[0])
 
 
 def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) -> None:
-    folds = generate_temporal(
-        market, index, TemporalSpec(n_splits=2, label_horizon=30, embargo=40), name="wf"
+    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=2,
+        label_horizon=30, embargo=40), name="wf"
     )
     path = tmp_path / "wf0.yaml"
     folds[0].save(path)
@@ -238,8 +246,8 @@ def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) 
 
 
 def test_temporal_header_states_the_rules(market: SignalStore, index) -> None:
-    folds = generate_temporal(
-        market, index, TemporalSpec(n_splits=1, label_horizon=25, embargo=60), name="wf"
+    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=1,
+        label_horizon=25, embargo=60), name="wf"
     )
     header = folds[0].to_yaml()
     assert "# temporal: unit=row, label_horizon=25, embargo=60" in header
@@ -249,10 +257,10 @@ def test_temporal_header_states_the_rules(market: SignalStore, index) -> None:
 def test_temporal_composes_with_a_group_partition(market: SignalStore, index) -> None:
     """Purged walk-forward within a held-out cohort: generalise over symbols AND time."""
     groups = {"train": ["AAPL", "MSFT"], "test": ["NVDA"]}
-    folds = generate_temporal(
-        market, index, TemporalSpec(n_splits=1, test_fraction=0.2), name="wf", groups=groups
+    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=1,
+        test_fraction=0.2), name="wf", groups=groups
     )
-    parts = resolve(index, folds[0], store=market)
+    parts = resolve(SignalExamples(market, index), folds[0])
     assert set(parts["train"].groups.tolist()) <= {"AAPL", "MSFT"}
     assert set(parts["test"].groups.tolist()) <= {"NVDA"}
 

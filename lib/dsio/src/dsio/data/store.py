@@ -1,9 +1,9 @@
 """The canonical signal store: one immutable copy of a corpus.
 
 A corpus is stored **once**, as continuous signal. Windows are produced by an index of
-offsets rather than by copying — see :mod:`dsio.data.views`. FORGE reached 229 GB across 29
-Zarr stores because every combination of window length, stride and labelling policy was a
-full physical copy; the same corpus here is one store plus a few megabytes of index per
+offsets rather than by copying — see :mod:`dsio.data.views`. Making every combination of
+window length, stride and labelling policy a full physical copy is how a store reaches
+hundreds of gigabytes; the same corpus here is one store plus a few megabytes of index per
 configuration.
 
 Layout::

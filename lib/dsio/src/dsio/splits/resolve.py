@@ -1,87 +1,74 @@
-"""Apply a split file to a window index.
+"""Apply a split file to a dataset.
 
-Splits are resolved **on the fly** against the memory-mapped store: one corpus, one small
-YAML of group IDs, and a boolean mask per part. Nothing is copied, so a fold costs a mask
-rather than a dataset.
+Splits are resolved **on the fly**: one dataset, one small YAML of group ids, and a boolean
+mask per part. Nothing is copied, so a fold costs a mask rather than a dataset.
 
-Why row-level overlap does not need checking at resolve time — the property is structural
-rather than incidental, and it is worth stating because it is the whole reason this design
-is safe:
+Disjointness is structural rather than incidental, which is the whole reason the design is
+safe. Every example belongs to exactly one group, and split parts are mutually disjoint over
+groups, so no example can appear in two parts.
 
-1. A window never crosses an entity boundary (:meth:`SignalStore.read` refuses).
-2. Every entity belongs to exactly one group (the store's ``Entity.group``).
-3. Split parts are mutually disjoint over groups (:class:`SplitFile` validates it).
-
-Therefore no raw row can appear in two parts. :func:`assert_no_row_overlap` verifies the
-conclusion directly for tests and for `dsio splits check`, but the guarantee comes from the
-three invariants, not from a runtime scan — which would be O(windows x length) and
-unaffordable on 42M windows.
+Some modalities carry a second hazard the group check cannot see: examples that overlap in
+an underlying buffer, such as sliding windows over a signal. Those datasets expose
+``covered_rows()`` and :func:`assert_no_row_overlap` proves the stronger property directly.
+It is deliberately not part of the protocol, because for a table or a set of documents there
+is nothing underneath to overlap.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
-from dsio.data.store import SignalStore
-from dsio.data.views import WindowIndex
+from dsio.data.examples import Examples
 from dsio.splits.models import SplitError, SplitFile
 from dsio.splits.temporal import apply as apply_temporal
-from dsio.splits.temporal import window_times
 
 
 def resolve(
-    index: WindowIndex,
+    examples: Examples,
     split: SplitFile,
     *,
-    store: SignalStore | None = None,
     require_total: bool = True,
-) -> dict[str, WindowIndex]:
-    """Split a window index into one sub-index per part.
+) -> dict[str, Examples]:
+    """Divide a dataset into one subset per part.
 
-    ``require_total`` rejects a split that does not account for every group present in the
-    index. Silently dropping windows is how a fold quietly trains on less data than its
-    name claims — but it applies to the *group* partition only. A temporal split
-    deliberately discards the purged and embargoed band, and that is the point of it.
+    ``require_total`` rejects a split that does not account for every group present.
+    Silently dropping examples is how a fold quietly trains on less data than its name
+    claims — but it applies to the *group* partition only. A temporal split deliberately
+    discards the purged and embargoed band, and that is the point of it.
     """
-    masks = resolve_masks(index, split, store=store, require_total=require_total)
-    return {part: index.subset(mask) for part, mask in masks.items()}
+    masks = resolve_masks(examples, split, require_total=require_total)
+    return {part: examples.subset(mask) for part, mask in masks.items()}
 
 
 def resolve_masks(
-    index: WindowIndex,
+    examples: Examples,
     split: SplitFile,
     *,
-    store: SignalStore | None = None,
     require_total: bool = True,
 ) -> dict[str, np.ndarray]:
-    """Boolean mask per part, over the index's windows.
+    """Boolean mask per part, over the dataset's examples.
 
-    The mask form is what the fold loop consumes: :func:`dsio.eval.Fold` wants integer
-    positions into the index, and a sub-index has forgotten where its rows came from.
+    The mask form is what the fold loop consumes: a :class:`~dsio.eval.contract.Fold` wants
+    integer positions, and a subset has forgotten where its examples came from.
     :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
     validation and there is no second code path to keep in step.
     """
-    if store is not None and split.store != store.path.name:
+    if split.store != examples.name:
         raise SplitError(
-            f"split {split.name!r} was built for store {split.store!r}, "
-            f"not {store.path.name!r}"
+            f"split {split.name!r} was built for {split.store!r}, not {examples.name!r}"
         )
-    if store is not None and split.store_manifest_sha256 is not None:
-        actual = store.manifest().signal_sha256
+    if split.store_manifest_sha256 is not None:
+        actual = examples.digest
         if actual != split.store_manifest_sha256:
             raise SplitError(
-                f"split {split.name!r} was computed against store digest "
-                f"{split.store_manifest_sha256[:12]}, but {store.path.name!r} is now "
-                f"{actual[:12]}; regenerate the split or restore the store"
+                f"split {split.name!r} was computed against digest "
+                f"{split.store_manifest_sha256[:12]}, but {examples.name!r} is now "
+                f"{actual[:12]}; regenerate the split or restore the data"
             )
 
-    if split.temporal is not None and store is None:
-        raise SplitError(
-            f"split {split.name!r} has temporal bounds, which need the store to place "
-            "windows in time; pass store="
-        )
-
-    present = set(index.entity_groups)
+    present = {str(g) for g in examples.groups}
     named = split.all_groups
 
     unknown = named - present
@@ -98,16 +85,21 @@ def resolve_masks(
                 f"in the index: {', '.join(sorted(unassigned)[:5])}"
             )
 
-    groups = index.groups
+    groups = np.asarray([str(g) for g in examples.groups])
     parts = set(split.parts) | set(split.temporal.spans if split.temporal else ())
 
     times: tuple[np.ndarray, np.ndarray] | None = None
-    if split.temporal is not None and store is not None:
-        times = window_times(store, index, unit=split.temporal.time_unit)
+    if split.temporal is not None:
+        times = examples.times()
+        if times is None:
+            raise SplitError(
+                f"split {split.name!r} has temporal bounds, but {examples.name!r} has no "
+                "time coordinates to apply them to"
+            )
 
     out: dict[str, np.ndarray] = {}
     for part in sorted(parts):
-        mask = np.ones(len(index), dtype=bool)
+        mask = np.ones(len(examples), dtype=bool)
         # A part named only in `temporal` spans every group; the time bounds alone
         # decide it. That is what makes a purely temporal split expressible.
         if split.parts and part in split.parts:
@@ -118,16 +110,22 @@ def resolve_masks(
     return out
 
 
-def assert_no_row_overlap(parts: dict[str, WindowIndex]) -> None:
-    """Prove no raw row appears in two parts.
+def assert_no_row_overlap(parts: dict[str, Any]) -> None:
+    """Prove no underlying row appears in two parts.
 
-    Expensive by construction — it materialises every covered row — so this belongs in
-    tests and in an explicit check command, not in the training path. The invariants in
-    this module's docstring are what make it redundant at runtime; this function is how we
-    keep verifying that they actually hold.
+    For modalities whose examples overlap in a shared buffer. Expensive by construction — it
+    materialises every covered row — so it belongs in tests and in an explicit check
+    command, not in the training path.
     """
+    for part, subset in parts.items():
+        if not hasattr(subset, "covered_rows"):
+            raise SplitError(
+                f"part {part!r} cannot prove row-level disjointness: its dataset has no "
+                "covered_rows(). This check is specific to modalities whose examples "
+                "overlap in an underlying buffer, such as windowed signal."
+            )
     covered: dict[str, np.ndarray] = {
-        part: index.covered_rows() for part, index in parts.items()
+        part: subset.covered_rows() for part, subset in parts.items()
     }
     names = sorted(covered)
     for i, left in enumerate(names):
@@ -140,13 +138,12 @@ def assert_no_row_overlap(parts: dict[str, WindowIndex]) -> None:
                 )
 
 
-def summarise(parts: dict[str, WindowIndex]) -> dict[str, dict[str, int]]:
-    """Window and group counts per part, for logging into the run record."""
+def summarise(parts: dict[str, Examples]) -> dict[str, dict[str, int]]:
+    """Example and group counts per part, for logging into the run record."""
     return {
         part: {
-            "windows": len(index),
-            "groups": len(set(index.groups.tolist())),
-            "entities": len(set(index.entity_codes.tolist())),
+            "examples": len(subset),
+            "groups": len({str(g) for g in subset.groups}),
         }
-        for part, index in parts.items()
+        for part, subset in parts.items()
     }

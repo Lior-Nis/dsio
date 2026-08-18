@@ -4,11 +4,11 @@
 a completed run whose ``config_hash`` matches it. Nothing else is written and nothing else
 is consulted.
 
-That is a deliberate correction of FORGE's ``.probed_checkpoints`` file, which is the
-standard shape for this and is wrong in a specific way: a sidecar records an *intention* and
-can disagree with what happened. It says "done" for a run that crashed after the line was
-appended, or omits a run that completed before the write. Deriving resume state from the
-ledger means it cannot drift, because the ledger is the same record the result is read from.
+A progress sidecar is the standard shape for this and is wrong in a specific way: it
+records an *intention* and can disagree with what happened. It says "done" for a run that
+crashed after the line was appended, or omits a run that completed before the write. Deriving
+resume state from the ledger means it cannot drift, because the ledger is the same record the
+result is read from.
 
 **A failed cell does not stop the sweep, and is not swallowed either.** It is recorded as a
 failed run — with its traceback in the record — the sweep continues, and the summary reports

@@ -7,8 +7,9 @@ cross-validated masked-reconstruction MSE, which is a number nobody should act o
 
 What it produces instead is an artifact with a pinned reference. The encoder goes into the
 model registry, whose ``ModelRef`` has no way to express "latest", and a downstream run
-names that ref. FORGE's classification checkpoints silently reloaded their MAE encoder from
-a hardcoded path and failed on a fresh clone; there is no path here to hardcode.
+names that ref. A downstream checkpoint that reloads its encoder from a hardcoded path
+fails on a fresh clone and, worse, silently picks up whatever has since been written there;
+neither is expressible when the reference is a name, a version and a digest.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from pydantic import Field, model_validator
 
 from dsio.artifacts.store import ModelRegistry
 from dsio.config.schema import TASKS, TaskConfig
+from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
 from dsio.nn import AUGMENTORS, BACKBONES, LABELS, TRANSFORMS, WindowDataset, make_loader
@@ -127,7 +129,8 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     store = SignalStore(data_root() / task.store)
     row_labels = None if task.labels is None else np.asarray(LABELS.get(task.labels)(store))
     index = load_or_build(store, task.window, labels=row_labels)
-    folds = load_folds(index, fold_paths(task.splits_root, task.split), store=store)
+    examples = SignalExamples(store, index)
+    folds = load_folds(examples, fold_paths(task.splits_root, task.split))
     fold = next((f for f in folds if f.index == task.fold), None)
     if fold is None:
         raise ValueError(f"fold {task.fold} is not in split family {task.split!r}")

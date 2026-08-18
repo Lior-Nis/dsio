@@ -1,4 +1,4 @@
-"""Component chain invariants, including the ones FORGE documented but did not enforce."""
+"""Component chain invariants, including the ones usually documented but not enforced."""
 
 from __future__ import annotations
 
@@ -68,15 +68,15 @@ def test_encode_survives_without_a_head(batch: torch.Tensor) -> None:
         assert module.encode(batch).shape == (4, 8)
 
 
-# --- the enforced improvement over FORGE --------------------------------------------
+# --- enforced, not merely documented ------------------------------------------------
 
 
 def test_augmentation_is_skipped_outside_training(batch: torch.Tensor) -> None:
     """The bug this exists to prevent: augmenting a validation batch.
 
     It makes the metric noisier and irreproducible while looking entirely normal, and
-    nothing in a config file or a loss curve reveals it. FORGE's chain applies whatever is
-    configured whenever it is called.
+    nothing in a config file or a loss curve reveals it. A chain that applies whatever is
+    configured whenever it is called will do exactly this.
     """
     module = tiny_module(augmentor=Jitter(sigma=1.0)).eval()
     with torch.no_grad():
@@ -126,7 +126,7 @@ def test_chain_order_puts_the_transform_after_augmentation(batch: torch.Tensor) 
 
 
 def test_every_stage_shares_one_step_implementation(batch: torch.Tensor) -> None:
-    """FORGE's _common_step, kept: three near-identical methods are three that drift."""
+    """One implementation: three near-identical step methods are three that drift apart."""
     module = tiny_module()
     payload = {"x": batch, "y": torch.tensor([0, 1, 0, 1])}
     for method in (module.training_step, module.validation_step, module.test_step):

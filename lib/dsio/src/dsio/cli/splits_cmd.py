@@ -1,9 +1,9 @@
 """``dsio splits`` — generate, inspect and prove split files.
 
-A split is scientific provenance: a paper has to state which subjects were in test, and
-these YAML files are that statement, diffable and reviewable in git. The commands here are
-deliberately shaped around that — ``make`` writes them, ``show`` reads one without parsing,
-and ``check`` proves the property they exist to guarantee.
+A split is provenance: a result has to state which groups were held out, and these YAML
+files are that statement, diffable and reviewable in git. The commands are shaped around
+that — ``make`` writes them, ``show`` reads one without parsing, and ``check`` proves the
+property they exist to guarantee.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Annotated, Any
 import typer
 
 from dsio.cli.envelope import json_command
-from dsio.data import SignalStore, WindowSpec, build_index
+from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index, entity_examples
 from dsio.splits import (
     SplitFile,
     SplitSpec,
@@ -73,7 +73,7 @@ def make(
         stratify=keys,
         always_train=tuple(always_train or []),
     )
-    paths = write_splits(signal, spec, name=name, root=root)
+    paths = write_splits(entity_examples(signal), spec, name=name, root=root)
     files = [SplitFile.load(path) for path in paths]
     return {
         "store": signal.path.name,
@@ -140,7 +140,7 @@ def make_temporal(
         label_horizon=label_horizon,
         embargo=embargo,
     )
-    paths = write_temporal_splits(signal, index, spec, name=name, root=root)
+    paths = write_temporal_splits(SignalExamples(signal, index), spec, name=name, root=root)
     return {
         "store": signal.path.name,
         "name": name,
@@ -212,11 +212,12 @@ def check(
     splits = [SplitFile.load(path) for path in paths]
 
     # Building the folds is itself the cross-fold disjointness check.
-    folds = folds_from_splits(index, splits, store=signal, require_total=False)
+    examples = SignalExamples(signal, index)
+    folds = folds_from_splits(examples, splits, require_total=False)
 
     per_fold: list[dict[str, Any]] = []
     for split, fold in zip(splits, folds, strict=True):
-        parts = resolve(index, split, store=signal, require_total=False)
+        parts = resolve(examples, split, require_total=False)
         if prove_rows:
             assert_no_row_overlap(parts)
         per_fold.append(

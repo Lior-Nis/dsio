@@ -1,8 +1,8 @@
 """Resumable job matrices and adaptive search, both emitting ordinary Runs.
 
-FORGE orchestrated its sweeps in bash: 70+ shell scripts, including a polling daemon with a
-resume file. Both commands here are content-addressed instead — a cell's identity is the
-sha256 of its resolved config, and the run ledger is the resume state.
+Both commands are content-addressed: a cell's identity is the sha256 of its resolved
+config, and the run ledger is the resume state. That replaces the usual shape for this —
+shell scripts plus a polling daemon with its own progress file.
 """
 
 from dsio.matrix.cells import (

@@ -1,9 +1,9 @@
 """Masking strategies, as their own module.
 
-Masking is separated from the methods that use it because it is the axis FORGE actually
-varied: three of its seven pipelines are the same MAE with a different masking mode. Making
-masking a slot rather than a constructor argument means a fourth mode is a decorator, not a
-fourth pipeline.
+Masking is separated from the methods that use it because it is the axis that actually
+gets varied: several "different" pretraining setups are the same masked autoencoder with a
+different masking mode. Making masking a slot rather than a constructor argument means a new
+mode is a decorator, not a new pipeline.
 
 Every strategy returns a boolean mask that is ``True`` where a position is **hidden**. That
 convention is stated once here and asserted in the tests, because the opposite convention is

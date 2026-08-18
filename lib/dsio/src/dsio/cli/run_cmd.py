@@ -81,7 +81,7 @@ def run(
 def _preflight(config: RunConfig) -> None:
     """Fail before any data is touched if the run cannot possibly execute.
 
-    FORGE's errors surfaced inside ``instantiate()`` after data loading had started, so a
+    Deferred validation surfaces errors after data loading has started, so a
     typo cost a coffee break. Resolving every name up front costs microseconds.
     """
     check(config)

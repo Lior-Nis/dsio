@@ -145,7 +145,7 @@ def test_validation_names_the_cell_that_does_not_resolve() -> None:
 
 
 def test_resume_state_comes_from_the_ledger(ledger: RunLedger) -> None:
-    """Not from a sidecar. FORGE's `.probed_checkpoints` records an intention and can
+    """Not from a sidecar. A progress sidecar records an intention and can
     disagree with what happened; the ledger is the same record the result is read from."""
     assert completed_hashes(ledger) == set()
 

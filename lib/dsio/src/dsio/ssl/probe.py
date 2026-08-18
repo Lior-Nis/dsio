@@ -1,19 +1,16 @@
 """The online probe and representation-quality metrics, as callbacks.
 
-FORGE ran this as infrastructure: ``DownstreamTaskCallback`` shelled out to
-``train_classification.py`` through subprocess/SBATCH behind a ``ThreadPoolExecutor``, and
-``probe_loop.sh`` polled a checkpoint directory every fifteen minutes with a
-``.probed_checkpoints`` resume file. That is a job scheduler written in bash, and its
+The usual shape for this is infrastructure: a callback that submits a downstream training
+job, plus a loop that polls a checkpoint directory and tracks what it has already probed. Its
 failure modes — a silently dead subprocess, a checkpoint probed twice, a probe reporting
-against a checkpoint that has since been overwritten — are invisible from the training run.
+against a checkpoint since overwritten — are all invisible from the training run.
 
 A probe is a linear model on frozen features. It takes a fraction of a second. Making it a
 callback removes the scheduler entirely.
 
 **Why probe during pretraining at all.** The SSL loss is not monotonically related to
 downstream quality; a run whose loss is still falling can already have passed its best
-representation. Without a probe there is no signal to stop on, which is exactly why FORGE
-needed the polling loop in the first place.
+representation. Without a probe there is no signal to stop on.
 """
 
 from __future__ import annotations

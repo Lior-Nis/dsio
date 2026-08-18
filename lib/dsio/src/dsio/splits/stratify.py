@@ -107,16 +107,21 @@ class BalanceReport(DsioModel):
 
 
 def aggregate_to_groups(
-    entities: list[Any], key: StratifyKey
+    groups: Any, values: Any, key: StratifyKey
 ) -> dict[str, float | str]:
-    """Reduce an entity-level attribute to one value per group."""
+    """Reduce a per-example attribute to one value per group.
+
+    Takes two parallel arrays rather than a dataset object, so it works for any
+    :class:`~dsio.data.examples.Examples` — a table's rows, a corpus's windows, a set of
+    agent episodes — without knowing which it was given.
+    """
     collected: dict[str, list[Any]] = defaultdict(list)
-    for entity in entities:
+    for group, value in zip(list(groups), list(values), strict=True):
         # Touch every group so one with no values still appears, and lands in the
         # __missing__ level rather than vanishing from the partition.
-        values_for_group = collected[entity.group]
-        if key.name in entity.attrs:
-            values_for_group.append(entity.attrs[key.name])
+        values_for_group = collected[str(group)]
+        if value is not None and value == value:
+            values_for_group.append(value)
 
     out: dict[str, float | str] = {}
     for group, values in collected.items():
@@ -212,7 +217,7 @@ def _cost(
 
 def stratified_partition(
     groups: list[str],
-    entities: list[Any],
+    examples: Any,
     keys: list[StratifyKey],
     k: int,
     *,
@@ -235,7 +240,7 @@ def stratified_partition(
     warnings: list[str] = []
 
     for key in keys:
-        values = aggregate_to_groups(entities, key)
+        values = aggregate_to_groups(examples.groups, examples.attribute(key.name), key)
         missing = [g for g in groups if g not in values]
         for g in missing:
             values[g] = 0.0 if key.kind == "numeric" else "__missing__"

@@ -1,8 +1,8 @@
 """``dsio data`` — inspect, verify and index canonical stores.
 
-Every listing has a projected form. algua had to retrofit ``--summary`` onto its sweep
-output once full JSON started overwhelming an agent's context; a store with 300 entities
-would do the same, so the projection ships from the start and detail is opt-in.
+Every listing has a projected form. A store with a few hundred entities produces more JSON
+than any caller wants by default, so the projection ships from the start and detail is
+opt-in.
 """
 
 from __future__ import annotations
@@ -119,8 +119,8 @@ def index(
     """Build (or describe) a windowed view over a store.
 
     A window-config change costs seconds and megabytes here rather than hours and tens of
-    gigabytes: the index is offsets, and the signal is never copied. FORGE's 229 GB across
-    29 Zarr stores was one corpus materialised once per (length, stride, policy).
+    gigabytes: the index is offsets, and the signal is never copied. Materialising one
+    corpus per (length, stride, policy) is how a store grows to hundreds of gigabytes.
     """
     signal = SignalStore(store)
     spec = WindowSpec(length=length, stride=stride)

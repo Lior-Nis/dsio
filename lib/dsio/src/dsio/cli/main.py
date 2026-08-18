@@ -1,8 +1,8 @@
 """The composition root.
 
-Sub-apps are mounted here and nowhere else, so no command module imports a sibling. algua
-added the same rule as a linter contract after command modules began reaching into each
-other's private helpers, which is how gating logic drifts apart between subcommands.
+Sub-apps are mounted here and nowhere else, so no command module imports a sibling. The
+rule is a linter contract because command modules that reach into each other's private
+helpers are how gating logic drifts apart between subcommands.
 """
 
 from __future__ import annotations

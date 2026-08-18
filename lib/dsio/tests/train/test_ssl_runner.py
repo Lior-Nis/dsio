@@ -1,4 +1,4 @@
-"""Pretraining and the encoder handoff — the bug FORGE shipped, made unrepresentable."""
+"""Pretraining and the encoder handoff, with the hardcoded-path bug made unrepresentable."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ pytest.importorskip("sklearn")
 
 from dsio.artifacts.store import REGISTRY_ROOT_ENV, ModelRegistry  # noqa: E402
 from dsio.config.schema import RunConfig  # noqa: E402
-from dsio.data import SignalStore, WindowSpec  # noqa: E402
+from dsio.data import SignalStore, WindowSpec, entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV  # noqa: E402
 from dsio.eval import read_report  # noqa: E402
 from dsio.nn import LABELS, labels  # noqa: E402
@@ -37,14 +37,14 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(REGISTRY_ROOT_ENV, str(tmp_path / "models"))
     rng = np.random.default_rng(0)
     with SignalStore.builder(tmp_path / "stores" / "tone", channels=2) as builder:
-        for subject in range(9):
-            positive = subject % 2 == 0
+        for group in range(9):
+            positive = group % 2 == 0
             t = np.arange(1600) / 100.0
             signal = (rng.standard_normal((1600, 2)) * 0.5).astype("float32")
             if positive:
                 signal[:, 0] += (np.sin(2 * np.pi * 5 * t) * 2.0).astype("float32")
             builder.add(
-                f"p{subject}", signal, group=f"p{subject}", attrs={"positive": int(positive)}
+                f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
             )
 
     if "tone" not in LABELS:
@@ -57,7 +57,7 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             return out
 
     write_splits(
-        SignalStore(tmp_path / "stores" / "tone"),
+        entity_examples(SignalStore(tmp_path / "stores" / "tone")),
         SplitSpec(
             scheme="stratified_kfold",
             k=3,
@@ -169,7 +169,7 @@ def test_the_encoder_records_its_lineage(corpus: Path) -> None:
 
 
 def test_the_online_probe_runs_during_pretraining(corpus: Path) -> None:
-    """FORGE shelled out to a subprocess and polled a directory from bash for this."""
+    """The alternative is a subprocess plus a loop polling a directory from outside the run."""
     config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
     _, metrics = run(config, corpus)
     assert "probe_rankme" in metrics
@@ -232,8 +232,7 @@ def test_a_tampered_digest_fails_closed(corpus: Path, pretrained: EncoderRef) ->
 
 def test_there_is_no_way_to_ask_for_latest(pretrained: EncoderRef) -> None:
     """Resolving a moving alias at load time is how a reproduction silently becomes a
-    different experiment. FORGE's checkpoints reached a hardcoded path, which is the same
-    failure with worse ergonomics."""
+    different experiment. A hardcoded path is the same failure with worse ergonomics."""
     assert isinstance(pretrained.version, int)
     with pytest.raises(Exception):
         EncoderRef(name="enc_mae", version="latest", digest=pretrained.digest)  # type: ignore[arg-type]
