@@ -14,6 +14,7 @@ import typer
 
 from dsio.cli.envelope import json_command
 from dsio.data import SignalStore, StageCache, WindowSpec, build_index, load_or_build
+from dsio.data.remote import Transfer, pull, push, status
 from dsio.data.store import SIGNAL_FILE
 from dsio.data.views import index_path
 
@@ -133,6 +134,79 @@ def index(
         "groups": len(set(windows.entity_groups)),
         "path": str(destination),
         "written": build,
+    }
+
+
+@app.command("push")
+@json_command
+def push_cmd(
+    store: Annotated[Path, typer.Argument(help="Path to a store directory.")],
+    remote: Annotated[
+        str | None, typer.Option(help="fsspec URL. Defaults to the committed mapping.")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Report what would transfer, send nothing.")
+    ] = False,
+) -> dict[str, Any]:
+    """Upload a store's payload to its remote, skipping objects already there.
+
+    Verifies locally first. Publishing bytes that do not match the manifest would put a
+    corrupt store behind a digest that promises otherwise, which is worse than failing.
+    """
+    transfers = push(store, remote=remote, dry_run=dry_run)
+    return _transfer_payload(Path(store).name, transfers, dry_run=dry_run)
+
+
+@app.command("pull")
+@json_command
+def pull_cmd(
+    name: Annotated[str, typer.Argument(help="Store name under the data root.")],
+    remote: Annotated[
+        str | None, typer.Option(help="fsspec URL. Defaults to the committed mapping.")
+    ] = None,
+    root: Annotated[Path | None, typer.Option(help="Data root. Defaults to stores/.")] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-fetch even when local bytes already match.")
+    ] = False,
+) -> dict[str, Any]:
+    """Fetch a store's payload using its committed manifest, verifying every object.
+
+    The manifest is the index, so this needs no remote listing and cannot be handed
+    something other than the bytes git already names. Fails closed on a digest mismatch
+    and leaves nothing behind.
+    """
+    transfers = pull(name, remote=remote, root=root, force=force)
+    return _transfer_payload(name, transfers, dry_run=False)
+
+
+@app.command("status")
+@json_command
+def status_cmd(
+    name: Annotated[str, typer.Argument(help="Store name under the data root.")],
+    remote: Annotated[str | None, typer.Option(help="fsspec URL.")] = None,
+    root: Annotated[Path | None, typer.Option(help="Data root. Defaults to stores/.")] = None,
+) -> dict[str, Any]:
+    """Report, per file, whether the bytes are here, on the remote, both or neither."""
+    return status(name, remote=remote, root=root)
+
+
+def _transfer_payload(name: str, transfers: list[Transfer], *, dry_run: bool) -> dict[str, Any]:
+    moved = [item for item in transfers if not item.skipped]
+    return {
+        "store": name,
+        "dry_run": dry_run,
+        "transferred": len(moved),
+        "skipped": len(transfers) - len(moved),
+        "bytes": sum(item.bytes for item in moved),
+        "files": [
+            {
+                "file": item.filename,
+                "digest": item.digest[:16],
+                "bytes": item.bytes,
+                "skipped": item.skipped,
+            }
+            for item in transfers
+        ],
     }
 
 

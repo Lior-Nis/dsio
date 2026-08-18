@@ -24,6 +24,17 @@ from dsio.data.cache import (
 )
 from dsio.data.format import DTypeCode, IndexFormatError, IndexHeader
 from dsio.data.readers import ReadError, SignalReader, open_reader
+from dsio.data.remote import (
+    REMOTE_ENV,
+    RemoteError,
+    RemoteIntegrityError,
+    Transfer,
+    pull,
+    push,
+    resolve_remote,
+    status,
+    write_remotes,
+)
 from dsio.data.store import (
     DATA_ROOT_ENV,
     Entity,
@@ -45,6 +56,7 @@ from dsio.data.views import (
 __all__ = [
     "CACHE_ROOT_ENV",
     "DATA_ROOT_ENV",
+    "REMOTE_ENV",
     "BytesCodec",
     "CacheEntry",
     "CacheError",
@@ -62,12 +74,15 @@ __all__ = [
     "NpzCodec",
     "NumpyCodec",
     "ReadError",
+    "RemoteError",
+    "RemoteIntegrityError",
     "SignalReader",
     "SignalStore",
     "SignalStoreBuilder",
     "StageCache",
     "StoreError",
     "StoreManifest",
+    "Transfer",
     "WindowIndex",
     "WindowSpec",
     "WindowView",
@@ -77,4 +92,9 @@ __all__ = [
     "list_stores",
     "load_or_build",
     "open_reader",
+    "pull",
+    "push",
+    "resolve_remote",
+    "status",
+    "write_remotes",
 ]

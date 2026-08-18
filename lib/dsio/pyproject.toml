@@ -39,6 +39,10 @@ dev = [
     "import-linter>=2.1",
     "types-pyyaml>=6.0",
     "scikit-learn>=1.9",
+    # fsspec is an optional extra for users, but a required dev dependency: the remote
+    # push/pull path must be exercised in CI against a local filesystem, or the fresh-clone
+    # reproduction test is only a claim.
+    "fsspec>=2025.1",
 ]
 
 [tool.ruff]

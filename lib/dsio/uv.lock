@@ -857,6 +857,7 @@ wandb = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fsspec" },
     { name = "import-linter" },
     { name = "mypy" },
     { name = "pytest" },
@@ -891,6 +892,7 @@ provides-extras = ["tabular", "forecast", "torch", "data", "legacy", "search", "
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fsspec", specifier = ">=2025.1" },
     { name = "import-linter", specifier = ">=2.1" },
     { name = "mypy", specifier = ">=1.14" },
     { name = "pytest", specifier = ">=8.3" },

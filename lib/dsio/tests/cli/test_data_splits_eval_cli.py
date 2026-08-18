@@ -119,6 +119,61 @@ def test_data_index_dry_run_writes_nothing(workdir: Path) -> None:
     assert not (workdir / payload["path"]).exists()
 
 
+# --- dsio data push / pull ----------------------------------------------------------
+
+
+def test_push_then_pull_round_trips_through_the_cli(workdir: Path, tmp_path: Path) -> None:
+    """The fresh-clone path, driven the way a user or an agent would drive it."""
+    remote = tmp_path / "remote"
+    remote.mkdir()
+
+    code, payload = dsio(
+        "data", "push", "stores/cohort", "--remote", str(remote), cwd=workdir
+    )
+    assert code == 0 and payload["transferred"] == 3
+
+    clone = tmp_path / "clone"
+    (clone / "stores" / "cohort").mkdir(parents=True)
+    (clone / "stores" / "cohort" / "manifest.yaml").write_bytes(
+        (workdir / "stores" / "cohort" / "manifest.yaml").read_bytes()
+    )
+
+    code, payload = dsio("data", "pull", "cohort", "--remote", str(remote), cwd=clone)
+    assert code == 0 and payload["transferred"] == 3
+
+    code, payload = dsio("data", "verify", "stores/cohort", cwd=clone)
+    assert code == 0 and payload["verified"] is True
+
+
+def test_push_is_idempotent_through_the_cli(workdir: Path, tmp_path: Path) -> None:
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    dsio("data", "push", "stores/cohort", "--remote", str(remote), cwd=workdir)
+    code, payload = dsio("data", "push", "stores/cohort", "--remote", str(remote), cwd=workdir)
+    assert code == 0
+    assert payload["transferred"] == 0 and payload["skipped"] == 3
+    assert payload["bytes"] == 0
+
+
+def test_status_reports_before_and_after_a_push(workdir: Path, tmp_path: Path) -> None:
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    code, payload = dsio("data", "status", "cohort", "--remote", str(remote), cwd=workdir)
+    assert code == 0 and payload["complete"] is True and payload["pushed"] is False
+
+    dsio("data", "push", "stores/cohort", "--remote", str(remote), cwd=workdir)
+    _, payload = dsio("data", "status", "cohort", "--remote", str(remote), cwd=workdir)
+    assert payload["pushed"] is True
+
+
+def test_an_unconfigured_remote_is_its_own_error_code(workdir: Path) -> None:
+    """`remote` rather than `internal`: it is a setup problem with an obvious fix."""
+    code, payload = dsio("data", "status", "cohort", cwd=workdir)
+    assert code == 1
+    assert payload["code"] == "remote"
+    assert payload["retryable"] is False
+
+
 # --- dsio splits --------------------------------------------------------------------
 
 
