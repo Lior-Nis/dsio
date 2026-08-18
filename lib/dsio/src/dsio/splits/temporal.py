@@ -189,6 +189,18 @@ def walk_forward(
     embargo = spec.embargo + spec.embargo_fraction * total
     test_len = spec.test_fraction * total
 
+    # A test span narrower than one window admits nothing: `TimeSpan.contains` keeps only
+    # windows lying *entirely* inside. Without this check the split is structurally valid,
+    # every fold is empty, and the failure surfaces much later as "nothing to score" with
+    # no indication that the window length was the cause.
+    window_len = float(np.max(t_end - t_start)) if t_start.size else 0.0
+    if test_len < window_len:
+        raise TemporalError(
+            f"test_fraction {spec.test_fraction} gives a test span of {test_len:g} "
+            f"{spec.time_unit} units, narrower than one {window_len:g}-unit window, so no "
+            "window fits inside it; raise test_fraction or shorten the window"
+        )
+
     # Space the test spans so the last one ends at the end of the data and the first
     # leaves room for a non-empty training set.
     if spec.n_splits == 1:

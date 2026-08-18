@@ -43,6 +43,24 @@ def resolve(
     name claims — but it applies to the *group* partition only. A temporal split
     deliberately discards the purged and embargoed band, and that is the point of it.
     """
+    masks = resolve_masks(index, split, store=store, require_total=require_total)
+    return {part: index.subset(mask) for part, mask in masks.items()}
+
+
+def resolve_masks(
+    index: WindowIndex,
+    split: SplitFile,
+    *,
+    store: SignalStore | None = None,
+    require_total: bool = True,
+) -> dict[str, np.ndarray]:
+    """Boolean mask per part, over the index's windows.
+
+    The mask form is what the fold loop consumes: :func:`dsio.eval.Fold` wants integer
+    positions into the index, and a sub-index has forgotten where its rows came from.
+    :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
+    validation and there is no second code path to keep in step.
+    """
     if store is not None and split.store != store.path.name:
         raise SplitError(
             f"split {split.name!r} was built for store {split.store!r}, "
@@ -87,7 +105,7 @@ def resolve(
     if split.temporal is not None and store is not None:
         times = window_times(store, index, unit=split.temporal.time_unit)
 
-    out: dict[str, WindowIndex] = {}
+    out: dict[str, np.ndarray] = {}
     for part in sorted(parts):
         mask = np.ones(len(index), dtype=bool)
         # A part named only in `temporal` spans every group; the time bounds alone
@@ -96,7 +114,7 @@ def resolve(
             mask &= np.isin(groups, list(split.parts[part]))
         if split.temporal is not None and times is not None and part in split.temporal.spans:
             mask &= apply_temporal(split.temporal, *times, part=part)
-        out[part] = index.subset(mask)
+        out[part] = mask
     return out
 
 

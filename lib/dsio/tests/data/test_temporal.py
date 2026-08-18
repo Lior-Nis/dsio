@@ -180,6 +180,20 @@ def test_walk_forward_needs_windows(market: SignalStore) -> None:
         walk_forward(np.array([]), np.array([]), TemporalSpec())
 
 
+def test_a_test_span_narrower_than_one_window_is_rejected(market: SignalStore) -> None:
+    """Otherwise every fold is structurally valid and empty.
+
+    `TimeSpan.contains` keeps only windows lying entirely inside the span, so a test span
+    shorter than the window length admits nothing. The split, the files and the fold all
+    look fine; the failure surfaces much later as "nothing to score", pointing at the
+    evaluation rather than at the window length that actually caused it.
+    """
+    index = build_index(market, WindowSpec(length=2000, stride=500))
+    t_start, t_end = window_times(market, index, unit="row")
+    with pytest.raises(TemporalError, match="narrower than one"):
+        walk_forward(t_start, t_end, TemporalSpec(n_splits=3, test_fraction=0.2))
+
+
 def test_embargo_fraction_scales_with_the_span(market: SignalStore, index) -> None:
     t_start, t_end = window_times(market, index, unit="row")
     folds = walk_forward(

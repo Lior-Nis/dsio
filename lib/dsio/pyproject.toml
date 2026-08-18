@@ -102,6 +102,24 @@ source_modules = ["dsio"]
 forbidden_modules = ["project"]
 
 [[tool.importlinter.contracts]]
+# The fold loop and the artifact contract must stay framework- and modality-agnostic.
+# The moment `dsio.eval` can see a WindowIndex or a Run, someone will type one of them
+# into a signature, and the loop stops being usable for tabular, forecast and torch alike.
+# Dependency points the other way: splits builds folds, runners call the loop.
+name = "Evaluation depends on no pipeline layer"
+type = "forbidden"
+source_modules = ["dsio.eval"]
+forbidden_modules = [
+    "dsio.data",
+    "dsio.splits",
+    "dsio.train",
+    "dsio.runs",
+    "dsio.artifacts",
+    "dsio.tracking",
+    "dsio.cli",
+]
+
+[[tool.importlinter.contracts]]
 # CLI command modules must not import each other. algua added this contract after command
 # modules started reaching into each other's private helpers, which is how gating logic
 # drifts apart between subcommands.
