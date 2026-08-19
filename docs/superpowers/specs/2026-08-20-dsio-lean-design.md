@@ -225,30 +225,47 @@ it is baked into a small Dockerfile rather than pip-installed at container start
 ### Backup
 
 MLflow being the source of truth (decision 7) makes backup a correctness concern, not
-hygiene. **Both halves must be captured together:** Postgres holds run metadata and artifact
-*URIs*, while the files live in the `mlartifacts` volume. Restoring the database alone yields
-an index pointing at files that no longer exist.
+hygiene. **Both halves must be captured:** Postgres holds run metadata and artifact *URIs*,
+while the files live in the `mlartifacts` volume. Restoring the database alone yields an
+index pointing at files that no longer exist.
+
+The archive is **push-only and append-only**. Data moves local -> Drive and never back;
+nothing in the system reads from the archive, and restore is a deliberate manual act.
 
 ```bash
-STAMP=$(date -u +%Y%m%dT%H%M%SZ); OUT=/var/backups/mlflow
-docker compose exec -T postgres pg_dump -U mlflow mlflow | gzip > "$OUT/db-$STAMP.sql.gz"
-docker run --rm -v mlartifacts:/a -v "$OUT":/out alpine \
-  tar czf "/out/artifacts-$STAMP.tar.gz" -C /a .
-rclone sync "$OUT" gdrive:dsio-backup --transfers 4
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+
+# DB: small, full dump, timestamped, keep many
+docker compose exec -T postgres pg_dump -U mlflow mlflow \
+  | gzip > /var/backups/mlflow/db-$STAMP.sql.gz
+rclone copy /var/backups/mlflow gdrive:dsio-backup/db
+
+# Artifacts: incremental. MLflow artifacts are immutable once a run finishes,
+# so nothing is ever re-uploaded.
+rclone copy /var/lib/docker/volumes/mlartifacts/_data gdrive:dsio-backup/artifacts
 ```
 
-Nightly, on a systemd timer. `rclone` because there is no official Google Drive client for
-Linux. Google Drive rather than a second local disk because the failure that erases
-everything is machine loss, which a local copy does not survive.
+Nightly, on a systemd timer.
 
-Two constraints on what gets backed up. **Keep `MLFlowLogger(log_model=False)`** — the
-default — so per-epoch checkpoints never enter the artifact store; only *promoted* models
-reach the registry, which is what the clean-tree gate exists for. Without this the 15 GB
-Drive quota fills with checkpoints nobody will reload. And **use an `rclone crypt` remote**
-if the corpus is clinical: subject-identified accelerometer data should not sit unencrypted
-in consumer cloud storage.
+**`rclone copy`, never `rclone sync`.** `sync` makes the destination match the source, so it
+deletes from the archive whatever disappeared locally — which propagates a corrupted or wiped
+volume straight into the backup, at exactly the moment the backup matters. `copy` never
+deletes, and with timestamped dumps the archive is append-only by construction.
 
-Accepted imprecision: `pg_dump` is atomic but the artifact tar is not taken at the same
+**Scope the remote to `drive.file`.** That OAuth scope grants access only to files the
+application itself created, so the one-way property is enforced by the credential rather than
+by discipline, and a mistaken flag cannot reach the rest of the Drive.
+
+Google Drive rather than a second local disk because the failure that erases everything is
+machine loss, which a local copy does not survive. `rclone crypt` if the corpus is clinical:
+subject-identified accelerometer data should not sit unencrypted in consumer cloud storage.
+
+**Keep `MLFlowLogger(log_model=False)`** — the default. Not for quota, but because per-epoch
+checkpoints in the artifact store make the registry meaningless: the clean-tree gate exists
+to mark a model as *kept*, and if every epoch's weights land there anyway, promotion
+distinguishes nothing. Candidates are transient; promoted models are artifacts.
+
+Accepted imprecision: `pg_dump` is atomic, but the artifact copy is not taken at the same
 instant, so a run writing during the backup can straddle the two. At nightly cadence the
 exposure is one in-flight run, which is not worth engineering away.
 
