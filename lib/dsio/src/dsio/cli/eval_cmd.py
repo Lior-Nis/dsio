@@ -15,10 +15,12 @@ from dsio.cli.envelope import json_command
 from dsio.eval import (
     CVReport,
     Outcome,
+    blocks_from_reports,
     compare,
     minimum_detectable_rows,
     read_report,
     sampling_noise,
+    select,
 )
 from dsio.runs import RunLedger
 from dsio.runs.record import ARTIFACTS_DIR
@@ -194,3 +196,66 @@ def _try_load(ledger: RunLedger, run_id: str) -> CVReport | None:
     except (FileNotFoundError, ValueError):
         return None
     return report
+
+
+@app.command("select")
+@json_command
+def select_cmd(
+    metric: Annotated[str, typer.Option(help="Metric to select on.")] = "accuracy",
+    name: Annotated[str | None, typer.Option(help="Only runs with this name.")] = None,
+    alpha: Annotated[float, typer.Option(help="Significance level for the search.")] = 0.05,
+    pbo_threshold: Annotated[
+        float, typer.Option(help="Maximum tolerable probability of overfitting.")
+    ] = 0.25,
+    fold_sd: Annotated[
+        float | None, typer.Option(help="Per-config spread. Defaults to the spread across runs.")
+    ] = None,
+) -> dict[str, Any]:
+    """Judge the best run against the search that produced it.
+
+    A ranking is an ordering; this is what turns one into a claim, or refuses to. Three
+    gates: the winner must beat what luck alone reaches across this many trials, the search
+    must be unlikely enough under the null, and the ranking must transfer out of sample.
+
+    The most useful answer is often the negative one — "a sweep of 200 configurations found
+    nothing that survives the correction" — and a system that cannot say that will always
+    hand back a winner.
+    """
+    ledger = RunLedger()
+    records = ledger.list_runs()
+    if name:
+        records = [record for record in records if record.name == name]
+
+    scores: dict[str, float] = {}
+    reports: dict[str, CVReport] = {}
+    for record in records:
+        report = _try_load(ledger, record.run_id)
+        if report is not None and metric in report.metrics:
+            scores[record.run_id] = report.metrics[metric]
+            reports[record.run_id] = report
+
+    if len(scores) < 2:
+        raise ValueError(
+            f"need at least two runs recording {metric!r} to select between; found "
+            f"{len(scores)}"
+        )
+
+    blocks = blocks_from_reports(reports, metric)
+    usable = blocks if len(blocks) == len(scores) else None
+    result = select(
+        scores,
+        blocks=usable,
+        fold_sd=fold_sd,
+        alpha=alpha,
+        pbo_threshold=pbo_threshold,
+    )
+    payload = result.model_dump(mode="json")
+    payload["metric"] = metric
+    payload["summary"] = result.summary_lines()
+    payload["n_runs"] = len(scores)
+    if usable is None:
+        payload["note"] = (
+            "not every run reports per-fold scores for this metric, so the transfer test "
+            "was skipped and the verdict is provisional"
+        )
+    return payload
