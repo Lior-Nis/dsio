@@ -183,8 +183,7 @@ a digest on save, verify on load, **fail closed on mismatch** (which MLflow does
 `promotion_blockers` for ADR 0003's clean-tree gate.
 
 Accepted risk: the Postgres volume is a single point of failure for experimental history.
-Mitigation, to be set up on day one: scheduled `pg_dump`, and note that artifacts under the
-`mlartifacts` volume survive DB loss — you would lose the index, not the evidence.
+Mitigation is decision 8's backup job, set up on day one rather than after the first loss.
 
 ### 8. Infrastructure: local, two services
 
@@ -211,11 +210,49 @@ services:
 volumes: {pgdata: , mlartifacts: }
 ```
 
-Postgres rather than SQLite because decision 6 makes concurrent fold processes normal, and
-SQLite is single-writer. Named volumes rather than bind mounts, so artifacts never land in
-the source tree. The official `ghcr.io/mlflow/mlflow` image ships without `psycopg2`
-(mlflow#9513), so it is baked into a small Dockerfile rather than pip-installed at container
-start.
+MLflow runs as a daemon on port 5000 and is the only thing training talks to. The backend
+store is invisible from the training side — `MLFlowLogger(tracking_uri="http://localhost:5000")`
+is the entire integration, metrics stream from `self.log(...)` automatically, and
+`logger.experiment` is an `MlflowClient` for artifacts.
+
+Postgres rather than SQLite: decision 6 makes concurrent runs normal, and the intended
+workload is **multiple agents launching experiments in parallel**, not one person running
+folds in sequence. SQLite is single-writer and the MLflow server's own gunicorn workers
+contend on it. Named volumes rather than bind mounts, so artifacts never land in the source
+tree. The official `ghcr.io/mlflow/mlflow` image ships without `psycopg2` (mlflow#9513), so
+it is baked into a small Dockerfile rather than pip-installed at container start.
+
+### Backup
+
+MLflow being the source of truth (decision 7) makes backup a correctness concern, not
+hygiene. **Both halves must be captured together:** Postgres holds run metadata and artifact
+*URIs*, while the files live in the `mlartifacts` volume. Restoring the database alone yields
+an index pointing at files that no longer exist.
+
+```bash
+STAMP=$(date -u +%Y%m%dT%H%M%SZ); OUT=/var/backups/mlflow
+docker compose exec -T postgres pg_dump -U mlflow mlflow | gzip > "$OUT/db-$STAMP.sql.gz"
+docker run --rm -v mlartifacts:/a -v "$OUT":/out alpine \
+  tar czf "/out/artifacts-$STAMP.tar.gz" -C /a .
+rclone sync "$OUT" gdrive:dsio-backup --transfers 4
+```
+
+Nightly, on a systemd timer. `rclone` because there is no official Google Drive client for
+Linux. Google Drive rather than a second local disk because the failure that erases
+everything is machine loss, which a local copy does not survive.
+
+Two constraints on what gets backed up. **Keep `MLFlowLogger(log_model=False)`** — the
+default — so per-epoch checkpoints never enter the artifact store; only *promoted* models
+reach the registry, which is what the clean-tree gate exists for. Without this the 15 GB
+Drive quota fills with checkpoints nobody will reload. And **use an `rclone crypt` remote**
+if the corpus is clinical: subject-identified accelerometer data should not sit unencrypted
+in consumer cloud storage.
+
+Accepted imprecision: `pg_dump` is atomic but the artifact tar is not taken at the same
+instant, so a run writing during the backup can straddle the two. At nightly cadence the
+exposure is one in-flight run, which is not worth engineering away.
+
+This is infrastructure. It adds no lines to the spine.
 
 **Local GPU note:** the target machine is an RTX 5070 Ti — Blackwell, `sm_120`. torch 2.6 has
 no kernels for it. Floor the pin at **torch ≥ 2.7 with the cu128 index**, or the first local
