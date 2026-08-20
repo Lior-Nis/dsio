@@ -189,6 +189,28 @@ class MaskedMSE(nn.Module):
             )
         return nn.functional.mse_loss(prediction[valid], target[valid])
 
+    def diagnostics(
+        self, prediction: torch.Tensor, target: torch.Tensor, x: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """The copy-vs-learned split: ADR 0011's detector for a model that is copying.
+
+        ``masked_mse`` is exactly what :meth:`forward` scores. ``visible_mse`` needs the
+        true value at every *visible* position, which the sentinel target no longer
+        carries — ``x`` does: masking only zeroes the hidden positions, so every visible
+        one still holds the original signal. If ``visible_mse`` collapses while
+        ``masked_mse`` does not, the model is copying rather than reconstructing.
+
+        Called from :meth:`~dsio.nn.module.DsioModule._common_step`, on the same
+        ``prediction`` that step already computed — no extra forward pass, unlike the
+        first attempt at restoring this diagnostic via a training-batch-end hook.
+        """
+        hidden = ~torch.isnan(target)
+        visible = ~hidden
+        return {
+            "masked_mse": nn.functional.mse_loss(prediction[hidden], target[hidden]),
+            "visible_mse": nn.functional.mse_loss(prediction[visible], x[visible]),
+        }
+
 
 # --- transforms and preprocessors ---------------------------------------------------
 

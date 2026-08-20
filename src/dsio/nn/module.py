@@ -26,6 +26,16 @@ drift apart.
 can be aligned back to the fold that produced them by identity rather than by trusting
 DataLoader ordering. This is the same failure class the fold loop refuses — an off-by-one
 that scores row *i* against row *j*'s label and looks merely disappointing.
+
+**A loss may report its own diagnostics, from inside the one forward pass this step
+already does.** ``self.loss`` sees only ``(prediction, target)`` by contract — but a loss
+that also implements ``diagnostics(prediction, target, x) -> dict[str, Tensor]`` gets it
+called here and each entry logged under ``{stage}/{name}``. This dispatches on what the
+loss object *is* (``getattr(self.loss, "diagnostics", None)``), the same shape every
+registry in this codebase already uses to add a capability without every caller needing to
+know which concrete type it is talking to — not on which task or method configured it, so
+a loss with nothing to add costs one attribute lookup and a loss with something to add
+costs no second forward pass to get it.
 """
 
 from __future__ import annotations
@@ -114,6 +124,10 @@ class DsioModule(LightningModule):
             on_epoch=True,
             prog_bar=stage == "val",
         )
+        diagnostics = getattr(self.loss, "diagnostics", None)
+        if diagnostics is not None:
+            for name, diagnostic in diagnostics(prediction, target, x).items():
+                self.log(f"{stage}/{name}", diagnostic, batch_size=x.shape[0], on_epoch=True)
         return value
 
     def training_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
