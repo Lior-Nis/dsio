@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from dsio.config.presets import preset
 from dsio.config.schema import RunConfig
-from dsio.train.tabular import TabularTask
 
 
 @preset
@@ -24,6 +23,12 @@ def spine_baseline(
     seed: int = 42,
 ) -> RunConfig:
     """Starter baseline. Replace the task with your own once you have data staged."""
+    # Imported here, not at module scope, so that enumerating presets does not pay for
+    # importing a task. Bare `dsio run` lists presets and their parameters by
+    # introspecting signatures; it never constructs a config, so it must not pull in
+    # torch the day a built-in preset uses TorchTask.
+    from dsio.train.tabular import TabularTask
+
     return RunConfig(
         name=f"{dataset}-{estimator}",
         seed=seed,

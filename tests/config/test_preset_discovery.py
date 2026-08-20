@@ -7,6 +7,7 @@ from dsio.config.presets import _BUILTIN_PRESET_MODULES, load_preset_modules
 
 def test_every_builtin_preset_module_is_importable():
     """A stale entry here would rot exactly as a stale runner entry did."""
+    assert _BUILTIN_PRESET_MODULES, "no preset modules declared"
     for name in _BUILTIN_PRESET_MODULES:
         importlib.import_module(name)
 

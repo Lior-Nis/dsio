@@ -75,6 +75,16 @@ def test_bare_run_lists_presets(workdir: Path) -> None:
     assert "presets" in payload
 
 
+def test_a_project_preset_does_not_hide_the_builtin_ones(
+    workdir: Path, preset_env: dict[str, str]
+) -> None:
+    """DSIO_PRESET_MODULES adds to discovery, it does not replace it — a project preset
+    and a built-in preset must both be listed once both are loaded."""
+    code, payload = dsio("run", cwd=workdir, env_extra=preset_env)
+    assert code == 0
+    assert {"spine_baseline", "project_preset"} <= payload["presets"].keys()
+
+
 def test_failure_envelope_carries_a_code(workdir: Path) -> None:
     code, payload = dsio("run", "nope", "--dry-run", cwd=workdir)
     assert code == 1
