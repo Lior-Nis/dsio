@@ -16,6 +16,7 @@ import numpy as np
 
 from dsio.contracts import sha256_of_bytes, short_digest
 from dsio.data.examples import ExamplesError
+from dsio.data.views import window_times
 
 
 class TableExamples:
@@ -180,8 +181,6 @@ class SignalExamples:
         return per_entity[self.index.entity_codes]
 
     def times(self) -> tuple[np.ndarray, np.ndarray] | None:
-        from dsio.splits.temporal import window_times
-
         return window_times(self.store, self.index, unit=self.time_unit)  # type: ignore[arg-type]
 
     def subset(self, mask: np.ndarray) -> SignalExamples:

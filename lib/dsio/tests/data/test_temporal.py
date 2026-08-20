@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index
+from dsio.data import SignalExamples, SignalStore, StoreError, WindowSpec, build_index
 from dsio.splits import (
     SplitFile,
     TemporalBounds,
@@ -66,7 +66,7 @@ def test_epoch_time_requires_the_attributes(tmp_path: Path) -> None:
         builder.add("a", np.zeros((1000, 1), "float32"), group="a")
     store = SignalStore(path)
     idx = build_index(store, WindowSpec(length=100, stride=50))
-    with pytest.raises(TemporalError, match="t_start"):
+    with pytest.raises(StoreError, match="t_start"):
         window_times(store, idx, unit="epoch_s")
 
 

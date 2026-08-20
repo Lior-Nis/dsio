@@ -25,11 +25,15 @@ import numpy as np
 from pydantic import Field, model_validator
 
 from dsio.contracts import DsioModel, short_digest
-from dsio.data.store import SignalStore
+from dsio.data.store import SignalStore, StoreError
 
 VIEWS_DIRNAME = "views"
 
 LabelPolicy = Literal["any", "majority", "ratio", "none"]
+TimeUnit = Literal["row", "epoch_s"]
+
+T_START_ATTR = "t_start"
+SAMPLE_RATE_ATTR = "sample_rate"
 
 
 class WindowSpec(DsioModel):
@@ -202,6 +206,47 @@ class WindowIndex:
             f"length={self.spec.length}, stride={self.spec.stride}, "
             f"groups={len(set(self.entity_groups))})"
         )
+
+
+def window_times(
+    store: SignalStore, index: WindowIndex, *, unit: TimeUnit = "row"
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(t_start, t_end)`` per window in the requested unit.
+
+    ``row`` is the offset *within the window's own entity*, which is the right coordinate
+    when each recording is an independent timeline. Using the global row offset instead
+    would make entity 2's row 1000 look simultaneous with entity 1's row 1000, and a
+    walk-forward cut would slice each recording at a different point in its own history.
+
+    ``epoch_s`` needs ``t_start`` and ``sample_rate`` on each entity, and fails loudly
+    without them rather than silently falling back to row order.
+    """
+    starts = index.starts.astype(np.float64)
+    entity_start = np.array(
+        [store.entity(name).start_row for name in index.entity_names], dtype=np.float64
+    )
+    relative = starts - entity_start[index.entity_codes]
+
+    if unit == "row":
+        return relative, relative + float(index.spec.length)
+
+    t0 = np.empty(len(index.entity_names), dtype=np.float64)
+    rate = np.empty(len(index.entity_names), dtype=np.float64)
+    for i, name in enumerate(index.entity_names):
+        attrs = store.entity(name).attrs
+        if T_START_ATTR not in attrs or SAMPLE_RATE_ATTR not in attrs:
+            raise StoreError(
+                f"entity {name!r} lacks {T_START_ATTR!r}/{SAMPLE_RATE_ATTR!r}, which "
+                f"time_unit='epoch_s' requires; set them at ingest or use time_unit='row'"
+            )
+        t0[i] = float(attrs[T_START_ATTR])
+        rate[i] = float(attrs[SAMPLE_RATE_ATTR])
+        if rate[i] <= 0:
+            raise StoreError(f"entity {name!r} has non-positive {SAMPLE_RATE_ATTR}")
+
+    seconds = relative / rate[index.entity_codes]
+    absolute = t0[index.entity_codes] + seconds
+    return absolute, absolute + float(index.spec.length) / rate[index.entity_codes]
 
 
 def build_index(

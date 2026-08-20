@@ -146,3 +146,12 @@ modules = [
     "dsio.cli.splits_cmd",
     "dsio.cli.eval_cmd",
 ]
+
+[[tool.importlinter.contracts]]
+# data/adapters.py used a function-local import to dodge this cycle. The layer
+# direction is splits -> data, one way; a local import that hides a cycle is a
+# cycle, and the next person to add one will not know it was deliberate.
+name = "The data layer never imports splits"
+type = "forbidden"
+source_modules = ["dsio.data"]
+forbidden_modules = ["dsio.splits"]
