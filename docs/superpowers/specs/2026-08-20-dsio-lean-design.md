@@ -54,7 +54,7 @@ Consequence — every abstraction that existed to be framework-neutral is delete
 | Deleted | Replaced by |
 |---|---|
 | `eval.loop.FitPredict` dispatch | `Trainer` |
-| `eval/metrics.py` implementations | `torchmetrics` |
+| `eval/metrics.py` implementations | evaluated, rejected — kept in numpy; see ADR 0015 |
 | `tracking/` (`ExperimentTracker`, `MultiTracker`, `MlflowTracker`) | Lightning `Logger` / `MLFlowLogger` |
 | most of `runs/seeding.py` | `lightning.seed_everything(seed, workers=True)` |
 
@@ -306,7 +306,7 @@ src/dsio/
   config/          461   RunConfig, @preset, component registries, overrides
   runs/           ~215   provenance stamp, dirty-diff capture, reproduce script, seed record
   artifacts/       ~80   digest on save, fail-closed load, promotion blockers
-  eval/           ~550   single-run artifact contract, torchmetrics registry, verdict
+  eval/           ~550   single-run artifact contract, metric registry, verdict
   data/         ~1,560   DenseStore, lazy views, .bin/.idx format, mmap reader,
                          Examples protocol, skip-if-exists staging
   splits/         ~485   SplitFile, resolve→positions, fold_at, purged walk-forward
@@ -363,7 +363,7 @@ preserves the forbidden-import contract and is the right seam regardless.
 | `splits/generate.py` + `SplitSpec` | 341 | Reimplements sklearn's `GroupKFold`/`StratifiedGroupKFold`/`LeaveOneGroupOut`; generation is an offline script that may depend on anything |
 | `matrix/` | 700 | Decision 6 makes resume free; Optuna/MLflow sweeps handle search externally |
 | `tracking/` | 182 | Lightning `Logger` |
-| `eval/metrics.py` implementations | ~200 | torchmetrics, with a ~60-line name registry kept |
+| `eval/metrics.py` implementations | 0 | Evaluated, not cut: torchmetrics 1.9 cannot hit the 1e-12 scikit-learn pin for classification metrics, and the distributed-reduction rationale doesn't apply to a post-hoc, single-process, numpy-in-numpy-out call path; see ADR 0015 |
 | CLI commands (26 → 1) | ~1,250 | Decision 9 |
 | `__init__.py` façades | ~250 | 41 and 30 re-exported symbols existed for a library you could not edit |
 | `runs/` ledger machinery | ~270 | Decision 7 |

@@ -38,10 +38,35 @@ Every abstraction that existed to be framework-neutral is deleted rather than ma
 | Deleted | Replaced by |
 |---|---|
 | `eval.loop.FitPredict` dispatch | `Trainer` |
-| `eval/metrics.py` implementations | `torchmetrics` |
+| `eval/metrics.py` implementations | evaluated, **rejected** — kept in numpy (see below) |
 | `tracking/` (`ExperimentTracker`, `MultiTracker`, `MlflowTracker`) | Lightning `Logger` / `MLFlowLogger` |
 | most of `runs/seeding.py` | `lightning.seed_everything(seed, workers=True)` |
 | `agents/` | out of scope |
+
+**`eval/metrics.py` was tried and reverted.** Two independent reasons, either sufficient on
+its own:
+
+1. Six of the eight classification metrics (`accuracy`, `balanced_accuracy`, `f1`,
+   `f1_macro`, `precision`, `recall`) cannot reach the 1e-12 scikit-learn parity
+   `tests/eval/test_metrics.py` pins them to through any documented, per-call means in
+   torchmetrics 1.9.0: `torchmetrics/utilities/compute.py`'s `_safe_divide` casts
+   confusion-matrix counts with an unconditional `num.float()`, always producing
+   `float32` regardless of input dtype. The remaining two (`average_precision`,
+   `roc_auc`) lose precision the same way through a different mechanism — a bare Python
+   `1.0` in `_binary_clf_curve` that promotes through torch's process-wide default
+   dtype rather than the input tensor's — and setting that default dtype for the
+   duration of a call is a side effect a metrics module should not impose on whatever
+   else is running in the process. Measured against this file's own test fixtures,
+   `roc_auc` came out ~1.8e-08 off scikit-learn's float64 result — four orders of
+   magnitude past the pin.
+2. The rationale above ("a hand-rolled version gets wrong the first time it sees two
+   GPUs") does not apply to this call path. `METRICS`/`compute()` is reached only from
+   `eval/loop.py`, pooling an `OutOfFold` of plain `np.ndarray`, and from `ssl/probe.py`
+   — both single-process, numpy in and out, computed after training rather than during
+   it. Training-time metric logging is a separate path through Lightning's `self.log`
+   (`nn/module.py`). These metrics never run as accumulated GPU tensors and never
+   reduce across processes, so torchmetrics's distributed-reduction benefit is not
+   available here to justify the precision cost above.
 
 We do **not** adopt `LightningCLI`. It is YAML-config-driven, which ADR 0001 rejects for
 reasons that have not changed: structure belongs in Python, and YAML is a recorded output of

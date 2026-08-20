@@ -1,5 +1,11 @@
 """Metrics, implemented in numpy and registered by name.
 
+torchmetrics was tried here and reverted (ADR 0015): its classification functionals cast
+confusion-matrix counts to float32 internally, which cannot meet the 1e-12 scikit-learn
+pin below, and this file's calls are post-hoc and single-process, so torchmetrics's
+distributed-reduction benefit was never available to pay for that precision loss. Don't
+redo the experiment without reading that ADR first.
+
 Two reasons these are not simply re-exported from scikit-learn.
 
 **Dependency.** sklearn is an optional extra. If the metric path needed it, the fixed
