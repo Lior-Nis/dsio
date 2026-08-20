@@ -131,15 +131,6 @@ type = "independence"
 modules = ["dsio.config", "dsio.runs", "dsio.artifacts"]
 
 [[tool.importlinter.contracts]]
-# The spine must never depend on a specific project. In the workspace layout this is
-# also enforced by packaging — dsio does not declare the project as a dependency — but
-# the contract catches an accidental import before it reaches a lockfile.
-name = "dsio never imports project code"
-type = "forbidden"
-source_modules = ["dsio"]
-forbidden_modules = ["project"]
-
-[[tool.importlinter.contracts]]
 # The fold loop and the artifact contract must stay framework- and modality-agnostic.
 # The moment `dsio.eval` can see a WindowIndex or a Run, someone will type one of them
 # into a signature, and the loop stops being usable for tabular, forecast and torch alike.

@@ -3,7 +3,9 @@
 Status: accepted (2026-08-20)
 Supersedes: the Copier-template distribution model described in `copier.yml` and the root
 README.
-Implemented: no. This is Plan 2.
+Implemented: yes, by Plan 2a. The `project → dsio` direction is now enforced by nothing —
+there is one package, so the direction this ADR described no longer has two sides, and the
+import-linter contract that stood in for it has been retired.
 
 ## Context
 
