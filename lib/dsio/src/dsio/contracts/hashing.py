@@ -1,7 +1,7 @@
 """Canonical serialization and content hashing.
 
-Every identity in dsio — config hashes, cache keys, job-matrix cell keys, provenance
-digests — routes through :func:`canonical_json`. If two structures serialize to the same
+Every identity in dsio — config hashes, cache keys, provenance digests — routes through
+:func:`canonical_json`. If two structures serialize to the same
 bytes here, they must be the same thing everywhere in the system. That means the encoding
 has to be total and deterministic, with no float ambiguity and no dict-ordering ambiguity.
 """

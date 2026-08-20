@@ -16,7 +16,6 @@ _BUILTIN_RUNNER_MODULES = (
     "dsio.train.tabular",
     "dsio.train.torch_task",
     "dsio.train.ssl_task",
-    "dsio.agents.task",
 )
 
 

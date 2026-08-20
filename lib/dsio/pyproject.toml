@@ -129,7 +129,6 @@ forbidden_modules = [
     "dsio.train",
     "dsio.runs",
     "dsio.artifacts",
-    "dsio.tracking",
     "dsio.cli",
 ]
 

@@ -11,10 +11,9 @@ separated, what can be balanced across folds, and where they sit in time. Readin
 data is the runner's business, and keeping it out of here is what stops one modality's shape
 from becoming the abstraction.
 
-Structural rather than inherited, matching :class:`~dsio.tracking.base.ExperimentTracker`
-and :class:`~dsio.data.readers.SignalReader`: a project can satisfy it without importing
-anything from dsio, which means a dataset type dsio has never heard of needs no adapter
-registered anywhere.
+Structural rather than inherited, matching :class:`~dsio.data.readers.SignalReader`:
+a project can satisfy it without importing anything from dsio, which means a dataset
+type dsio has never heard of needs no adapter registered anywhere.
 """
 
 from __future__ import annotations
