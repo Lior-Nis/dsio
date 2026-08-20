@@ -54,11 +54,17 @@ torch = [{ index = "pytorch-cpu" }]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-# ADR proof-of-concept scripts are historical documentation, not shipped code, and
-# were never in scope when the spine lived at lib/dsio (ruff ran from that directory
-# and never reached docs/). Running from the repository root would otherwise sweep
-# them in for the first time.
-extend-exclude = ["docs"]
+# docs/adr/*.py are frozen benchmark evidence committed alongside an ADR: each is a
+# single, never-amended commit, not shipped code under active maintenance. They were
+# invisible to ruff before the move because ruff ran with lib/dsio as its working
+# directory; running from the repository root would otherwise sweep them in for the
+# first time. Scoped to docs/adr specifically so the rest of docs/ (docs/superpowers/
+# and any future subtree) stays linted.
+extend-exclude = ["docs/adr"]
+# Without this, `ruff check docs/adr` (an explicit path argument) would still lint
+# the excluded files — exclude/extend-exclude only apply during directory traversal
+# by default. Force it so the boundary holds no matter how ruff is invoked.
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "BLE", "SIM", "RUF"]
