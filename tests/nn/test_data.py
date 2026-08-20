@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +13,7 @@ torch = pytest.importorskip("torch")
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
-from dsio.nn.data import WindowDataset, make_loader  # noqa: E402
+from dsio.nn.data import WindowDataset, make_loader, train_dataset, val_dataset  # noqa: E402
 from dsio.splits.folds import folds_from_splits  # noqa: E402
 from dsio.splits.models import SplitFile  # noqa: E402
 from dsio.ssl.masking import CausalMask  # noqa: E402
@@ -125,16 +126,24 @@ def test_groups_are_reachable_for_leak_checking(store: SignalStore, index) -> No
 # --- pretext masking -------------------------------------------------------------------
 
 
-def test_a_pretext_item_carries_the_masked_signal_and_the_original_target(
+def test_a_pretext_item_carries_the_masked_signal_and_a_sentinel_target(
     store: SignalStore, index
 ) -> None:
-    dataset = WindowDataset(
-        store, index, positions=np.array([7]), mask=CausalMask(ratio=0.5)
-    )
+    """The target is not the untouched window. It is the original value at every position
+    the mask hid, and NaN everywhere it did not -- the continuous analogue of MLM's -100,
+    so a mask-aware loss knows what to score without a batch dict or a subclass."""
+    mask = CausalMask(ratio=0.5)
+    dataset = WindowDataset(store, index, positions=np.array([7]), mask=mask)
     item = dataset[0]
-    original = store.read(int(index.starts[7]), 100).T
-    assert not np.array_equal(item["x"].numpy(), original), "the masked view must differ"
-    assert np.array_equal(item["y"].numpy(), original), "the target is the untouched window"
+    original = torch.from_numpy(store.read(int(index.starts[7]), 100).T).float()
+    hidden = mask(original.unsqueeze(0)).squeeze(0)
+
+    assert not np.array_equal(item["x"].numpy(), original.numpy()), "the masked view must differ"
+    assert torch.isnan(item["y"][:, ~hidden]).all(), "visible positions must be NaN in the target"
+    assert not torch.isnan(item["y"][:, hidden]).any(), "hidden positions must carry a real value"
+    assert torch.equal(item["y"][:, hidden], original[:, hidden]), (
+        "hidden positions must carry the original value, not the masked one"
+    )
 
 
 def test_a_pretext_item_still_carries_its_row(store: SignalStore, index) -> None:
@@ -164,17 +173,39 @@ def test_validation_dataset_is_unmasked_by_construction(store: SignalStore, inde
     a validation dataset does not because it was not, and that is the whole mechanism.
     """
     positions = np.array([3, 8])
-    train_dataset = WindowDataset(store, index, positions=positions, mask=CausalMask(ratio=0.5))
+    masked = WindowDataset(store, index, positions=positions, mask=CausalMask(ratio=0.5))
     # This is what a runner hands validation: the same store and index, no mask at all.
-    val_dataset = WindowDataset(store, index, positions=positions)
+    unmasked = WindowDataset(store, index, positions=positions)
 
     original = store.read(int(index.starts[3]), 100).T
-    assert np.array_equal(val_dataset[0]["x"].numpy(), original), (
+    assert np.array_equal(unmasked[0]["x"].numpy(), original), (
         "validation must see the untouched window"
     )
-    assert not np.array_equal(train_dataset[0]["x"].numpy(), original), (
+    assert not np.array_equal(masked[0]["x"].numpy(), original), (
         "training must see the masked window"
     )
+
+
+def test_train_dataset_builder_can_mask(store: SignalStore, index) -> None:
+    dataset = train_dataset(store, index, positions=np.array([7]), mask=CausalMask(ratio=0.5))
+    item = dataset[0]
+    original = store.read(int(index.starts[7]), 100).T
+    assert not np.array_equal(item["x"].numpy(), original)
+    assert torch.isnan(item["y"]).any(), "a masked train dataset must emit a sentinel target"
+
+
+def test_val_dataset_builder_has_no_mask_parameter() -> None:
+    """The structural version of "never mask a validation batch": there is no keyword to
+    pass here at all, so the mistake is unrepresentable rather than merely unmade."""
+    assert "mask" not in inspect.signature(val_dataset).parameters
+
+
+def test_val_dataset_builder_is_never_masked(store: SignalStore, index) -> None:
+    dataset = val_dataset(store, index, positions=np.array([7]))
+    item = dataset[0]
+    original = store.read(int(index.starts[7]), 100).T
+    assert np.array_equal(item["x"].numpy(), original)
+    assert "y" not in item, "no labels were supplied, so there is nothing to key under y"
 
 
 # --- loaders -------------------------------------------------------------------------

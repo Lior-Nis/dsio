@@ -7,10 +7,12 @@ Three methods rather than seven, chosen to span the families rather than to be e
 - **VICReg** — redundancy reduction. No negatives at all; collapse is prevented by an
   explicit variance term.
 
-Each is a small object with one method, ``step(module, x) -> (loss, logs)``, so the encoder,
-the augmentations and the training loop are shared and only the objective differs. The
-alternative — one pipeline class per objective — makes adding an objective a change in every
-one of them.
+SimCLR and VICReg are each a small object with one method, ``step(module, x) -> (loss,
+logs)``, so the encoder, the augmentations and the training loop are shared and only the
+objective differs. MAE has moved off that shape: masking now lives on the dataset and the
+loss reads a NaN-sentinel target directly, so the generic ``(prediction, target)`` chain in
+``DsioModule._common_step`` is MAE's whole training step, and ``MaskedReconstruction``
+exists only to build its decoder head.
 
 **Every method logs the diagnostic that reveals its own failure mode**, because in SSL the
 loss does not. A collapsed SimCLR encoder that maps everything to one point has a *low*
@@ -27,7 +29,6 @@ import torch
 from torch import nn
 
 from dsio.config.registry import Registry
-from dsio.ssl.masking import apply_mask
 
 METHODS: Registry[type] = Registry("ssl_method")
 
@@ -37,15 +38,31 @@ def ssl_method(name: str):  # type: ignore[no-untyped-def]
     return METHODS.register(name)
 
 
-class SslMethod(Protocol):
-    """What every pretext objective must provide."""
+class PretextObjective(Protocol):
+    """What every pretext objective must provide, MAE included.
 
-    def step(self, module: Any, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, float]]:
-        """Return the loss and any scalars worth logging alongside it."""
-        ...
+    Narrower than :class:`SslMethod`: MAE builds a head but no longer implements ``step`` —
+    its training step is the generic ``(prediction, target)`` chain, driven by the
+    dataset's mask and a mask-aware loss, not by an objective-specific call. This is the
+    type :class:`~dsio.ssl.module.SslModule` accepts, since it no longer calls ``step`` on
+    anything itself.
+    """
 
     def build_head(self, feature_dim: int, channels: int, length: int) -> nn.Module:
         """The objective's own output layer, which is discarded after pretraining."""
+        ...
+
+
+class SslMethod(PretextObjective, Protocol):
+    """What a *contrastive* pretext objective must provide, on top of a head.
+
+    SimCLR and VICReg still drive their own step: they augment two views of ``x`` and
+    compute a loss no ``(prediction, target)`` pair could express, so they keep the
+    explicit ``step`` call that :class:`~dsio.ssl.module.ContrastiveModule` reaches for.
+    """
+
+    def step(self, module: Any, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, float]]:
+        """Return the loss and any scalars worth logging alongside it."""
         ...
 
 
@@ -53,15 +70,13 @@ class SslMethod(Protocol):
 class MaskedReconstruction:
     """Masked autoencoding: hide part of the signal, predict it from what remains.
 
-    The loss is computed on the **masked positions only**. Averaging over every position
-    lets the model score well by copying the visible input, which it will, because copying
-    is easier than inferring — and the resulting loss curve is indistinguishable from a
-    model that learned something.
+    The mask itself lives on the training dataset now (``WindowDataset(..., mask=...)``),
+    which also writes the NaN sentinel a mask-aware loss needs — see
+    :class:`~dsio.nn.components.MaskedMSE`. That makes ``(x_masked, target)`` exactly the
+    ``(prediction, target)`` shape the generic chain already knows how to consume, so this
+    class no longer implements ``step``; it exists to build the reconstruction head, which
+    is method-specific in a way masking and loss selection are not.
     """
-
-    def __init__(self, mask: Any, norm_target: bool = True) -> None:
-        self.mask = mask
-        self.norm_target = norm_target
 
     def build_head(self, feature_dim: int, channels: int, length: int) -> nn.Module:
         return nn.Sequential(
@@ -70,29 +85,6 @@ class MaskedReconstruction:
             nn.Linear(feature_dim * 2, channels * length),
             nn.Unflatten(-1, (channels, length)),
         )
-
-    def step(self, module: Any, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, float]]:
-        mask = self.mask(x)
-        target = x
-        if self.norm_target:
-            # Per-window normalisation of the target only. Reconstructing raw amplitude
-            # makes the loss dominated by whichever channel happens to have the largest
-            # units, so the model spends its capacity on the loudest sensor.
-            mean = x.mean(dim=-1, keepdim=True)
-            std = x.std(dim=-1, keepdim=True) + 1e-6
-            target = (x - mean) / std
-
-        prediction = module.head(module.encode(apply_mask(x, mask)))
-        hidden = mask.unsqueeze(1).expand_as(target)
-        if not hidden.any():  # pragma: no cover - ratio is validated to be > 0
-            raise ValueError("the mask hid nothing; there is no reconstruction target")
-
-        error = (prediction - target) ** 2
-        loss = error[hidden].mean()
-        with torch.no_grad():
-            visible = error[~hidden].mean()
-        # If visible error collapses while masked error does not, the model is copying.
-        return loss, {"masked_mse": float(loss.detach()), "visible_mse": float(visible)}
 
 
 @ssl_method("simclr")

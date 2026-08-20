@@ -24,8 +24,16 @@ from dsio.ssl.masking import (
     apply_mask,
     mask_strategy,
 )
-from dsio.ssl.methods import METHODS, MaskedReconstruction, SimCLR, SslMethod, VICReg, ssl_method
-from dsio.ssl.module import SslModule
+from dsio.ssl.methods import (
+    METHODS,
+    MaskedReconstruction,
+    PretextObjective,
+    SimCLR,
+    SslMethod,
+    VICReg,
+    ssl_method,
+)
+from dsio.ssl.module import ContrastiveModule, SslModule
 from dsio.ssl.probe import OnlineProbe, RankMeMonitor, embed, rankme
 
 __all__ = [
@@ -34,9 +42,11 @@ __all__ = [
     "BudgetError",
     "BudgetSelection",
     "CausalMask",
+    "ContrastiveModule",
     "MaskedReconstruction",
     "OnlineProbe",
     "PatchMask",
+    "PretextObjective",
     "RandomMask",
     "RankMeMonitor",
     "SimCLR",

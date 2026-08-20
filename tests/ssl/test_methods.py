@@ -1,4 +1,12 @@
-"""Pretext objectives, and the collapse diagnostics that the loss cannot show."""
+"""Pretext objectives, and the collapse diagnostics that the loss cannot show.
+
+MAE is the exception to this file's own title: its step no longer exists, so it has no
+collapse diagnostic to check here any more. Its masking, sentinel and reconstruction-vs-
+copying property live in ``tests/nn/test_data.py`` (the dataset side) and
+``tests/nn/test_components.py`` (``MaskedMSE``, the loss side). What remains here for MAE
+is the one thing those files cannot show on their own: that it trains the *same* backbone,
+through the *same* generic step, as every other method.
+"""
 
 from __future__ import annotations
 
@@ -9,15 +17,16 @@ pytest.importorskip("lightning")
 
 from torch import nn  # noqa: E402
 
-from dsio.nn.components import Conv1dEncoder, Jitter  # noqa: E402
+from dsio.nn.components import Conv1dEncoder, Jitter, MaskedMSE  # noqa: E402
 from dsio.ssl import (  # noqa: E402
     METHODS,
     MaskedReconstruction,
     SimCLR,
     SslModule,
     VICReg,
+    apply_mask,
 )
-from dsio.ssl.masking import PatchMask, SpanMask  # noqa: E402
+from dsio.ssl.masking import SpanMask  # noqa: E402
 
 CHANNELS, LENGTH, DIM = 2, 128, 16
 
@@ -39,55 +48,49 @@ def signal() -> torch.Tensor:
 
 
 # --- MAE ------------------------------------------------------------------------------
+#
+# MAE no longer implements step(): masking moved to the dataset
+# (tests/nn/test_data.py) and the masked-loss property moved to MaskedMSE
+# (tests/nn/test_components.py, including the copy-vs-reconstruct comparison that used to
+# live here as test_mae_scores_only_the_masked_positions). What is left to prove here is
+# that the pieces compose: a masked batch, run through SslModule's inherited (generic)
+# _common_step, actually trains the backbone. norm_target does not survive this move: the
+# mask-aware loss in the ruling this task implements is bare MSE over the sentineled
+# positions, with no per-window target normalisation.
 
 
-def test_mae_produces_a_finite_loss_and_its_diagnostics(signal: torch.Tensor) -> None:
-    method = MaskedReconstruction(mask=SpanMask(0.5, span=16))
-    loss, logs = method.step(module_for(method), signal)
+def _masked_batch(
+    signal: torch.Tensor, ratio: float = 0.5, span: int = 16
+) -> dict[str, torch.Tensor]:
+    """What WindowDataset's masking branch would hand a training loader for this signal."""
+    hidden = SpanMask(ratio, span=span)(signal)
+    x = apply_mask(signal, hidden)
+    target = apply_mask(signal, ~hidden, value=float("nan"))
+    return {"x": x, "y": target, "row": torch.arange(signal.shape[0])}
+
+
+def test_mae_trains_the_backbone_through_the_generic_step(signal: torch.Tensor) -> None:
+    """The property test_every_method_trains_the_same_encoder used to check for MAE via
+    method.step(); MAE now goes through SslModule's inherited _common_step instead, so it
+    needs its own batch-shaped exercise rather than the shared one below."""
+    method = MaskedReconstruction()
+    backbone = Conv1dEncoder(channels=CHANNELS, hidden=8, out_dim=DIM, depth=1)
+    module = SslModule(
+        method=method,
+        backbone=backbone,
+        head=method.build_head(DIM, CHANNELS, LENGTH),
+        loss=MaskedMSE(),
+    )
+    loss = module._common_step(_masked_batch(signal), "train")
     assert torch.isfinite(loss)
-    assert {"masked_mse", "visible_mse"} == set(logs)
+    loss.backward()
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in module.backbone.parameters())
 
 
-def test_mae_scores_only_the_masked_positions(signal: torch.Tensor) -> None:
-    """The failure this prevents: averaging over every position lets the model score well
-    by copying the visible input, which it will, because copying is easier than inferring.
-
-    A predictor that reproduces the target perfectly where it can see it and outputs zero
-    where it cannot must still be penalised.
-    """
-    method = MaskedReconstruction(mask=PatchMask(0.5, patch=16), norm_target=False)
-    module = module_for(method)
-    mask = PatchMask(0.5, patch=16)(signal)
-
-    class Copier(nn.Module):
-        """Perfect on visible positions, useless on hidden ones."""
-
-        def forward(self, _: torch.Tensor) -> torch.Tensor:
-            out = signal.clone()
-            out[mask.unsqueeze(1).expand_as(out)] = 0.0
-            return out
-
-    module.head = Copier()
-    module.encode = lambda x: x  # type: ignore[method-assign]
-    method.mask = lambda x, generator=None: mask  # type: ignore[assignment]
-
-    loss, logs = method.step(module, signal)
-    assert logs["visible_mse"] == pytest.approx(0.0, abs=1e-6)
-    assert loss.item() > 0.1, "copying the visible input must not score well"
-
-
-def test_mae_normalises_the_target_by_default(signal: torch.Tensor) -> None:
-    """Reconstructing raw amplitude makes the loss dominated by the loudest channel, so the
-    model spends its capacity on whichever sensor has the largest units."""
-    loud = signal.clone()
-    loud[:, 0] *= 100.0
-    method = MaskedReconstruction(mask=SpanMask(0.5, span=16), norm_target=True)
-    module = module_for(method)
-    torch.manual_seed(0)
-    quiet_loss, _ = method.step(module, signal)
-    torch.manual_seed(0)
-    loud_loss, _ = method.step(module, loud)
-    assert loud_loss.item() < quiet_loss.item() * 50
+def test_mae_no_longer_implements_step() -> None:
+    """Pinned so a future change doesn't quietly resurrect the old objective-owned loss
+    path this task deleted in favour of the dataset sentinel + MaskedMSE."""
+    assert not hasattr(MaskedReconstruction(), "step")
 
 
 # --- SimCLR ---------------------------------------------------------------------------
@@ -167,15 +170,19 @@ def test_vicreg_needs_more_than_one_sample(signal: torch.Tensor) -> None:
 @pytest.mark.parametrize(
     "method",
     [
-        MaskedReconstruction(mask=SpanMask(0.5, span=16)),
         SimCLR(augment=Jitter(0.2)),
         VICReg(augment=Jitter(0.2)),
     ],
-    ids=["mae", "simclr", "vicreg"],
+    ids=["simclr", "vicreg"],
 )
 def test_every_method_trains_the_same_encoder(method, signal: torch.Tensor) -> None:
     """The property that makes encoders interchangeable downstream: the backbone does not
-    know which objective is training it."""
+    know which objective is training it.
+
+    MAE is covered separately, by test_mae_trains_the_backbone_through_the_generic_step
+    above: it no longer implements step(), so it cannot join a parametrize built around
+    calling method.step() directly.
+    """
     module = module_for(method)
     loss, _ = method.step(module, signal)
     loss.backward()
@@ -185,7 +192,7 @@ def test_every_method_trains_the_same_encoder(method, signal: torch.Tensor) -> N
 @pytest.mark.parametrize(
     "method",
     [
-        MaskedReconstruction(mask=SpanMask(0.5, span=16)),
+        MaskedReconstruction(),
         SimCLR(augment=Jitter(0.2)),
         VICReg(augment=Jitter(0.2)),
     ],

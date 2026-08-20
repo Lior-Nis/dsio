@@ -164,6 +164,32 @@ def mse_loss() -> nn.Module:
     return _MSE()
 
 
+@loss("masked_mse")
+class MaskedMSE(nn.Module):
+    """Reconstruction loss for a target that carries NaN outside masked positions.
+
+    NaN is the continuous analogue of MLM's ``-100``: :class:`~dsio.nn.data.WindowDataset`
+    writes the original value at every position its mask hid and NaN everywhere the model
+    was allowed to see the input, so this is the whole mechanism that keeps a masked
+    autoencoder from winning by copying — a reconstruction that only matches the visible
+    input is never compared against anything there, because there is nothing there to
+    compare against.
+
+    Selecting ``~torch.isnan(target)`` **before** computing ``(prediction - target) ** 2``
+    is required, not stylistic: a NaN that reaches the subtraction produces a NaN error,
+    and ``nan * 0`` is still NaN, so masking after the arithmetic would poison the mean
+    (and the gradient) regardless of which positions were meant to be excluded.
+    """
+
+    def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        valid = ~torch.isnan(target)
+        if not valid.any():
+            raise ValueError(
+                "target has no masked positions to reconstruct; the mask hid nothing"
+            )
+        return nn.functional.mse_loss(prediction[valid], target[valid])
+
+
 # --- transforms and preprocessors ---------------------------------------------------
 
 

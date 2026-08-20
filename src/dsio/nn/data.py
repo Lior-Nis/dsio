@@ -13,11 +13,17 @@ ADR 0005's worker-scaling benchmark before anything depended on it.
 be a stochastic slot the model applied only when ``self.training`` was set — a runtime flag
 that a validation loop could get wrong without anything in a config file revealing it. Here
 it is a constructor argument instead: a dataset built with ``mask=`` always masks, one built
-without it never does, and which dataset a stage gets is a fact settled once when the
-DataModule (or the runner, today) hands loaders to Lightning — not a branch re-evaluated on
-every batch. A masked item still carries the original signal, under whatever key the
-module's loss expects it, so ``(x_masked, x_orig)`` is exactly the ``(prediction, target)``
-shape ``_common_step`` already knows how to consume.
+without it never does, and which dataset a stage gets is a fact settled once when
+``train_dataset``/``val_dataset`` hand loaders to Lightning — not a branch re-evaluated on
+every batch.
+
+**The target carries a NaN sentinel, not the whole original window.** Averaging a
+reconstruction loss over every position — visible ones included — lets a model win by
+copying the visible input, which is indistinguishable from having learned something. NaN is
+the continuous analogue of MLM's ``-100``: a masked item's target holds the true value at
+every position the mask hid, and NaN everywhere it did not, so a mask-aware loss reads
+``(prediction, target)`` and nothing else to know which positions to score — no batch dict,
+no subclass. See :class:`~dsio.nn.components.MaskedMSE`.
 """
 
 from __future__ import annotations
@@ -48,11 +54,14 @@ class WindowDataset(Dataset[dict[str, Any]]):
     so predictions can be realigned by identity rather than by trusting loader ordering.
 
     ``mask``, when given, turns this into a pretext dataset: ``__getitem__`` returns the
-    masked window as ``x`` and the untouched window under ``target_key``, and ``labels`` is
-    ignored (a pretext window has no label to speak of; the target *is* the signal). Without
-    ``mask`` an item is ``(x, label)`` exactly as before. Building a training dataset with a
-    mask and a validation dataset without one is what makes "never mask a validation batch"
-    a fact about which object was constructed, rather than a flag checked at call time.
+    masked window as ``x`` and, under ``target_key``, the original window with every
+    *visible* position replaced by NaN — the sentinel a mask-aware loss selects on before
+    it computes anything, so it never sees a position the model was allowed to look at.
+    ``labels`` is ignored (a pretext window has no label to speak of; the target *is* the
+    signal). Without ``mask`` an item is ``(x, label)`` exactly as before. Building a
+    training dataset with a mask and a validation dataset without one is what makes "never
+    mask a validation batch" a fact about which object was constructed, rather than a flag
+    checked at call time.
     """
 
     def __init__(
@@ -104,12 +113,15 @@ class WindowDataset(Dataset[dict[str, Any]]):
         # folds by this identity, not by trusting the order a DataLoader hands batches back.
         item: dict[str, Any] = {"row": position}
         if self.mask is not None:
-            # One window at a time, so the mask strategy sees a batch of one. The target is
-            # the untouched window, under whatever key the module's loss reads — the same
-            # (prediction, target) shape a supervised step already knows how to consume.
+            # One window at a time, so the mask strategy sees a batch of one. The target
+            # carries the true value at every hidden position and NaN everywhere else —
+            # apply_mask with the mask inverted, since apply_mask fills where its mask is
+            # True and here that is "visible", the opposite of what x's masking used.
             hidden = self.mask(x.unsqueeze(0))
             item["x"] = apply_mask(x.unsqueeze(0), hidden).squeeze(0)
-            item[self.target_key] = x
+            item[self.target_key] = apply_mask(
+                x.unsqueeze(0), ~hidden, value=float("nan")
+            ).squeeze(0)
         else:
             item["x"] = x
             if self.labels is not None:
@@ -121,6 +133,57 @@ class WindowDataset(Dataset[dict[str, Any]]):
     def groups(self) -> np.ndarray:
         """Group per item, for verifying a loader never mixes a split boundary."""
         return self.index.groups[self.positions]
+
+
+def train_dataset(
+    store: SignalStore,
+    index: WindowIndex,
+    positions: np.ndarray | None = None,
+    *,
+    labels: np.ndarray | None = None,
+    channels_first: bool = True,
+    mask: MaskStrategy | None = None,
+    target_key: str = "y",
+) -> WindowDataset:
+    """Build the dataset a training loader gets. The only builder that can mask.
+
+    Paired with :func:`val_dataset`, whose signature has no ``mask`` parameter at all —
+    "never mask a validation batch" is then a fact about which function a caller reached
+    for, not a convention a caller has to remember to uphold by leaving an argument unset.
+    """
+    return WindowDataset(
+        store,
+        index,
+        positions,
+        labels=labels,
+        channels_first=channels_first,
+        mask=mask,
+        target_key=target_key,
+    )
+
+
+def val_dataset(
+    store: SignalStore,
+    index: WindowIndex,
+    positions: np.ndarray | None = None,
+    *,
+    labels: np.ndarray | None = None,
+    channels_first: bool = True,
+    target_key: str = "y",
+) -> WindowDataset:
+    """Build the dataset a validation (or other never-masked) loader gets.
+
+    There is no ``mask=`` keyword to pass here — the mistake this closes is not "someone
+    remembered not to", it is "there was nothing to remember".
+    """
+    return WindowDataset(
+        store,
+        index,
+        positions,
+        labels=labels,
+        channels_first=channels_first,
+        target_key=target_key,
+    )
 
 
 def make_loader(

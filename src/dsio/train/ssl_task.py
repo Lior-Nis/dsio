@@ -27,12 +27,12 @@ from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
-from dsio.nn.data import WindowDataset, make_loader
-from dsio.nn.registry import BACKBONES, LABELS, TRANSFORMS, VIEW_AUGMENTORS
+from dsio.nn.data import MaskStrategy, make_loader, train_dataset, val_dataset
+from dsio.nn.registry import BACKBONES, LABELS, LOSSES, TRANSFORMS, VIEW_AUGMENTORS
 from dsio.splits.folds import fold_paths, load_folds
 from dsio.ssl.masking import MASKS
 from dsio.ssl.methods import METHODS
-from dsio.ssl.module import SslModule
+from dsio.ssl.module import ContrastiveModule, SslModule
 from dsio.ssl.probe import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
 from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional
@@ -108,14 +108,29 @@ def check_ssl(config: RunConfig) -> None:
 
 
 def build_method(task: SslPretrainTask) -> Any:
-    """Assemble the pretext objective, wiring its mask or augmentor into it."""
+    """Assemble the pretext objective, wiring its augmentor into it for contrastive methods.
+
+    A mask, when the task has one, no longer goes into the objective — it drives the
+    *dataset's* masking instead (:func:`build_mask`). Only MAE has ever taken a mask
+    Component, and MAE's objective no longer has anywhere to put one.
+    """
     factory = METHODS.get(task.method.name)
     params = dict(task.method.params)
-    if task.mask is not None:
-        params["mask"] = MASKS.get(task.mask.name)(**task.mask.params)
     if task.augmentor is not None:
         params["augment"] = VIEW_AUGMENTORS.get(task.augmentor.name)(**task.augmentor.params)
     return factory(**params)
+
+
+def build_mask(task: SslPretrainTask) -> MaskStrategy | None:
+    """The training dataset's mask, or ``None`` for a method that has no use for one.
+
+    Contrastive methods build their two views by augmenting ``x``, not by masking it, so
+    their tasks carry no ``mask`` Component and this returns ``None`` — which is exactly
+    what makes their training dataset identical to a validation one.
+    """
+    if task.mask is None:
+        return None
+    return MASKS.get(task.mask.name)(**task.mask.params)
 
 
 @runner("ssl_pretrain")
@@ -137,6 +152,12 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         raise ValueError(f"fold {task.fold} is not in split family {task.split!r}")
 
     method = build_method(task)
+    # Only MAE's training dataset ever masks. Its loss depends on the sentinel that
+    # masking writes into the target; every other method's dataset is identical to a
+    # validation one, because their objective builds its own views from x.
+    is_mae = task.method.name == "mae"
+    mask = build_mask(task) if is_mae else None
+
     factory = BACKBONES.get(task.backbone.name)
     shape = _accepted(factory, {"channels": store.channels, "length": task.window.length})
     backbone = factory(**{**shape, **task.backbone.params})
@@ -144,18 +165,23 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         backbone, store.channels, task.window.length
     )
 
-    module = SslModule(
+    # MAE's training step is the generic (prediction, target) chain, driven by the
+    # dataset's sentinel and a mask-aware loss; SslModule needs no override for it.
+    # Contrastive methods still drive their own step through method.step, so they get
+    # ContrastiveModule and a loss slot that goes unused (see its docstring).
+    module_cls = SslModule if is_mae else ContrastiveModule
+    module = module_cls(
         method=method,
         backbone=backbone,
         head=method.build_head(feature_dim, store.channels, task.window.length),
-        loss=torch.nn.Identity(),  # the objective owns the loss; this slot is unused
+        loss=LOSSES.get("masked_mse")() if is_mae else torch.nn.Identity(),
         transform=_optional(task.transform, TRANSFORMS),
         lr=task.lr,
         weight_decay=task.weight_decay,
     )
 
     train_loader = make_loader(
-        WindowDataset(store, index, fold.train),
+        train_dataset(store, index, fold.train, mask=mask),
         batch_size=task.batch_size,
         shuffle=True,
         num_workers=task.num_workers,
@@ -169,7 +195,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         None
         if validation is None
         else make_loader(
-            WindowDataset(store, index, validation),
+            val_dataset(store, index, validation),
             batch_size=task.batch_size,
             num_workers=task.num_workers,
             seed=config.seed,
@@ -181,14 +207,16 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     probe: OnlineProbe | None = None
     if val_loader is not None and row_labels is not None:
         probe = OnlineProbe(
+            # Embeddings for the probe must come from an unmasked view regardless of the
+            # pretext objective, so this always reaches for val_dataset, never train_dataset.
             make_loader(
-                WindowDataset(store, index, fold.train),
+                val_dataset(store, index, fold.train),
                 batch_size=task.batch_size,
                 num_workers=task.num_workers,
                 seed=config.seed,
             ),
             make_loader(
-                WindowDataset(store, index, fold.test),
+                val_dataset(store, index, fold.test),
                 batch_size=task.batch_size,
                 num_workers=task.num_workers,
                 seed=config.seed,
