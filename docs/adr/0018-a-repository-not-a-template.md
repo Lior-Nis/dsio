@@ -3,7 +3,9 @@
 Status: accepted (2026-08-20)
 Supersedes: the Copier-template distribution model described in `copier.yml` and the root
 README.
-Implemented: no. This is Plan 2.
+Implemented: yes, by Plan 2a. The `project → dsio` direction is now enforced by nothing —
+there is one package, so the direction this ADR described no longer has two sides, and the
+import-linter contract that stood in for it has been retired.
 
 ## Context
 
@@ -46,7 +48,10 @@ there is nothing left to template.
 Projects clone the repository, add their components in the same tree, and pull improvements
 with `git remote add upstream …` followed by `git merge upstream/main`.
 
-The repository runs itself: `uv sync && uv run pytest` is green in a fresh clone.
+The repository runs itself: `uv sync --extra cpu && uv run pytest` is green in a fresh
+clone. An accelerator extra is mandatory, not optional: a bare `uv sync` deliberately
+installs no torch, so a bare `uv run pytest` fails loudly at collection rather than
+silently pulling several gigabytes of CUDA wheel.
 
 ## Consequences
 
@@ -64,6 +69,10 @@ package that becomes a lint rule — an import-linter contract — rather than a
 impossibility. A contract catches the mistake before it lands; packaging made it unthinkable.
 That is a real downgrade, accepted because the alternative is a repository that cannot run its
 own test suite.
+
+(As implemented, this went further than accepted here — see the status line at the top of
+this ADR: the contract was retired rather than kept, because in one package the direction
+has no second side left to enforce.)
 
 The second consequence is social rather than technical. A clone that never adds the upstream
 remote is a fork, and its fixes rot exactly as the original README warned. The template

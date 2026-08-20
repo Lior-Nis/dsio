@@ -1,50 +1,58 @@
 # dsio
 
-A reproducible ML/DL experimentation spine, distributed as a Copier template.
+A reproducible ML/DL experimentation spine.
 
 `dsio` owns the parts every project rebuilds badly: typed configuration, staged data with
 content-addressed caching, leakage-safe splits, a run ledger that makes results
-reconstructible, and evaluation with honest verdicts. It does not
-own your models — those stay idiomatic. A tabular task uses a real scikit-learn
-`Pipeline`, a deep task a real `LightningModule`, forecasting real Nixtla objects. There is
-no universal `Model` wrapper to fight.
+reconstructible, and evaluation with honest verdicts. It does not own your models — those
+stay idiomatic. A tabular task uses a real scikit-learn `Pipeline`, a deep task a real
+`LightningModule`, forecasting real Nixtla objects. There is no universal `Model` wrapper to
+fight.
 
 ## Start a project
 
 ```bash
-uvx copier copy gh:<you>/dsio my-project
+git clone https://github.com/<you>/dsio my-project
 cd my-project
-uv sync
-uv run dsio run
-uv run dsio run <module>_baseline --summary
+git remote rename origin upstream
+uv sync --locked --extra gpu   # or --extra cpu on a machine without an NVIDIA GPU
+uv run dsio run                # lists the presets
+uv run dsio run spine_baseline
 ```
 
+Selecting an extra is mandatory: a bare `uv sync` installs no torch at all, and that is
+deliberate — it fails loudly instead of silently pulling several gigabytes you may not
+want. CI uses `cpu`. `gpu` currently floats on the default PyPI index because that
+platform's default wheel is already CUDA-enabled (`torch 2.13.0+cu130`, `cuda.is_available()
+== True` on an RTX 5070 Ti, next to `2.13.0+cpu` from `cpu`); if that ever stops being true,
+`gpu` needs an explicit CUDA index again.
+
+Add your components under `src/dsio/` — a backbone in `nn/`, a preset in `presets.py`.
 Later, pull spine improvements without losing your work:
 
 ```bash
-copier update && uv sync && uv run pytest
+git fetch upstream && git merge upstream/main
 ```
 
-That last command is why this is a template rather than a repo you fork. A fork can only
-merge; a Copier project records its answers and re-applies template changes on top of your
-local edits — which is the difference between a fix reaching every project and rotting in
-whichever repo it was written.
+That is the whole propagation story. It works because the package name is fixed, so paths
+line up between your clone and upstream and a merge conflicts only in files you both
+edited. The previous Copier template existed to rename the package per project, which is
+precisely what stopped a plain merge from working.
 
 ## Shape
 
-A generated project is a `uv` workspace with two distributions:
+A single `uv` project rooted at one package:
 
 ```
-pyproject.toml         your project — depends on dsio
-src/<module>/          your code: ruff only, tests optional, hack freely
-lib/dsio/              the shared spine: ruff + mypy + import contracts + tests
-tests/                 your tests
-runs/                  the run ledger (gitignored; the records are the source of truth)
-stores/ views/         canonical data and derived indices (manifests committed)
+pyproject.toml    the project
+src/dsio/         the package: config, data, splits, train, eval, runs, cli, presets
+tests/            its test suite
+runs/             the run ledger (gitignored; the records are the source of truth)
+stores/ views/    canonical data and derived indices (manifests committed)
 ```
 
-`project → dsio`, never the reverse. That direction is enforced by packaging: the spine has
-no way to name your project. Treat `lib/dsio/` as read-only and send fixes upstream.
+`docs/adr/0018-a-repository-not-a-template.md` records why this replaced the earlier
+two-distribution Copier layout.
 
 ## Principles
 
@@ -64,14 +72,11 @@ gate sits at model-registry promotion, where it belongs.
 **Correctness is structural.** Leakage walls are import-linter contracts, not review
 conventions.
 
-## Developing the spine
-
-`lib/dsio/` is a standalone installable package with its own test suite:
+## Developing
 
 ```bash
-cd lib/dsio
-uv sync && uv run pytest && uv run ruff check . && uv run mypy && uv run lint-imports
+uv sync --locked --extra cpu
+uv run --extra cpu pytest -q && uv run --extra cpu ruff check . && uv run --extra cpu mypy && uv run --extra cpu lint-imports
 ```
 
-This repository is a template, so it has no root `pyproject.toml` — `pyproject.toml.jinja`
-owns that name. Decisions and their reasons live in `docs/adr/`.
+Decisions and their reasons live in `docs/adr/`.

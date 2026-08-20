@@ -11,18 +11,15 @@ RUN apt-get update \
 WORKDIR /app
 
 # Dependency layer first so source edits do not invalidate the install.
-# Workspace members must be present for the lockfile to resolve.
 COPY pyproject.toml uv.lock README.md ./
-COPY lib/dsio/pyproject.toml lib/dsio/README.md ./lib/dsio/
-RUN uv sync --locked --no-install-project
+RUN uv sync --locked --extra cpu --no-install-project
 
-COPY lib/ ./lib/
 COPY src/ ./src/
-RUN uv sync --locked
+RUN uv sync --locked --extra cpu
 
 ENV DSIO_RUNS_ROOT=/data/runs \
     DSIO_REGISTRY_ROOT=/data/models \
     PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["uv", "run", "dsio"]
+ENTRYPOINT ["uv", "run", "--extra", "cpu", "dsio"]
 CMD ["--help"]

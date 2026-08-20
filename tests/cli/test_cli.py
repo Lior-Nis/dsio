@@ -32,7 +32,7 @@ from dsio.train.tabular import TabularTask
 
 
 @preset
-def spine_baseline(dataset: str = "iris", estimator: str = "logreg") -> RunConfig:
+def project_preset(dataset: str = "iris", estimator: str = "logreg") -> RunConfig:
     return RunConfig(
         name=f"{dataset}-{estimator}",
         task=TabularTask(dataset=dataset, estimator=estimator),
@@ -44,9 +44,10 @@ def spine_baseline(dataset: str = "iris", estimator: str = "logreg") -> RunConfi
 def workdir(tmp_path: Path) -> Path:
     """A scratch directory carrying a preset module the spawned CLI can discover.
 
-    The spine ships no presets of its own, and a subprocess cannot see one registered in
-    conftest. Writing a module here and pointing DSIO_PRESET_MODULES at it exercises the
-    environment-override discovery path as a side effect.
+    dsio ships `spine_baseline` (`dsio.presets`) by default, so a bare subprocess already
+    has a preset to resolve. This fixture writes a *second*, differently-named preset
+    module and points DSIO_PRESET_MODULES at it, to exercise the environment-override
+    discovery path — the way a real project adds presets alongside the built-in ones.
     """
     (tmp_path / "presets_fixture.py").write_text(_FIXTURE_PRESET)
     return tmp_path
@@ -74,6 +75,16 @@ def test_bare_run_lists_presets(workdir: Path) -> None:
     assert "presets" in payload
 
 
+def test_a_project_preset_does_not_hide_the_builtin_ones(
+    workdir: Path, preset_env: dict[str, str]
+) -> None:
+    """DSIO_PRESET_MODULES adds to discovery, it does not replace it — a project preset
+    and a built-in preset must both be listed once both are loaded."""
+    code, payload = dsio("run", cwd=workdir, env_extra=preset_env)
+    assert code == 0
+    assert {"spine_baseline", "project_preset"} <= payload["presets"].keys()
+
+
 def test_failure_envelope_carries_a_code(workdir: Path) -> None:
     code, payload = dsio("run", "nope", "--dry-run", cwd=workdir)
     assert code == 1
@@ -84,7 +95,7 @@ def test_failure_envelope_carries_a_code(workdir: Path) -> None:
 
 def test_bad_override_is_classified(workdir: Path, preset_env: dict[str, str]) -> None:
     code, payload = dsio(
-        "run", "spine_baseline", "task.nope=1", "--dry-run", cwd=workdir, env_extra=preset_env
+        "run", "project_preset", "task.nope=1", "--dry-run", cwd=workdir, env_extra=preset_env
     )
     assert code == 1
     assert payload["code"] == "bad_override"
@@ -101,7 +112,7 @@ def test_usage_error_is_json_not_text(workdir: Path) -> None:
 def test_run_happy_path(workdir: Path, preset_env: dict[str, str]) -> None:
     """``dsio run <preset>`` resolves, executes, and reports metrics."""
     env = {**preset_env, "DSIO_RUNS_ROOT": str(workdir / "runs")}
-    code, run_payload = dsio("run", "spine_baseline", "--summary", cwd=workdir, env_extra=env)
+    code, run_payload = dsio("run", "project_preset", "--summary", cwd=workdir, env_extra=env)
     assert code == 0, run_payload
     assert run_payload["run_id"]
     assert run_payload["metrics"]["accuracy"] > 0.5
@@ -112,9 +123,9 @@ def test_summary_projection_omits_the_config(
 ) -> None:
     """Output projection ships from day one; prior work had to retrofit it."""
     env = {**preset_env, "DSIO_RUNS_ROOT": str(workdir / "runs")}
-    _, full = dsio("run", "spine_baseline", "--dry-run", cwd=workdir, env_extra=env)
+    _, full = dsio("run", "project_preset", "--dry-run", cwd=workdir, env_extra=env)
     _, brief = dsio(
-        "run", "spine_baseline", "--dry-run", "--summary", cwd=workdir, env_extra=env
+        "run", "project_preset", "--dry-run", "--summary", cwd=workdir, env_extra=env
     )
     assert "config" in full
     assert "config" not in brief

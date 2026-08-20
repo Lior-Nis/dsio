@@ -18,16 +18,26 @@ dependencies = [
 [project.optional-dependencies]
 tabular = ["scikit-learn>=1.9", "xgboost>=3.4", "polars>=1.30", "pyarrow>=18"]
 forecast = ["statsforecast>=2.1", "mlforecast>=1.1"]
-torch = ["torch>=2.6", "lightning>=2.5", "torchmetrics>=1.6"]
 data = ["pyarrow>=18"]
 # zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
 legacy = ["zarr>=3.0"]
+# torch ships one wheel per accelerator, and they cannot coexist in a resolution.
+# CI has no GPU and wants the small CPU wheel; a local Blackwell card (sm_120) needs
+# a CUDA build or it fails at model-build time with "no kernel image is available
+# for execution on the device". Declaring both as conflicting extras lets one
+# lockfile serve both: `uv sync --extra cpu` in CI, `uv sync --extra gpu` locally.
+# Both carry the full Lightning stack (not just torch) so that neither extra alone,
+# nor the dev group, leaves a torch-needing import unresolved: a bare `uv run` with
+# no extra selected must fail loudly on a missing import, not silently fall back to
+# downloading a multi-gigabyte default wheel.
+cpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
+gpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
 
-# The spine is developed and tested standalone: `cd lib/dsio && uv sync && uv run pytest`.
-# A generated project pulls it in as a workspace member and brings its own dev group.
+# dsio is one package, developed and tested in place: `uv sync --extra cpu && uv run pytest`.
+# There is no separate generated project and no workspace; this dev group is the only one.
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -36,24 +46,41 @@ dev = [
     "import-linter>=2.1",
     "types-pyyaml>=6.0",
     "scikit-learn>=1.9",
-    # CPU torch: the component chain and the Lightning
-    # runner must run in CI, which has no GPU. A generated project overrides the source
-    # below to get CUDA wheels — uv sources are not propagated to consumers of dsio.
-    "torch>=2.6",
-    "lightning>=2.5",
 ]
+
+# torch and lightning are declared only in the cpu/gpu extras (above), not here.
+# A bare `uv sync` with no extra selected must leave torch and lightning uninstalled,
+# so that a bare `uv run pytest` fails loudly on ModuleNotFoundError instead of
+# silently resolving an unpinned, CUDA-bundled default wheel for the "no extra" fork.
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+# No index is declared for the gpu extra: the default PyPI torch wheel for this
+# platform is already CUDA-enabled (2.13.0+cu130, newer than the pytorch-cu128
+# index's 2.11.0+cu128), so pinning to a specific CUDA index would make the gpu
+# extra resolve an *older* torch than the unpinned default — the wrong direction.
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
+torch = [{ index = "pytorch-cpu", extra = "cpu" }]
 
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+# docs/adr/*.py are frozen benchmark evidence committed alongside an ADR: each is a
+# single, never-amended commit, not shipped code under active maintenance. They were
+# invisible to ruff before the move because ruff ran with lib/dsio as its working
+# directory; running from the repository root would otherwise sweep them in for the
+# first time. Scoped to docs/adr specifically so the rest of docs/ (docs/superpowers/
+# and any future subtree) stays linted.
+extend-exclude = ["docs/adr"]
+# Without this, `ruff check docs/adr` (an explicit path argument) would still lint
+# the excluded files — exclude/extend-exclude only apply during directory traversal
+# by default. Force it so the boundary holds no matter how ruff is invoked.
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "BLE", "SIM", "RUF"]
@@ -72,7 +99,6 @@ packages = ["src/dsio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
 
 # ---------------------------------------------------------------------------
 # The spine is held to a stricter bar than project code. See docs/adr/.
@@ -101,15 +127,6 @@ include_external_packages = true
 name = "Foundation modules import no other dsio module"
 type = "independence"
 modules = ["dsio.config", "dsio.runs", "dsio.artifacts"]
-
-[[tool.importlinter.contracts]]
-# The spine must never depend on a specific project. In the workspace layout this is
-# also enforced by packaging — dsio does not declare the project as a dependency — but
-# the contract catches an accidental import before it reaches a lockfile.
-name = "dsio never imports project code"
-type = "forbidden"
-source_modules = ["dsio"]
-forbidden_modules = ["project"]
 
 [[tool.importlinter.contracts]]
 # The fold loop and the artifact contract must stay framework- and modality-agnostic.
