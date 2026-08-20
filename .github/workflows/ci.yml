@@ -8,6 +8,14 @@ on:
 jobs:
   spine:
     runs-on: ubuntu-latest
+    # The spine is a standalone package at lib/dsio. This repository's root is a
+    # Copier template whose root pyproject is `pyproject.toml.jinja`, so there is no
+    # root project for uv to find — every uv command must run from the package
+    # directory. This mirrors the documented developer workflow exactly:
+    # `cd lib/dsio && uv sync && uv run pytest && uv run ruff check . && uv run mypy`.
+    defaults:
+      run:
+        working-directory: lib/dsio
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,11 +36,10 @@ jobs:
         run: uv run ruff check .
 
       - name: Types
-        run: uv run mypy --config-file lib/dsio/pyproject.toml
+        run: uv run mypy
 
       - name: Import contracts
-        working-directory: lib/dsio
-        run: uv run --project .. lint-imports
+        run: uv run lint-imports
 
   fork-drift:
     # A fork is expected to merge from upstream, not to edit the spine in place.
