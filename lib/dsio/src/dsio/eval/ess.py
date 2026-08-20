@@ -12,8 +12,8 @@ from __future__ import annotations
 import numpy as np
 
 
-class MultiplicityError(ValueError):
-    """Raised when a selection cannot be judged from what was supplied."""
+class EssError(ValueError):
+    """Raised when effective sample size cannot be computed from what was supplied."""
 
 
 def autocorrelation(values: np.ndarray, max_lag: int | None = None) -> np.ndarray:
@@ -21,7 +21,7 @@ def autocorrelation(values: np.ndarray, max_lag: int | None = None) -> np.ndarra
     series = np.asarray(values, dtype=np.float64)
     n = series.size
     if n < 3:
-        raise MultiplicityError("need at least three observations for autocorrelation")
+        raise EssError("need at least three observations for autocorrelation")
     lag_limit = max_lag or min(n // 2, 200)
     centred = series - series.mean()
     denominator = float(np.dot(centred, centred))

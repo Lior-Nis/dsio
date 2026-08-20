@@ -363,7 +363,11 @@ def _derive_labels(labels: np.ndarray, starts: np.ndarray, spec: WindowSpec) -> 
 
 
 class WindowView:
-    """Reads windows on demand. The thing a DataLoader wraps."""
+    """Reads windows on demand: a numpy-level, framework-free view over a store and index.
+
+    Nothing here is torch-aware — no ``Dataset`` base class, no tensor conversion. The
+    torch-facing equivalent, wrapped by ``make_loader``, is :class:`dsio.nn.data.WindowDataset`.
+    """
 
     def __init__(self, store: SignalStore, index: WindowIndex) -> None:
         if index.store_name != store.path.name:

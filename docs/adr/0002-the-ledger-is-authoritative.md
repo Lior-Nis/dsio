@@ -1,6 +1,9 @@
 # 2. The run ledger is authoritative; trackers are sinks
 
 Status: accepted (2026-08-15)
+Superseded (2026-08-20): `tracking/` and its `ExperimentTracker` sinks are deleted, and
+`dsio runs list`/`compare` no longer exist. Plan 3 makes MLflow the source of truth for
+run data, superseding this ADR's core claim that the run ledger is authoritative.
 
 ## Context
 

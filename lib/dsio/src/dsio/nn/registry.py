@@ -39,6 +39,10 @@ AUGMENTORS: Registry[ComponentFactory] = Registry("augmentor")
 PREPROCESSORS: Registry[ComponentFactory] = Registry("preprocessor")
 
 #: Per-row label providers over a store, keyed by name.
+#: Unlike the registries above, this one intentionally ships with no built-in entries —
+#: projects supply their own labels, and ``check_torch`` fails loudly via ``LABELS.get``
+#: when one is missing, so an empty ``LABELS`` is not the same defect as an empty
+#: ``BACKBONES``/``HEADS``/``LOSSES`` (see ``tests/nn/test_registry_bootstrap.py``).
 LABELS: Registry[Callable[..., Any]] = Registry("labels")
 
 

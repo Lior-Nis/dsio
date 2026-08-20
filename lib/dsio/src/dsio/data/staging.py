@@ -11,6 +11,7 @@ complete is worse than a missing one, because the next run reuses it.
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
@@ -42,7 +43,27 @@ def stage(
     try:
         build(partial)
     except Exception as exc:
-        partial.unlink(missing_ok=True)
+        _cleanup_partial(partial)
         raise StagingError(f"stage {name!r} failed to build: {exc}") from exc
     partial.replace(target)
     return target
+
+
+def _cleanup_partial(partial: Path) -> None:
+    """Remove a failed build's leftovers, whether ``build`` left a file or a directory.
+
+    Never raises: a build can fail after creating a directory (e.g. a ``SignalStore``
+    root, the default staging shape), and ``Path.unlink`` on a directory raises
+    ``IsADirectoryError``. Left unguarded, that error would replace the real build
+    error rather than let it propagate, and the half-built directory would survive —
+    unusable forever, since a later retry sees ``target`` still missing, rebuilds into
+    the same ``partial`` path, and the builder's own ``mkdir`` then hits
+    ``FileExistsError``. Cleanup failure must never mask the original build error.
+    """
+    try:
+        if partial.is_dir() and not partial.is_symlink():
+            shutil.rmtree(partial, ignore_errors=True)
+        else:
+            partial.unlink(missing_ok=True)
+    except OSError:
+        pass

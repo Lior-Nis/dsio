@@ -43,3 +43,32 @@ def test_a_failed_build_leaves_nothing_behind(tmp_path: Path):
         out.write_bytes(b"complete")
 
     assert stage("windows", {"length": 500}, good, root=tmp_path).read_bytes() == b"complete"
+
+
+def test_a_failed_directory_build_leaves_nothing_behind(tmp_path: Path):
+    """The default staging shape is a directory (a SignalStore root), not a file.
+
+    A build that creates a directory before raising must still be cleaned up: naive
+    ``Path.unlink`` raises ``IsADirectoryError`` on a directory, which (if unguarded)
+    would replace the real build error and leave the half-built directory stranded —
+    unusable forever, since the next attempt sees the target still missing, rebuilds
+    into the same partial path, and the builder's own ``mkdir`` hits
+    ``FileExistsError``.
+    """
+
+    def build(out: Path) -> None:
+        out.mkdir(parents=True)
+        (out / "data.bin").write_bytes(b"half-written")
+        raise RuntimeError("boom")
+
+    with pytest.raises(StagingError):
+        stage("windows", {"length": 500}, build, root=tmp_path)
+
+    assert list(tmp_path.rglob("*.partial")) == []
+
+    def good(out: Path) -> None:
+        out.mkdir(parents=True)
+        (out / "data.bin").write_bytes(b"complete")
+
+    result = stage("windows", {"length": 500}, good, root=tmp_path)
+    assert (result / "data.bin").read_bytes() == b"complete"

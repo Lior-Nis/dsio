@@ -2,6 +2,9 @@
 
 Status: accepted (2026-08-19)
 Supersedes the plan's "NLP scope" open question.
+Superseded (2026-08-20): `agents/` is deleted. The agentic modality is out of scope
+under the Lightning-only cut; this ADR's reasoning stands as the historical record of
+why it was in scope, not as current architecture.
 
 ## Context
 

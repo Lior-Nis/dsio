@@ -79,9 +79,9 @@ are registered as classes rather than through wrapper functions precisely so the
 is real.
 
 **Committed splits are required, not optional.** The runner resolves `fold_paths` in
-pre-flight and fails with "dsio splits make" rather than generating something unrecorded on
-the fly. Splits are provenance (ADR 0006); a torch run that invents its own has no
-provenance to cite.
+pre-flight and fails with "commit a split file there first" rather than generating
+something unrecorded on the fly. Splits are provenance (ADR 0006); a torch run that
+invents its own has no provenance to cite.
 
 ## What building this surfaced
 

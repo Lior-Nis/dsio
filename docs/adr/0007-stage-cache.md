@@ -2,6 +2,9 @@
 
 Status: accepted (2026-08-17)
 Implements: ADR 0004 items 1, 5, 12 and 13.
+Superseded (2026-08-20): `data/cache.py` is deleted. It is replaced by the ~40-line
+`data/staging.py`, which keeps the "build once, keyed by config" shape but drops the
+pluggable policy-and-codec framework this ADR describes.
 
 ## Context
 

@@ -85,12 +85,3 @@ modality:
     Time series / forecasting (Nixtla): forecast
     Deep learning (torch, Lightning): torch
   default: tabular
-
-tracker:
-  type: str
-  help: Optional tracking sink. The local run ledger is authoritative either way.
-  choices:
-    None — local ledger only: none
-    MLflow: mlflow
-    Weights & Biases: wandb
-  default: none
