@@ -32,8 +32,12 @@ LOSSES: Registry[ComponentFactory] = Registry("loss")
 #: Deterministic signal transforms — resampling, spectrograms, normalisation.
 TRANSFORMS: Registry[ComponentFactory] = Registry("transform")
 
-#: Stochastic augmentations. Applied in training only; see :mod:`dsio.nn.module`.
-AUGMENTORS: Registry[ComponentFactory] = Registry("augmentor")
+#: Stochastic view-builders for a contrastive SSL objective (SimCLR, VICReg), which need
+#: two independently-augmented views of the same window to pull together or push apart.
+#: Not wired into :class:`~dsio.nn.module.DsioModule` — the chain has no stochastic slot,
+#: so nothing here can leak into a validation batch by accident. A pretext objective that
+#: instead needs one masked view (MAE) gets it from the dataset, not from here.
+VIEW_AUGMENTORS: Registry[ComponentFactory] = Registry("view_augmentor")
 
 #: Fitted-on-train preprocessing, kept separate from transforms because it has state.
 PREPROCESSORS: Registry[ComponentFactory] = Registry("preprocessor")
@@ -62,8 +66,8 @@ def transform(name: str) -> Callable[[ComponentFactory], ComponentFactory]:
     return TRANSFORMS.register(name)
 
 
-def augmentor(name: str) -> Callable[[ComponentFactory], ComponentFactory]:
-    return AUGMENTORS.register(name)
+def view_augmentor(name: str) -> Callable[[ComponentFactory], ComponentFactory]:
+    return VIEW_AUGMENTORS.register(name)
 
 
 def preprocessor(name: str) -> Callable[[ComponentFactory], ComponentFactory]:

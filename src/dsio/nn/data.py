@@ -8,10 +8,21 @@ than five datasets — and switching window length costs a new index, not a new 
 The store's reader is keyed by process id and its live handles are dropped on pickling, so
 worker processes reopen their own. That was verified under real DataLoader concurrency in
 ADR 0005's worker-scaling benchmark before anything depended on it.
+
+**The dataset owns the paradigm.** A pretext objective like masked reconstruction used to
+be a stochastic slot the model applied only when ``self.training`` was set — a runtime flag
+that a validation loop could get wrong without anything in a config file revealing it. Here
+it is a constructor argument instead: a dataset built with ``mask=`` always masks, one built
+without it never does, and which dataset a stage gets is a fact settled once when the
+DataModule (or the runner, today) hands loaders to Lightning — not a branch re-evaluated on
+every batch. A masked item still carries the original signal, under whatever key the
+module's loss expects it, so ``(x_masked, x_orig)`` is exactly the ``(prediction, target)``
+shape ``_common_step`` already knows how to consume.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -21,6 +32,12 @@ from torch.utils.data import DataLoader, Dataset
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex
 from dsio.runs.seeding import dataloader_kwargs
+from dsio.ssl.masking import apply_mask
+
+#: What a masking strategy from :mod:`dsio.ssl.masking` looks like from here: called with
+#: one window at a time (a fake batch of one), returning a boolean hide-mask of the same
+#: shape's time axis.
+MaskStrategy = Callable[[torch.Tensor], torch.Tensor]
 
 
 class WindowDataset(Dataset[dict[str, Any]]):
@@ -29,6 +46,13 @@ class WindowDataset(Dataset[dict[str, Any]]):
     ``positions`` are offsets into ``index``, which is what a
     :class:`~dsio.eval.contract.Fold` carries. Each item reports the position it came from
     so predictions can be realigned by identity rather than by trusting loader ordering.
+
+    ``mask``, when given, turns this into a pretext dataset: ``__getitem__`` returns the
+    masked window as ``x`` and the untouched window under ``target_key``, and ``labels`` is
+    ignored (a pretext window has no label to speak of; the target *is* the signal). Without
+    ``mask`` an item is ``(x, label)`` exactly as before. Building a training dataset with a
+    mask and a validation dataset without one is what makes "never mask a validation batch"
+    a fact about which object was constructed, rather than a flag checked at call time.
     """
 
     def __init__(
@@ -39,6 +63,8 @@ class WindowDataset(Dataset[dict[str, Any]]):
         labels: np.ndarray | None = None,
         *,
         channels_first: bool = True,
+        mask: MaskStrategy | None = None,
+        target_key: str = "y",
     ) -> None:
         if index.store_name != store.path.name:
             raise ValueError(
@@ -59,6 +85,8 @@ class WindowDataset(Dataset[dict[str, Any]]):
                 "be aligned with the whole index, not with this fold"
             )
         self.channels_first = channels_first
+        self.mask = mask
+        self.target_key = target_key
 
     def __len__(self) -> int:
         return int(self.positions.size)
@@ -71,13 +99,22 @@ class WindowDataset(Dataset[dict[str, Any]]):
         # is required because the mmap slice is a view, and a view handed to a worker
         # process outlives the read it came from.
         array = np.ascontiguousarray(window.T if self.channels_first else window)
-        item: dict[str, Any] = {
-            "x": torch.from_numpy(array).float(),
-            "row": position,
-        }
-        if self.labels is not None:
-            value = self.labels[position]
-            item["y"] = torch.as_tensor(value)
+        x = torch.from_numpy(array).float()
+        # row is carried regardless of which branch below runs: predictions are aligned to
+        # folds by this identity, not by trusting the order a DataLoader hands batches back.
+        item: dict[str, Any] = {"row": position}
+        if self.mask is not None:
+            # One window at a time, so the mask strategy sees a batch of one. The target is
+            # the untouched window, under whatever key the module's loss reads — the same
+            # (prediction, target) shape a supervised step already knows how to consume.
+            hidden = self.mask(x.unsqueeze(0))
+            item["x"] = apply_mask(x.unsqueeze(0), hidden).squeeze(0)
+            item[self.target_key] = x
+        else:
+            item["x"] = x
+            if self.labels is not None:
+                value = self.labels[position]
+                item["y"] = torch.as_tensor(value)
         return item
 
     @property

@@ -28,7 +28,7 @@ from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
 from dsio.nn.data import WindowDataset, make_loader
-from dsio.nn.registry import AUGMENTORS, BACKBONES, LABELS, TRANSFORMS
+from dsio.nn.registry import BACKBONES, LABELS, TRANSFORMS, VIEW_AUGMENTORS
 from dsio.splits.folds import fold_paths, load_folds
 from dsio.ssl.masking import MASKS
 from dsio.ssl.methods import METHODS
@@ -99,7 +99,7 @@ def check_ssl(config: RunConfig) -> None:
     if task.mask is not None:
         MASKS.get(task.mask.name)
     if task.augmentor is not None:
-        AUGMENTORS.get(task.augmentor.name)
+        VIEW_AUGMENTORS.get(task.augmentor.name)
     if task.transform is not None:
         TRANSFORMS.get(task.transform.name)
     if task.labels is not None:
@@ -114,7 +114,7 @@ def build_method(task: SslPretrainTask) -> Any:
     if task.mask is not None:
         params["mask"] = MASKS.get(task.mask.name)(**task.mask.params)
     if task.augmentor is not None:
-        params["augment"] = AUGMENTORS.get(task.augmentor.name)(**task.augmentor.params)
+        params["augment"] = VIEW_AUGMENTORS.get(task.augmentor.name)(**task.augmentor.params)
     return factory(**params)
 
 

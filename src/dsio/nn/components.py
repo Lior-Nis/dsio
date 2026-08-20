@@ -14,7 +14,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from dsio.nn.registry import augmentor, backbone, head, loss, preprocessor, transform
+from dsio.nn.registry import backbone, head, loss, preprocessor, transform, view_augmentor
 
 
 def _check_3d(x: torch.Tensor, who: str) -> None:
@@ -211,10 +211,10 @@ class FixedStandardize(nn.Module):
         return (x - self.mean) / (self.std + self.eps)
 
 
-# --- augmentors ---------------------------------------------------------------------
+# --- view augmentors (contrastive SSL only; DsioModule has no stochastic slot) ------
 
 
-@augmentor("jitter")
+@view_augmentor("jitter")
 class Jitter(nn.Module):
     """Additive Gaussian noise, scaled per channel by that channel's own spread.
 
@@ -233,7 +233,7 @@ class Jitter(nn.Module):
         return x + torch.randn_like(x) * scale
 
 
-@augmentor("random_scale")
+@view_augmentor("random_scale")
 class RandomScale(nn.Module):
     """Multiply each channel by a random gain, for amplitude-invariant features."""
 
@@ -251,6 +251,6 @@ class RandomScale(nn.Module):
         return x * gain
 
 
-@augmentor("none")
+@view_augmentor("none")
 def no_augmentation() -> nn.Module:
     return nn.Identity()

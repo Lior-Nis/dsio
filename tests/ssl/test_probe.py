@@ -12,7 +12,7 @@ pytest.importorskip("sklearn")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader, Dataset  # noqa: E402
 
-from dsio.nn.components import Conv1dEncoder, CrossEntropy, Jitter  # noqa: E402
+from dsio.nn.components import Conv1dEncoder, CrossEntropy  # noqa: E402
 from dsio.nn.module import DsioModule  # noqa: E402
 from dsio.ssl import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
 
@@ -36,11 +36,17 @@ class Toy(Dataset):
 
 @pytest.fixture
 def module() -> DsioModule:
+    # Dropout stands in for what used to be the augmentor slot: a stochastic component
+    # whose behaviour differs between train() and eval(), which is what the tests below
+    # need to tell "embed() forced eval mode" apart from "embed() did nothing at all".
+    # DsioModule no longer has an augmentor slot of its own — see nn/module.py — so any
+    # source of train/eval-dependent randomness has to live inside a component instead.
     return DsioModule(
-        backbone=Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1),
+        backbone=nn.Sequential(
+            Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1), nn.Dropout(0.5)
+        ),
         head=nn.Linear(8, 2),
         loss=CrossEntropy(threshold=0.5),
-        augmentor=Jitter(0.5),
     )
 
 
@@ -105,7 +111,7 @@ def test_embed_restores_the_training_flag(module: DsioModule, loader: DataLoader
 
 
 def test_embed_runs_the_encoder_in_eval_mode(module: DsioModule, loader: DataLoader) -> None:
-    """Otherwise the augmentor fires and the measurement is of augmented features."""
+    """Otherwise a stochastic component fires and the measurement is not reproducible."""
     module.train()
     first, _ = embed(module, loader)
     second, _ = embed(module, loader)

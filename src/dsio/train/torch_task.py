@@ -43,7 +43,6 @@ from dsio.eval.metrics import METRICS
 from dsio.nn.data import WindowDataset, make_loader
 from dsio.nn.module import DsioModule
 from dsio.nn.registry import (
-    AUGMENTORS,
     BACKBONES,
     HEADS,
     LABELS,
@@ -139,8 +138,6 @@ class TorchTask(TaskConfig):
     loss: Component = Component(name="cross_entropy")
     transform: Component | None = None
     preprocessor: Component | None = None
-    augmentor: Component | None = None
-    spectral_augmentor: Component | None = None
 
     encoder: EncoderRef | None = Field(
         default=None,
@@ -192,8 +189,6 @@ def check_torch(config: RunConfig) -> None:
     for optional, registry in (
         (task.transform, TRANSFORMS),
         (task.preprocessor, PREPROCESSORS),
-        (task.augmentor, AUGMENTORS),
-        (task.spectral_augmentor, AUGMENTORS),
     ):
         if optional is not None:
             registry.get(optional.name)
@@ -233,8 +228,6 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
         loss=LOSSES.get(task.loss.name)(**task.loss.params),
         transform=transform,
         preprocessor=_optional(task.preprocessor, PREPROCESSORS),
-        augmentor=_optional(task.augmentor, AUGMENTORS),
-        spectral_augmentor=_optional(task.spectral_augmentor, AUGMENTORS),
         lr=task.lr,
         weight_decay=task.weight_decay,
     )

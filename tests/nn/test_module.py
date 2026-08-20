@@ -18,7 +18,7 @@ from dsio.nn.components import (  # noqa: E402
     RandomScale,
 )
 from dsio.nn.module import ComponentError, DsioModule  # noqa: E402
-from dsio.nn.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
+from dsio.nn.registry import BACKBONES, HEADS, LOSSES, VIEW_AUGMENTORS  # noqa: E402
 
 
 def tiny_module(**overrides) -> DsioModule:  # type: ignore[no-untyped-def]
@@ -48,7 +48,7 @@ def test_transform_defaults_to_identity_rather_than_none() -> None:
     """One chain shape means forward needs no branch, and no slot can be forgotten."""
     module = tiny_module()
     assert isinstance(module.transform, nn.Identity)
-    assert module.preprocessor is None and module.augmentor is None
+    assert module.preprocessor is None
 
 
 def test_forward_is_encode_plus_head(batch: torch.Tensor) -> None:
@@ -65,38 +65,23 @@ def test_encode_survives_without_a_head(batch: torch.Tensor) -> None:
 
 
 # --- enforced, not merely documented ------------------------------------------------
+#
+# The chain used to carry two train-only stochastic slots (augmentor, spectral_augmentor),
+# skipped unless ``self.training`` — a runtime flag a validation loop could get wrong
+# without anything in a config file revealing it. Those tests
+# (test_augmentation_is_skipped_outside_training,
+# test_augmentation_does_apply_in_training, test_spectral_augmentation_obeys_the_same_rule)
+# covered exactly that skip and are gone along with the slots: there is no longer a
+# stochastic component in the chain for ``self.training`` to gate. The property they
+# guarded — a validation batch is never augmented — now holds structurally instead: a
+# pretext transform like masking lives on the dataset
+# (tests/nn/test_data.py::test_validation_dataset_is_unmasked_by_construction), which has
+# no notion of "training" for a runtime flag to get wrong.
 
 
-def test_augmentation_is_skipped_outside_training(batch: torch.Tensor) -> None:
-    """The bug this exists to prevent: augmenting a validation batch.
-
-    It makes the metric noisier and irreproducible while looking entirely normal, and
-    nothing in a config file or a loss curve reveals it. A chain that applies whatever is
-    configured whenever it is called will do exactly this.
-    """
-    module = tiny_module(augmentor=Jitter(sigma=1.0)).eval()
-    with torch.no_grad():
-        first, second = module.encode(batch), module.encode(batch)
-    assert torch.allclose(first, second), "eval mode must be deterministic"
-
-
-def test_augmentation_does_apply_in_training(batch: torch.Tensor) -> None:
-    """The other half — a skip that always skips would pass the test above trivially."""
-    module = tiny_module(augmentor=Jitter(sigma=1.0)).train()
-    torch.manual_seed(0)
-    first = module.encode(batch)
-    second = module.encode(batch)
-    assert not torch.allclose(first, second)
-
-
-def test_spectral_augmentation_obeys_the_same_rule(batch: torch.Tensor) -> None:
-    module = tiny_module(spectral_augmentor=Jitter(sigma=1.0)).eval()
-    with torch.no_grad():
-        assert torch.allclose(module.encode(batch), module.encode(batch))
-
-
-def test_chain_order_puts_the_transform_after_augmentation(batch: torch.Tensor) -> None:
-    """Augmenting after normalising would undo the normalisation it was measured against."""
+def test_chain_order_puts_the_transform_after_the_preprocessor(batch: torch.Tensor) -> None:
+    """Transforming before preprocessing would compute preprocessing statistics on data
+    that has already been through a domain-specific transform they were not fitted for."""
     seen: list[str] = []
 
     class Recorder(nn.Module):
@@ -110,12 +95,10 @@ def test_chain_order_puts_the_transform_after_augmentation(batch: torch.Tensor) 
 
     module = tiny_module(
         preprocessor=Recorder("preprocessor"),
-        augmentor=Recorder("augmentor"),
         transform=Recorder("transform"),
-        spectral_augmentor=Recorder("spectral"),
     ).train()
     module.encode(batch)
-    assert seen == ["preprocessor", "augmentor", "transform", "spectral"]
+    assert seen == ["preprocessor", "transform"]
 
 
 # --- one step, three stages ---------------------------------------------------------
@@ -198,7 +181,7 @@ def test_registries_expose_the_builtins() -> None:
     assert {"mlp1d", "conv1d"} <= set(BACKBONES.names())
     assert {"linear", "mlp", "identity"} <= set(HEADS.names())
     assert {"cross_entropy", "bce", "mse"} <= set(LOSSES.names())
-    assert {"jitter", "random_scale", "none"} <= set(AUGMENTORS.names())
+    assert {"jitter", "random_scale", "none"} <= set(VIEW_AUGMENTORS.names())
 
 
 def test_an_unknown_component_suggests_a_close_name() -> None:

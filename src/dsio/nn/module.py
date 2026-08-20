@@ -4,15 +4,19 @@ A fixed chain of slots with declared always-present / maybe-present invariants, 
 training paradigm is the same object with different pieces in it.
 
 ```
-x -> preprocessor? -> augmentor? -> transform -> spectral_augmentor? -> backbone -> head
+x -> preprocessor? -> transform -> backbone -> head
 ```
 
 Three changes from the original, each fixing something that cost real time there:
 
-**Augmentation is training-only, enforced rather than documented.** A chain that applies
-whatever is configured whenever it is called will augment during validation, which makes the
-metric noisy *and* irreproducible while looking entirely normal — and it is invisible in a
-config file. The two stochastic slots are skipped unless ``self.training``.
+**No stochastic slot, so nothing here can augment a validation batch.** The chain used to
+carry two train-only slots, skipped unless ``self.training`` — a runtime flag a validation
+loop could get wrong without anything in a config file revealing it. That property now holds
+structurally instead: a pretext transform like masking lives on the *dataset*
+(:class:`~dsio.nn.data.WindowDataset`), so a training dataset built with ``mask=`` and a
+validation dataset built without one is the whole mechanism. There is no flag here to check
+and nothing to get wrong on the model side — ``encode`` runs the same chain regardless of
+``self.training``.
 
 **One step implementation, not three.** ``_common_step(batch, stage)`` removes the
 train/val/test triplication, because the alternative is three near-identical methods that
@@ -55,8 +59,6 @@ class DsioModule(LightningModule):
         loss: nn.Module,
         transform: nn.Module | None = None,
         preprocessor: nn.Module | None = None,
-        augmentor: nn.Module | None = None,
-        spectral_augmentor: nn.Module | None = None,
         lr: float = 1e-3,
         weight_decay: float = 0.0,
         target_key: str = "y",
@@ -71,16 +73,11 @@ class DsioModule(LightningModule):
         self.head = head
         self.loss = loss
         self.preprocessor = preprocessor
-        self.augmentor = augmentor
-        self.spectral_augmentor = spectral_augmentor
 
         self.lr = lr
         self.weight_decay = weight_decay
         self.target_key = target_key
-        self.save_hyperparameters(ignore=[
-            "backbone", "head", "loss", "transform",
-            "preprocessor", "augmentor", "spectral_augmentor",
-        ])
+        self.save_hyperparameters(ignore=["backbone", "head", "loss", "transform", "preprocessor"])
 
     # --- the chain --------------------------------------------------------------
 
@@ -93,14 +90,7 @@ class DsioModule(LightningModule):
         """
         if self.preprocessor is not None:
             x = self.preprocessor(x)
-        # Stochastic slots are skipped outside training. Augmenting a validation batch
-        # produces a metric that is both noisier and unreproducible, and nothing about the
-        # config or the loss curve reveals it.
-        if self.augmentor is not None and self.training:
-            x = self.augmentor(x)
         x = self.transform(x)
-        if self.spectral_augmentor is not None and self.training:
-            x = self.spectral_augmentor(x)
         return self.backbone(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

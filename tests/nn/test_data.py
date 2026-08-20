@@ -15,6 +15,7 @@ from dsio.data.views import WindowSpec, build_index  # noqa: E402
 from dsio.nn.data import WindowDataset, make_loader  # noqa: E402
 from dsio.splits.folds import folds_from_splits  # noqa: E402
 from dsio.splits.models import SplitFile  # noqa: E402
+from dsio.ssl.masking import CausalMask  # noqa: E402
 
 
 @pytest.fixture
@@ -119,6 +120,61 @@ def test_groups_are_reachable_for_leak_checking(store: SignalStore, index) -> No
     train = WindowDataset(store, index, fold.train)
     test = WindowDataset(store, index, fold.test)
     assert not (set(train.groups) & set(test.groups))
+
+
+# --- pretext masking -------------------------------------------------------------------
+
+
+def test_a_pretext_item_carries_the_masked_signal_and_the_original_target(
+    store: SignalStore, index
+) -> None:
+    dataset = WindowDataset(
+        store, index, positions=np.array([7]), mask=CausalMask(ratio=0.5)
+    )
+    item = dataset[0]
+    original = store.read(int(index.starts[7]), 100).T
+    assert not np.array_equal(item["x"].numpy(), original), "the masked view must differ"
+    assert np.array_equal(item["y"].numpy(), original), "the target is the untouched window"
+
+
+def test_a_pretext_item_still_carries_its_row(store: SignalStore, index) -> None:
+    """Row survives either branch: the fold loop aligns by identity, not loader order."""
+    dataset = WindowDataset(
+        store, index, positions=np.array([5, 9, 2]), mask=CausalMask(ratio=0.5)
+    )
+    assert [dataset[i]["row"] for i in range(3)] == [5, 9, 2]
+
+
+def test_a_pretext_target_lands_under_the_configured_key(store: SignalStore, index) -> None:
+    """The target key is already configurable on the module; the dataset just has to use
+    whichever one the module was built with, so no module-side change is needed."""
+    dataset = WindowDataset(
+        store, index, positions=np.array([3]), mask=CausalMask(ratio=0.5), target_key="orig"
+    )
+    item = dataset[0]
+    assert "orig" in item and "y" not in item
+
+
+def test_validation_dataset_is_unmasked_by_construction(store: SignalStore, index) -> None:
+    """The property the model's old ``self.training`` guard used to enforce, now enforced
+    by which dataset a stage is handed rather than by a flag checked on every call.
+
+    A ``WindowDataset`` has no notion of "training" or "eval" at all — there is no runtime
+    branch here to get wrong. A training dataset masks because it was built with ``mask=``;
+    a validation dataset does not because it was not, and that is the whole mechanism.
+    """
+    positions = np.array([3, 8])
+    train_dataset = WindowDataset(store, index, positions=positions, mask=CausalMask(ratio=0.5))
+    # This is what a runner hands validation: the same store and index, no mask at all.
+    val_dataset = WindowDataset(store, index, positions=positions)
+
+    original = store.read(int(index.starts[3]), 100).T
+    assert np.array_equal(val_dataset[0]["x"].numpy(), original), (
+        "validation must see the untouched window"
+    )
+    assert not np.array_equal(train_dataset[0]["x"].numpy(), original), (
+        "training must see the masked window"
+    )
 
 
 # --- loaders -------------------------------------------------------------------------
