@@ -81,7 +81,7 @@ def load_folds(
 
 
 def fold_paths(root: Path | str, name: str) -> list[Path]:
-    """Every fold file written by ``write_splits`` for a split name, in fold order.
+    """Every fold file committed under a split name, in fold order.
 
     Sorted by the fold number parsed from the filename rather than lexically, so ten folds
     do not come back as 0, 1, 10, 2 — an ordering bug that produces a perfectly plausible

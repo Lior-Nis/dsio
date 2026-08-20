@@ -17,7 +17,8 @@ from dsio.data import (  # noqa: E402, entity_examples
     entity_examples,  # noqa: E402
 )
 from dsio.nn import WindowDataset, make_loader  # noqa: E402
-from dsio.splits import SplitSpec, folds_from_splits, generate  # noqa: E402
+from dsio.splits import folds_from_splits  # noqa: E402
+from splitgen import kfold_split_files  # noqa: E402
 
 
 @pytest.fixture
@@ -59,7 +60,7 @@ def test_the_window_matches_a_direct_store_read(store: SignalStore, index) -> No
 
 def test_a_fold_costs_positions_not_a_dataset(store: SignalStore, index) -> None:
     """The payoff of the index layer: five folds are five position arrays, not five copies."""
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     folds = folds_from_splits(SignalExamples(store, index), splits)
     datasets = [WindowDataset(store, index, fold.train) for fold in folds]
     assert all(dataset.store is store for dataset in datasets), "one store, shared"
@@ -96,7 +97,7 @@ def test_a_foreign_index_is_rejected(store: SignalStore, index, tmp_path: Path) 
 
 
 def test_groups_are_reachable_for_leak_checking(store: SignalStore, index) -> None:
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     fold = folds_from_splits(SignalExamples(store, index), splits)[0]
     train = WindowDataset(store, index, fold.train)
     test = WindowDataset(store, index, fold.test)

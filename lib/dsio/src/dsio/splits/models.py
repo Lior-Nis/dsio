@@ -24,64 +24,19 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from pydantic import Field, model_validator
 
-from dsio.contracts import DsioModel, short_digest
+from dsio.contracts import DsioModel
 from dsio.splits.temporal import TemporalBounds
 
 SCHEMA = "dsio.split/1"
 
-Scheme = Literal[
-    "holdout",
-    "kfold",
-    "leave_one_group_out",
-    "explicit",
-]
-
 
 class SplitError(ValueError):
     """Raised when a split is malformed, or contradicts the store it names."""
-
-
-class SplitSpec(DsioModel):
-    """Declarative description of how to generate splits.
-
-    The spec is what you write; the YAML files are what it produces. Generation is
-    reproducible from the spec, and the output is committed so that reading a result never
-    requires re-running the generator.
-    """
-
-    scheme: Scheme
-    group_key: str = Field(
-        default="group",
-        description="Which key is the leakage boundary. 'group' is the store's own.",
-    )
-    k: int = Field(default=1, ge=1, description="Number of folds. 1 for holdout.")
-    seed: int = Field(default=42, ge=0)
-    val_fraction: float = Field(default=0.2, ge=0.0, lt=1.0)
-    test_fraction: float = Field(default=0.2, ge=0.0, lt=1.0)
-    always_train: tuple[str, ...] = Field(
-        default=(),
-        description="Groups pinned to train, e.g. subjects with zero positive events.",
-    )
-
-    @model_validator(mode="after")
-    def _check(self) -> SplitSpec:
-        if self.val_fraction + self.test_fraction >= 1.0:
-            raise ValueError(
-                f"val_fraction + test_fraction must leave room for train, got "
-                f"{self.val_fraction} + {self.test_fraction}"
-            )
-        if self.scheme == "kfold" and self.k < 2:
-            raise ValueError(f"{self.scheme} needs k >= 2, got {self.k}")
-        return self
-
-    @property
-    def digest(self) -> str:
-        return short_digest(self.model_dump(mode="json"))
 
 
 class SplitFile(DsioModel):
@@ -97,7 +52,6 @@ class SplitFile(DsioModel):
     group_key: str = "group"
     name: str
     fold: int | None = None
-    spec: SplitSpec | None = None
     counts: dict[str, int] = Field(default_factory=dict)
     notes: str | None = None
     parts: dict[str, list[str]] = Field(
@@ -169,8 +123,8 @@ class SplitFile(DsioModel):
             f"# store: {self.store}",
             f"# group key: {self.group_key}  <- the leakage boundary",
         ]
-        if self.spec is not None:
-            header.append(f"# scheme: {self.spec.scheme}, seed {self.spec.seed}")
+        # The generating script is a project concern now; `notes` carries whatever it
+        # wants to say about how this file was produced.
         header.append(
             "# counts: " + ", ".join(f"{part}={n}" for part, n in sorted(self.counts.items()))
         )

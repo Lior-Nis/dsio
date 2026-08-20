@@ -17,15 +17,12 @@ from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index, enti
 from dsio.eval import Fold, FoldPrediction, cross_validate
 from dsio.splits import (
     SplitError,
-    SplitSpec,
     TemporalSpec,
     fold_paths,
     folds_from_splits,
-    generate,
-    generate_temporal,
     load_folds,
-    write_splits,
 )
+from splitgen import kfold_split_files, logo_split_files, temporal_split_files, write_split_files
 
 
 @pytest.fixture
@@ -54,7 +51,7 @@ def index(store: SignalStore):
 
 
 def test_a_split_per_fold_becomes_a_fold_per_split(store: SignalStore, index) -> None:
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     folds = folds_from_splits(SignalExamples(store, index), splits)
     assert len(folds) == 3
     assert [fold.index for fold in folds] == [0, 1, 2]
@@ -62,7 +59,7 @@ def test_a_split_per_fold_becomes_a_fold_per_split(store: SignalStore, index) ->
 
 def test_folds_cover_the_index_without_copying_it(store: SignalStore, index) -> None:
     """Positions into one index, not three datasets. This is the whole point of the design."""
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     folds = folds_from_splits(SignalExamples(store, index), splits)
     for fold in folds:
         assert fold.train.max() < len(index)
@@ -73,7 +70,7 @@ def test_folds_cover_the_index_without_copying_it(store: SignalStore, index) -> 
 def test_no_group_is_trained_on_and_tested_in_the_same_fold(store: SignalStore, index) -> None:
     """The leakage property, checked at the level a metric would actually be corrupted."""
     groups = index.groups
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     for fold in folds_from_splits(SignalExamples(store, index), splits):
         assert not (set(groups[fold.train]) & set(groups[fold.test]))
 
@@ -83,7 +80,7 @@ def test_no_raw_row_is_shared_between_a_fold_train_and_test(
 ) -> None:
     """Overlapping windows straddling a boundary are the failure this whole layer exists
     to prevent — near-identical rows in train and test simultaneously."""
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     for fold in folds_from_splits(SignalExamples(store, index), splits):
         train_rows = index.subset(_mask(len(index), fold.train)).covered_rows()
         test_rows = index.subset(_mask(len(index), fold.test)).covered_rows()
@@ -91,7 +88,7 @@ def test_no_raw_row_is_shared_between_a_fold_train_and_test(
 
 
 def test_every_window_is_tested_exactly_once_across_folds(store: SignalStore, index) -> None:
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     tested = np.concatenate([fold.test for fold in folds_from_splits(SignalExamples(store,
         index), splits)])
     assert sorted(tested.tolist()) == list(range(len(index)))
@@ -100,7 +97,7 @@ def test_every_window_is_tested_exactly_once_across_folds(store: SignalStore, in
 def test_leave_one_group_out_produces_one_fold_per_subject(
     store: SignalStore, index
 ) -> None:
-    splits = generate(entity_examples(store), SplitSpec(scheme="leave_one_group_out"), name="logo")
+    splits = logo_split_files(entity_examples(store), name="logo")
     folds = folds_from_splits(SignalExamples(store, index), splits)
     assert len(folds) == 9
     assert all(len(set(index.groups[fold.test])) == 1 for fold in folds)
@@ -114,13 +111,13 @@ def test_fold_numbers_come_from_the_file_not_the_list_position(
     Otherwise `fold0` in an artifact means a different fold depending on which subset was
     run, and two runs of the same experiment stop being comparable.
     """
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     folds = folds_from_splits(SignalExamples(store, index), splits[1:])
     assert [fold.index for fold in folds] == [1, 2]
 
 
 def test_a_validation_part_is_carried_through(store: SignalStore, index) -> None:
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     fold = folds_from_splits(SignalExamples(store, index), splits)[0]
     assert fold.val is not None and fold.val.size > 0
     assert np.intersect1d(fold.val, fold.test).size == 0
@@ -131,14 +128,14 @@ def test_a_validation_part_is_carried_through(store: SignalStore, index) -> None
 
 def test_overlapping_test_parts_across_folds_are_rejected(store: SignalStore, index) -> None:
     """Each file is individually valid; only comparing them reveals the double-count."""
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     duplicated = [splits[0], splits[0].model_copy(update={"fold": 1})]
     with pytest.raises(SplitError, match="test part of both"):
         folds_from_splits(SignalExamples(store, index), duplicated)
 
 
 def test_a_split_without_a_test_part_is_rejected(store: SignalStore, index) -> None:
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     partial = splits[0].model_copy(
         update={"parts": {"train": sorted(splits[0].all_groups)}}
     )
@@ -156,7 +153,7 @@ def test_no_splits_is_rejected(store: SignalStore, index) -> None:
 
 def test_folds_load_from_committed_files(store: SignalStore, index, tmp_path: Path) -> None:
     root = tmp_path / "splits"
-    write_splits(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3", root=root)
+    write_split_files(kfold_split_files(entity_examples(store), 3, name="k3"), name="k3", root=root)
     folds = load_folds(SignalExamples(store, index), fold_paths(root, "k3"))
     assert len(folds) == 3
     assert sum(fold.test.size for fold in folds) == len(index)
@@ -166,7 +163,7 @@ def test_fold_paths_order_numerically_not_lexically(store: SignalStore, tmp_path
     """Ten folds must not come back as 0, 1, 10, 2 — every fold is individually valid, so
     nothing downstream can detect the permutation."""
     root = tmp_path / "splits"
-    write_splits(entity_examples(store), SplitSpec(scheme="kfold", k=9), name="k9", root=root)
+    write_split_files(kfold_split_files(entity_examples(store), 9, name="k9"), name="k9", root=root)
     (root / "k9" / "fold10.yaml").write_bytes((root / "k9" / "fold0.yaml").read_bytes())
     ordinals = [int(path.stem.removeprefix("fold")) for path in fold_paths(root, "k9")]
     assert ordinals == sorted(ordinals)
@@ -183,7 +180,7 @@ def test_missing_split_files_say_how_to_make_them(tmp_path: Path) -> None:
 
 def test_split_files_drive_the_loop_end_to_end(store: SignalStore, index) -> None:
     """A group-level label, cross-validated over the store without materialising a fold."""
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(entity_examples(store), 3, name="k3")
     folds = folds_from_splits(SignalExamples(store, index), splits)
     labels = (np.array([int(g[1:]) for g in index.groups]) % 2).astype(int)
 
@@ -203,7 +200,7 @@ def test_split_files_drive_the_loop_end_to_end(store: SignalStore, index) -> Non
 def test_a_purged_walk_forward_reports_partial_coverage(store: SignalStore, index) -> None:
     """The discarded band is the point of purging, so coverage below 1.0 is correct here —
     and must be recorded rather than silently rounded away."""
-    splits = generate_temporal(SignalExamples(store, index),
+    splits = temporal_split_files(SignalExamples(store, index),
         TemporalSpec(n_splits=2, test_fraction=0.4, label_horizon=100, embargo=100),
         name="wf",
     )

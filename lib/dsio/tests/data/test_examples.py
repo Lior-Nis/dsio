@@ -18,7 +18,8 @@ from dsio.data import (
     group_attribute,
 )
 from dsio.data.examples import check
-from dsio.splits import SplitSpec, folds_from_splits, generate, resolve
+from dsio.splits import folds_from_splits, resolve
+from splitgen import kfold_split_files
 
 
 @pytest.fixture
@@ -145,7 +146,7 @@ def test_keys_survive_subsetting() -> None:
 
 def test_splitting_works_on_a_dataset_that_is_only_grouping(table: TableExamples) -> None:
     """The headline: no store, no windows, no tensors — and the split layer does not care."""
-    splits = generate(table, SplitSpec(scheme="kfold", k=2), name="k2")
+    splits = kfold_split_files(table, 2, name="k2")
     assert len(splits) == 2
     parts = resolve(table, splits[0])
     assert set(parts) >= {"train", "test"}
@@ -153,7 +154,7 @@ def test_splitting_works_on_a_dataset_that_is_only_grouping(table: TableExamples
 
 
 def test_folds_build_from_a_plain_table(table: TableExamples) -> None:
-    splits = generate(table, SplitSpec(scheme="kfold", k=2), name="k2")
+    splits = kfold_split_files(table, 2, name="k2")
     folds = folds_from_splits(table, splits)
     assert len(folds) == 2
     assert sum(fold.test.size for fold in folds) == len(table)
@@ -167,7 +168,7 @@ def test_a_table_cannot_prove_row_overlap_and_says_why(table: TableExamples) -> 
     dataset with nothing underneath to overlap must explain rather than crash."""
     from dsio.splits import assert_no_row_overlap
 
-    splits = generate(table, SplitSpec(scheme="kfold", k=2), name="k2")
+    splits = kfold_split_files(table, 2, name="k2")
     parts = resolve(table, splits[0])
     with pytest.raises(Exception, match="no\n *covered_rows|covered_rows"):
         assert_no_row_overlap(parts)
@@ -180,7 +181,7 @@ def test_a_keyed_dataset_splits_by_a_coarser_group() -> None:
         keys=[f"t{i}" for i in range(12)],
         groups=[f"conv{i // 4}" for i in range(12)],
     )
-    splits = generate(keyed, SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = kfold_split_files(keyed, 3, name="k3")
     folds = folds_from_splits(keyed, splits)
     for fold in folds:
         assert not (set(keyed.groups[fold.train]) & set(keyed.groups[fold.test]))

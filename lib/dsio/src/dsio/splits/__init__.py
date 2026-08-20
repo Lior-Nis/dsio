@@ -6,14 +6,7 @@ See docs/adr/0006.
 """
 
 from dsio.splits.folds import fold_paths, folds_from_splits, load_folds
-from dsio.splits.generate import (
-    generate,
-    generate_temporal,
-    group_values,
-    write_splits,
-    write_temporal_splits,
-)
-from dsio.splits.models import SCHEMA, Scheme, SplitError, SplitFile, SplitSpec
+from dsio.splits.models import SCHEMA, SplitError, SplitFile
 from dsio.splits.resolve import assert_no_row_overlap, resolve, resolve_masks, summarise
 from dsio.splits.temporal import (
     TemporalBounds,
@@ -27,10 +20,8 @@ from dsio.splits.temporal import (
 
 __all__ = [
     "SCHEMA",
-    "Scheme",
     "SplitError",
     "SplitFile",
-    "SplitSpec",
     "TemporalBounds",
     "TemporalError",
     "TemporalSpec",
@@ -39,15 +30,10 @@ __all__ = [
     "describe",
     "fold_paths",
     "folds_from_splits",
-    "generate",
-    "generate_temporal",
-    "group_values",
     "load_folds",
     "resolve",
     "resolve_masks",
     "summarise",
     "walk_forward",
     "window_times",
-    "write_splits",
-    "write_temporal_splits",
 ]

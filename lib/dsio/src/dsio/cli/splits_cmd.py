@@ -1,9 +1,10 @@
-"""``dsio splits`` — generate, inspect and prove split files.
+"""``dsio splits`` — inspect and prove split files.
 
 A split is provenance: a result has to state which groups were held out, and these YAML
-files are that statement, diffable and reviewable in git. The commands are shaped around
-that — ``make`` writes them, ``show`` reads one without parsing, and ``check`` proves the
-property they exist to guarantee.
+files are that statement, diffable and reviewable in git. Generating them is a project
+concern — an offline script whose output gets committed — so this surface only reads them:
+``show`` reads one without parsing, and ``check`` proves the property they exist to
+guarantee.
 """
 
 from __future__ import annotations
@@ -14,108 +15,19 @@ from typing import Annotated, Any
 import typer
 
 from dsio.cli.envelope import json_command
-from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index, entity_examples
+from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index
 from dsio.splits import (
     SplitFile,
-    SplitSpec,
-    TemporalSpec,
     assert_no_row_overlap,
     fold_paths,
     folds_from_splits,
     resolve,
     summarise,
-    write_splits,
-    write_temporal_splits,
 )
 
-app = typer.Typer(help="Generate and verify leakage-safe splits.", no_args_is_help=True)
+app = typer.Typer(help="Inspect and verify leakage-safe splits.", no_args_is_help=True)
 
 SPLITS_ROOT = Path("splits")
-
-
-@app.command("make")
-@json_command
-def make(
-    store: Annotated[Path, typer.Argument(help="Path to a store directory.")],
-    name: Annotated[str, typer.Option(help="Name for this split family.")],
-    scheme: Annotated[str, typer.Option(help="kfold, holdout, leave_one_group_out, explicit")] = (
-        "kfold"
-    ),
-    k: Annotated[int, typer.Option(help="Number of folds.")] = 5,
-    seed: Annotated[int, typer.Option(help="Assignment seed.")] = 42,
-    always_train: Annotated[
-        list[str] | None,
-        typer.Option("--always-train", help="Groups pinned to train. Repeatable."),
-    ] = None,
-    root: Annotated[Path, typer.Option(help="Where to write the files.")] = SPLITS_ROOT,
-) -> dict[str, Any]:
-    """Generate split files and write them for committing.
-
-    The output is meant to be reviewed and committed. Regenerating with the same spec and
-    seed reproduces it exactly, but the committed file is what a result cites — reading a
-    published number should never require re-running a generator.
-    """
-    signal = SignalStore(store)
-    spec = SplitSpec(
-        scheme=scheme,  # type: ignore[arg-type]
-        k=k,
-        seed=seed,
-        always_train=tuple(always_train or []),
-    )
-    paths = write_splits(entity_examples(signal), spec, name=name, root=root)
-    files = [SplitFile.load(path) for path in paths]
-    return {
-        "store": signal.path.name,
-        "name": name,
-        "spec": spec.model_dump(mode="json"),
-        "count": len(paths),
-        "paths": [str(path) for path in paths],
-        "folds": [
-            {"fold": file.fold, "counts": file.counts}
-            for file in files
-        ],
-    }
-
-
-@app.command("make-temporal")
-@json_command
-def make_temporal(
-    store: Annotated[Path, typer.Argument(help="Path to a store directory.")],
-    name: Annotated[str, typer.Option(help="Name for this split family.")],
-    length: Annotated[int, typer.Option(help="Window length in rows.")] = 500,
-    stride: Annotated[int, typer.Option(help="Rows between window starts.")] = 250,
-    n_splits: Annotated[int, typer.Option(help="Walk-forward folds.")] = 5,
-    test_fraction: Annotated[float, typer.Option(help="Test span as a fraction.")] = 0.2,
-    label_horizon: Annotated[
-        float, typer.Option(help="How far past its end a label resolves. Drives purging.")
-    ] = 0.0,
-    embargo: Annotated[float, typer.Option(help="Gap after test before training resumes.")] = 0.0,
-    root: Annotated[Path, typer.Option(help="Where to write the files.")] = SPLITS_ROOT,
-) -> dict[str, Any]:
-    """Generate purged, embargoed walk-forward splits.
-
-    ``label_horizon`` and ``embargo`` are not optional refinements. A training window whose
-    label resolves inside the test period has seen it, and the window immediately after the
-    test period leaks the same autocorrelated regime. The band between is discarded and
-    belongs to neither part.
-    """
-    signal = SignalStore(store)
-    index = build_index(signal, WindowSpec(length=length, stride=stride))
-    spec = TemporalSpec(
-        n_splits=n_splits,
-        test_fraction=test_fraction,
-        label_horizon=label_horizon,
-        embargo=embargo,
-    )
-    paths = write_temporal_splits(SignalExamples(signal, index), spec, name=name, root=root)
-    return {
-        "store": signal.path.name,
-        "name": name,
-        "spec": spec.model_dump(mode="json"),
-        "count": len(paths),
-        "paths": [str(path) for path in paths],
-        "windows": len(index),
-    }
 
 
 @app.command("show")

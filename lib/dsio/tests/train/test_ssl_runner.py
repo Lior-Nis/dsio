@@ -19,7 +19,6 @@ from dsio.data.store import DATA_ROOT_ENV  # noqa: E402
 from dsio.eval import read_report  # noqa: E402
 from dsio.nn import LABELS, labels  # noqa: E402
 from dsio.runs import RunLedger  # noqa: E402
-from dsio.splits import SplitSpec, write_splits  # noqa: E402
 from dsio.train import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
@@ -29,6 +28,7 @@ from dsio.train.torch_task import (  # noqa: E402
     TrainerConfig,
     load_encoder,
 )
+from splitgen import kfold_split_files, write_split_files  # noqa: E402
 
 
 @pytest.fixture
@@ -56,9 +56,10 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 out[entity.start_row : entity.end_row] = float(entity.attrs["positive"])
             return out
 
-    write_splits(
-        entity_examples(SignalStore(tmp_path / "stores" / "tone")),
-        SplitSpec(scheme="kfold", k=3, seed=0),
+    write_split_files(
+        kfold_split_files(
+            entity_examples(SignalStore(tmp_path / "stores" / "tone")), 3, name="k3", seed=0
+        ),
         name="k3",
         root=tmp_path / "splits",
     )

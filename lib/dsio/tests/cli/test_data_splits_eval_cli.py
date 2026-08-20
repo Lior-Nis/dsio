@@ -17,10 +17,11 @@ import numpy as np
 import pytest
 
 from dsio.config.schema import RunConfig
-from dsio.data import SignalStore
+from dsio.data import SignalStore, entity_examples
 from dsio.runs import RunLedger
 from dsio.runs.record import RUNS_ROOT_ENV
 from dsio.train import execute, load_runners
+from splitgen import kfold_split_files, write_split_files
 
 
 def dsio(*args: str, cwd: Path, env_extra: dict[str, str] | None = None) -> tuple[int, dict]:
@@ -177,19 +178,23 @@ def test_an_unconfigured_remote_is_its_own_error_code(workdir: Path) -> None:
 # --- dsio splits --------------------------------------------------------------------
 
 
-def test_splits_make_writes_committable_files(workdir: Path) -> None:
-    code, payload = dsio(
-        "splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir
+def _write_k3_splits(workdir: Path) -> None:
+    """Split files are a project's own output now; the CLI only reads them.
+
+    Building the fixture directly (rather than through a removed ``splits make``) is what
+    ``show`` and ``check`` below actually exercise: reading and proving a committed split.
+    """
+    store = SignalStore(workdir / "stores" / "cohort")
+    write_split_files(
+        kfold_split_files(entity_examples(store), 3, name="k3"),
+        name="k3",
+        root=workdir / "splits",
     )
-    assert code == 0 and payload["count"] == 3
-    for path in payload["paths"]:
-        assert (workdir / path).is_file()
-        assert (workdir / path).read_text().startswith("# dsio split:")
 
 
 def test_splits_check_proves_no_row_overlap(workdir: Path) -> None:
     """The guarantee the whole layer exists for, verified rather than asserted."""
-    dsio("splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir)
+    _write_k3_splits(workdir)
     code, payload = dsio(
         "splits", "check", "stores/cohort", "--name", "k3",
         "--length", "500", "--stride", "200", cwd=workdir,
@@ -210,7 +215,7 @@ def test_splits_check_catches_a_hand_edited_overlap(workdir: Path) -> None:
     """
     import yaml
 
-    dsio("splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir)
+    _write_k3_splits(workdir)
     first_path = workdir / "splits" / "k3" / "fold0.yaml"
     second_path = workdir / "splits" / "k3" / "fold1.yaml"
 
@@ -232,7 +237,7 @@ def test_splits_check_catches_a_hand_edited_overlap(workdir: Path) -> None:
 
 
 def test_splits_show_projects_group_lists_by_default(workdir: Path) -> None:
-    dsio("splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir)
+    _write_k3_splits(workdir)
     code, payload = dsio("splits", "show", "splits/k3/fold0.yaml", cwd=workdir)
     assert code == 0
     assert payload["parts"]["test"] == 3

@@ -14,12 +14,12 @@ from dsio.splits import (
     TemporalError,
     TemporalSpec,
     TimeSpan,
-    generate_temporal,
     resolve,
     walk_forward,
     window_times,
 )
 from dsio.splits.temporal import apply, describe
+from splitgen import temporal_split_files
 
 
 @pytest.fixture
@@ -207,7 +207,7 @@ def test_embargo_fraction_scales_with_the_span(market: SignalStore, index) -> No
 
 def test_generated_temporal_split_resolves(market: SignalStore, index) -> None:
     spec = TemporalSpec(n_splits=3, test_fraction=0.2, label_horizon=20, embargo_fraction=0.02)
-    folds = generate_temporal(SignalExamples(market, index), spec, name="wf")
+    folds = temporal_split_files(SignalExamples(market, index), spec, name="wf")
     assert len(folds) == 3
 
     parts = resolve(SignalExamples(market, index), folds[0])
@@ -222,7 +222,7 @@ def test_a_temporal_split_needs_a_dataset_with_a_clock(market: SignalStore, inde
     from dsio.data import TableExamples
     from dsio.splits import SplitError
 
-    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=1), name="wf")
+    folds = temporal_split_files(SignalExamples(market, index), TemporalSpec(n_splits=1), name="wf")
     timeless = TableExamples(
         name=market.path.name,
         groups=[str(g) for g in index.groups],
@@ -233,7 +233,7 @@ def test_a_temporal_split_needs_a_dataset_with_a_clock(market: SignalStore, inde
 
 
 def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) -> None:
-    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=2,
+    folds = temporal_split_files(SignalExamples(market, index), TemporalSpec(n_splits=2,
         label_horizon=30, embargo=40), name="wf"
     )
     path = tmp_path / "wf0.yaml"
@@ -246,7 +246,7 @@ def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) 
 
 
 def test_temporal_header_states_the_rules(market: SignalStore, index) -> None:
-    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=1,
+    folds = temporal_split_files(SignalExamples(market, index), TemporalSpec(n_splits=1,
         label_horizon=25, embargo=60), name="wf"
     )
     header = folds[0].to_yaml()
@@ -257,7 +257,7 @@ def test_temporal_header_states_the_rules(market: SignalStore, index) -> None:
 def test_temporal_composes_with_a_group_partition(market: SignalStore, index) -> None:
     """Purged walk-forward within a held-out cohort: generalise over symbols AND time."""
     groups = {"train": ["AAPL", "MSFT"], "test": ["NVDA"]}
-    folds = generate_temporal(SignalExamples(market, index), TemporalSpec(n_splits=1,
+    folds = temporal_split_files(SignalExamples(market, index), TemporalSpec(n_splits=1,
         test_fraction=0.2), name="wf", groups=groups
     )
     parts = resolve(SignalExamples(market, index), folds[0])
