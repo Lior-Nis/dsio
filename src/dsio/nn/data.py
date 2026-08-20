@@ -50,9 +50,11 @@ from dsio.nn.masking import apply_mask
 from dsio.runs.seeding import dataloader_kwargs
 
 #: What a masking strategy from :mod:`dsio.nn.masking` looks like from here: called with
-#: one window at a time (a fake batch of one), returning a boolean hide-mask of the same
-#: shape's time axis.
-MaskStrategy = Callable[[torch.Tensor], torch.Tensor]
+#: one window at a time (a fake batch of one) plus an optional generator, returning a
+#: boolean hide-mask of the same shape's time axis. Every strategy in that module already
+#: accepts ``generator`` — this widened signature just states what was already true, and
+#: ``WindowDataset`` below is the first caller that actually passes one.
+MaskStrategy = Callable[[torch.Tensor, torch.Generator | None], torch.Tensor]
 
 
 class WindowDataset(Dataset[dict[str, Any]]):
@@ -80,6 +82,18 @@ class WindowDataset(Dataset[dict[str, Any]]):
     something that generalises across channels. This is the same normalisation the deleted
     ``MaskedReconstruction.step()`` used to apply; it moved here because the target it
     normalises is now built here.
+
+    ``mask_seed`` (only meaningful alongside ``mask``), when given, makes the mask a
+    function of the item rather than of call order: each ``__getitem__`` builds a fresh
+    ``torch.Generator`` seeded from ``mask_seed ^ position`` and hands it to ``mask``, so
+    the same position always draws the same hidden span, regardless of which epoch, which
+    worker, or how many times it has been fetched before. Left ``None`` (the default), the
+    mask strategy draws from the process's global RNG, which is what training wants —
+    fresh randomness every epoch is the point of a stochastic mask. A validation loader
+    needs the opposite: :func:`~dsio.train.ssl_task.build_loaders` sets this only for the
+    loader Lightning's validation loop consumes, so ``val/loss`` measures the same
+    held-out reconstruction problem every time it is computed rather than a freshly
+    redrawn one.
     """
 
     def __init__(
@@ -93,6 +107,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
         mask: MaskStrategy | None = None,
         target_key: str = "y",
         normalize_target: bool = True,
+        mask_seed: int | None = None,
     ) -> None:
         if index.store_name != store.path.name:
             raise ValueError(
@@ -116,6 +131,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
         self.mask = mask
         self.target_key = target_key
         self.normalize_target = normalize_target
+        self.mask_seed = mask_seed
 
     def __len__(self) -> int:
         return int(self.positions.size)
@@ -137,7 +153,15 @@ class WindowDataset(Dataset[dict[str, Any]]):
             # carries the true value at every hidden position and NaN everywhere else —
             # apply_mask with the mask inverted, since apply_mask fills where its mask is
             # True and here that is "visible", the opposite of what x's masking used.
-            hidden = self.mask(x.unsqueeze(0))
+            generator = None
+            if self.mask_seed is not None:
+                # Deterministic per position, not per call: the same window always draws
+                # the same mask regardless of epoch, worker, or how many times it has
+                # already been fetched. XOR rather than addition so the derived seed does
+                # not walk monotonically with position, which would correlate neighbouring
+                # windows' masks in a store where position order is meaningful.
+                generator = torch.Generator().manual_seed(self.mask_seed ^ position)
+            hidden = self.mask(x.unsqueeze(0), generator)
             item["x"] = apply_mask(x.unsqueeze(0), hidden).squeeze(0)
             target_source = x
             if self.normalize_target:
@@ -173,12 +197,17 @@ def train_dataset(
     mask: MaskStrategy | None = None,
     target_key: str = "y",
     normalize_target: bool = True,
+    mask_seed: int | None = None,
 ) -> WindowDataset:
     """Build the dataset a training loader gets. The only builder that can mask.
 
     Paired with :func:`val_dataset`, whose signature has no ``mask`` parameter at all —
     "never mask a validation batch" is then a fact about which function a caller reached
     for, not a convention a caller has to remember to uphold by leaving an argument unset.
+
+    ``mask_seed`` is left unset by a training caller (fresh randomness every epoch) and set
+    by a caller building the loader Lightning's validation loop consumes over a masked
+    fold — see :class:`WindowDataset`'s docstring.
     """
     return WindowDataset(
         store,
@@ -189,6 +218,7 @@ def train_dataset(
         mask=mask,
         target_key=target_key,
         normalize_target=normalize_target,
+        mask_seed=mask_seed,
     )
 
 
@@ -237,11 +267,24 @@ class TwoViewCollate:
     ``(prediction, target)`` loss already receives the whole batch's predictions, and the
     negatives are just "every row that is not my partner". See
     :class:`~dsio.nn.components.NTXent` and :class:`~dsio.nn.components.VICReg`.
+
+    ``seed``, when given, makes the two views a function of the batch's own rows rather
+    than of call order: ``augment`` is called inside ``torch.random.fork_rng``, reseeded
+    with ``seed`` XORed with the sum of the batch's row positions, so the same batch of
+    rows always draws the same two views and the outer (global) RNG stream is left exactly
+    as it was found. The augmentors here (``Jitter``, ``RandomScale``, ...) take no
+    generator of their own — unlike a masking strategy — so this is the collate-level
+    equivalent of ``WindowDataset``'s ``mask_seed``: unset for training (fresh augmentation
+    every epoch), set only for the loader Lightning's validation loop consumes. It relies
+    on that loader never shuffling, so the same rows land in the same batch, in the same
+    order, on every call — true of every validation loader :func:`~dsio.train.ssl_task.
+    build_loaders` builds.
     """
 
-    def __init__(self, augment: nn.Module, target_key: str = "y") -> None:
+    def __init__(self, augment: nn.Module, target_key: str = "y", seed: int | None = None) -> None:
         self.augment = augment
         self.target_key = target_key
+        self.seed = seed
 
     def __call__(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         if not items:
@@ -249,10 +292,18 @@ class TwoViewCollate:
         x = torch.stack([item["x"] for item in items])
         row = torch.as_tensor([item["row"] for item in items])
         batch = x.shape[0]
-        with torch.no_grad():
-            views = torch.cat([self.augment(x), self.augment(x)], dim=0)
+        views = self._augment_twice(x, row)
         pair = (torch.arange(2 * batch, device=views.device) + batch) % (2 * batch)
         return {"x": views, self.target_key: pair, "row": row.repeat(2)}
+
+    def _augment_twice(self, x: torch.Tensor, row: torch.Tensor) -> torch.Tensor:
+        if self.seed is None:
+            with torch.no_grad():
+                return torch.cat([self.augment(x), self.augment(x)], dim=0)
+        derived = self.seed ^ int(row.sum().item())
+        with torch.random.fork_rng(devices=[]), torch.no_grad():
+            torch.manual_seed(derived)
+            return torch.cat([self.augment(x), self.augment(x)], dim=0)
 
 
 def make_loader(
@@ -265,14 +316,27 @@ def make_loader(
     drop_last: bool = False,
     collate_fn: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
 ) -> DataLoader[dict[str, Any]]:
-    """Build a DataLoader whose result does not depend on the worker count.
+    """Build a DataLoader whose *shuffle order* does not depend on the worker count.
 
     Seeding the process is not enough: each worker gets its own RNG, so without an explicit
-    generator and ``worker_init_fn`` the shuffle order and any augmentation randomness vary
-    with ``num_workers`` — which would make a result depend on a performance knob and put
-    it straight into dsio's list of things that must never change an answer. That guarantee
-    extends to ``collate_fn``: PyTorch runs it inside the worker process, so
-    :class:`TwoViewCollate`'s own randomness is exactly as protected as a masking strategy's.
+    generator and ``worker_init_fn`` the shuffle order varies with ``num_workers`` — which
+    would make a result depend on a performance knob and put it straight into dsio's list
+    of things that must never change an answer. ``dataloader_kwargs`` closes that.
+
+    **This does not, on its own, make a mask or an augmented view worker-count-independent.**
+    ``_seed_worker`` seeds Python's and NumPy's per-worker RNGs deterministically, but
+    torch's own global RNG is seeded to ``base_seed + worker_id`` — different per worker by
+    construction — so anything a masking strategy or ``collate_fn`` draws from torch's
+    global RNG (the default when no generator is passed) genuinely varies with
+    ``num_workers``. Measured, not assumed: a ``WindowDataset`` built with an unseeded mask
+    reads a different hidden span at ``num_workers=0`` than at ``num_workers=2`` for the
+    same position, and an unseeded :class:`TwoViewCollate` produces different views. That is
+    fine for training — fresh randomness every epoch is the point — and exactly the problem
+    for validation, which is why ``WindowDataset.mask_seed`` and ``TwoViewCollate.seed``
+    exist: both draw from a generator built fresh from an explicit seed rather than from
+    torch's global state, which is what actually makes them independent of worker count
+    (and of call order, and of epoch) — verified in
+    ``tests/nn/test_data.py::test_loader_result_does_not_depend_on_worker_count``.
     """
     kwargs: dict[str, Any] = dict(dataloader_kwargs(seed))
     if num_workers > 0:

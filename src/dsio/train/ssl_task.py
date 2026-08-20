@@ -190,6 +190,13 @@ def build_loaders(
     :func:`val_dataset` used unmasked and uncollated, built separately below for the probe —
     so masking or collating it here does not touch the guarantee that protects a downstream
     evaluation split.
+
+    The validation loader's randomness is seeded (``mask_seed``/``TwoViewCollate.seed``);
+    the training loader's is not. A validation ``val/loss`` that redrew its mask or its
+    views on every call would move for reasons that have nothing to do with the model —
+    exactly the failure the deleted ``self.training`` guard existed to prevent, one layer
+    down in the dataset. Training keeps fresh randomness every epoch deliberately; that is
+    what makes it augmentation rather than a fixed transform.
     """
     validation = fold.val if fold.val is not None and fold.val.size else None
 
@@ -212,7 +219,16 @@ def build_loaders(
             if validation is None
             else make_loader(
                 train_dataset(
-                    store, index, validation, mask=mask, normalize_target=task.normalize_target
+                    store,
+                    index,
+                    validation,
+                    mask=mask,
+                    normalize_target=task.normalize_target,
+                    # Seeded here and only here: training wants a fresh mask every epoch,
+                    # but val/loss must measure the same held-out reconstruction problem
+                    # every time it is computed, not a freshly redrawn one — see
+                    # WindowDataset.mask_seed.
+                    mask_seed=seed,
                 ),
                 batch_size=task.batch_size,
                 num_workers=task.num_workers,
@@ -224,7 +240,6 @@ def build_loaders(
 
     assert task.augmentor is not None, "enforced by SslPretrainTask's model_validator"
     augment = AUGMENTORS.get(task.augmentor.name)(**task.augmentor.params)
-    collate = TwoViewCollate(augment)
     train_loader = make_loader(
         val_dataset(store, index, fold.train),
         batch_size=task.batch_size,
@@ -234,7 +249,7 @@ def build_loaders(
         # SimCLR's negatives are the rest of the batch, so a short final batch changes the
         # objective rather than merely the throughput.
         drop_last=True,
-        collate_fn=collate,
+        collate_fn=TwoViewCollate(augment),
     )
     val_loader = (
         None
@@ -245,7 +260,11 @@ def build_loaders(
             num_workers=task.num_workers,
             seed=seed,
             drop_last=True,
-            collate_fn=collate,
+            # A separate, seeded collate instance: the same reasoning as mask_seed above.
+            # Correctness relies on this loader never shuffling (make_loader's shuffle
+            # defaults to False and nothing here overrides it), so the same rows land in
+            # the same batch, in the same order, every time this loader is iterated.
+            collate_fn=TwoViewCollate(augment, seed=seed),
         )
     )
     return train_loader, val_loader

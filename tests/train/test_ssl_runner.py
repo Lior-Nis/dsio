@@ -195,6 +195,54 @@ def test_every_method_produces_a_real_validation_loss(method: str, corpus: Path)
     assert np.isfinite(metrics["val_loss"])
 
 
+@pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
+def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
+    method: str, corpus: Path
+) -> None:
+    """A fix-round-1 regression test: measured before the fix, five identical validation
+    passes over a **frozen** MAE module (never trained, weights never change) reported
+    val/loss in [0.97697, 1.01588, 1.00346, 0.99336, 0.99949] -- a 3.90% spread, with even
+    the hidden fraction moving between passes (0.3789 vs 0.4038). The validation mask (and,
+    for the contrastive methods, the two collated views) were being redrawn from torch's
+    global RNG on every call -- exactly the failure the deleted ``self.training`` guard
+    existed to prevent, reintroduced one layer down in the dataset. ``WindowDataset.
+    mask_seed`` and ``TwoViewCollate.seed``, wired in ``build_loaders`` for the validation
+    loader only, fix it: this asserts the spread is now exactly zero, not merely small.
+    """
+    from lightning import Trainer
+
+    from dsio.data.adapters import SignalExamples
+    from dsio.data.store import data_root
+    from dsio.data.views import load_or_build
+    from dsio.splits.folds import fold_paths, load_folds
+    from dsio.train.ssl_task import build_loaders, build_module
+
+    task = pretrain_task(corpus, method)
+    store = SignalStore(data_root() / task.store)
+    index = load_or_build(store, task.window)
+    examples = SignalExamples(store, index)
+    folds = load_folds(examples, fold_paths(task.splits_root, task.split))
+    fold = next(f for f in folds if f.index == task.fold)
+
+    module, _ = build_module(task, channels=store.channels, length=task.window.length)
+    module.eval()
+    _, val_loader = build_loaders(task, store, index, fold, seed=0)
+    assert val_loader is not None
+
+    trainer = Trainer(
+        accelerator="cpu",
+        devices=1,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    losses = [
+        trainer.validate(module, val_loader, verbose=False)[0]["val/loss"] for _ in range(5)
+    ]
+    assert losses == [losses[0]] * 5, f"{method}: val/loss moved across repeated passes: {losses}"
+
+
 def test_pretraining_writes_no_evaluation_report(corpus: Path) -> None:
     """Pretraining is deliberately not a fold loop. A cross-validated masked-reconstruction
     MSE is a number nobody should act on, so it is not produced."""

@@ -15,6 +15,7 @@ from torch import nn  # noqa: E402
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
+from dsio.nn.components import Jitter  # noqa: E402
 from dsio.nn.data import (  # noqa: E402
     TwoViewCollate,
     WindowDataset,
@@ -22,7 +23,7 @@ from dsio.nn.data import (  # noqa: E402
     train_dataset,
     val_dataset,
 )
-from dsio.nn.masking import CausalMask  # noqa: E402
+from dsio.nn.masking import CausalMask, SpanMask  # noqa: E402
 from dsio.splits.folds import folds_from_splits  # noqa: E402
 from dsio.splits.models import SplitFile  # noqa: E402
 
@@ -256,6 +257,52 @@ def test_train_dataset_builder_can_mask(store: SignalStore, index) -> None:
     assert torch.isnan(item["y"]).any(), "a masked train dataset must emit a sentinel target"
 
 
+# --- mask_seed: a masked item as a function of position, not of call order -------------
+
+
+def test_an_unseeded_mask_differs_across_repeated_fetches(store: SignalStore, index) -> None:
+    """The property mask_seed exists to fix, demonstrated first: without it, the same
+    position draws a different mask every time it is fetched -- exactly the failure the
+    deleted self.training guard existed to prevent, one layer down in the dataset."""
+    mask = SpanMask(ratio=0.5, span=16)
+    dataset = train_dataset(store, index, positions=np.array([7]), mask=mask)
+    draws = [dataset[0]["x"].clone() for _ in range(5)]
+    assert not all(torch.equal(draws[0], draw) for draw in draws)
+
+
+def test_a_seeded_mask_is_identical_across_repeated_fetches(store: SignalStore, index) -> None:
+    """mask_seed makes the same position draw the same mask regardless of call order --
+    what a validation loader needs, so its val/loss measures the model rather than the
+    draw."""
+    mask = SpanMask(ratio=0.5, span=16)
+    dataset = train_dataset(store, index, positions=np.array([7]), mask=mask, mask_seed=42)
+    draws = [dataset[0]["x"].clone() for _ in range(5)]
+    assert all(torch.equal(draws[0], draw) for draw in draws)
+
+
+def test_a_seeded_mask_still_differs_between_positions(store: SignalStore, index) -> None:
+    """mask_seed must not collapse every item onto the same mask -- it derives a distinct
+    generator per position (mask_seed XOR position), not one shared generator for the
+    whole dataset."""
+    mask = SpanMask(ratio=0.5, span=16)
+    dataset = train_dataset(
+        store, index, positions=np.array([3, 7, 11]), mask=mask, mask_seed=42
+    )
+    items = [dataset[i]["x"] for i in range(3)]
+    assert not torch.equal(items[0], items[1])
+    assert not torch.equal(items[1], items[2])
+
+
+def test_a_seeded_mask_still_varies_with_the_seed(store: SignalStore, index) -> None:
+    """Not a fixed mask baked into the position -- a different mask_seed genuinely changes
+    which mask a position draws, so different validation runs (or a run and a rerun with a
+    different seed) are not silently pinned to one specific draw forever."""
+    mask = SpanMask(ratio=0.5, span=16)
+    a = train_dataset(store, index, positions=np.array([7]), mask=mask, mask_seed=1)[0]
+    b = train_dataset(store, index, positions=np.array([7]), mask=mask, mask_seed=2)[0]
+    assert not torch.equal(a["x"], b["x"])
+
+
 def test_val_dataset_builder_has_no_mask_parameter() -> None:
     """The structural version of "never mask a validation batch": there is no keyword to
     pass here at all, so the mistake is unrepresentable rather than merely unmade."""
@@ -287,6 +334,85 @@ def test_loader_result_does_not_depend_on_worker_count(store: SignalStore, index
         return [int(row) for batch in loader for row in batch["row"]]
 
     assert order(0) == order(2)
+
+
+def _collect_by_row(loader) -> torch.Tensor:  # type: ignore[no-untyped-def]
+    """x, reordered by row so worker-to-worker batch reshuffling can't hide a real
+    difference (or manufacture a fake one) behind which worker happened to read which
+    position."""
+    xs = torch.cat([batch["x"] for batch in loader])
+    rows = torch.cat([torch.as_tensor(batch["row"]) for batch in loader])
+    return xs[torch.argsort(rows)]
+
+
+def test_an_unseeded_mask_does_depend_on_worker_count(store: SignalStore, index) -> None:
+    """The honest boundary shuffle-order seeding does not cover, demonstrated directly
+    rather than left implicit: `_seed_worker` seeds Python's and NumPy's per-worker RNGs,
+    but torch's own global RNG is seeded to `base_seed + worker_id` — different per worker
+    by construction — so a mask strategy drawing from it (no generator passed) genuinely
+    varies with num_workers. This is exactly why `mask_seed` exists below."""
+    positions = np.arange(16)
+    mask = SpanMask(0.5, span=8)
+
+    def read(workers: int) -> torch.Tensor:
+        dataset = train_dataset(store, index, positions, mask=mask)
+        loader = make_loader(dataset, batch_size=4, num_workers=workers, seed=7)
+        return _collect_by_row(loader)
+
+    assert not torch.equal(read(0), read(2))
+
+
+def test_a_seeded_mask_does_not_depend_on_worker_count(store: SignalStore, index) -> None:
+    """mask_seed closes the gap the test above demonstrates: a generator built fresh per
+    item from an explicit seed does not care which worker constructed it."""
+    positions = np.arange(16)
+    mask = SpanMask(0.5, span=8)
+
+    def read(workers: int) -> torch.Tensor:
+        dataset = train_dataset(store, index, positions, mask=mask, mask_seed=42)
+        loader = make_loader(dataset, batch_size=4, num_workers=workers, seed=7)
+        return _collect_by_row(loader)
+
+    assert torch.equal(read(0), read(2))
+
+
+def test_an_unseeded_two_view_collate_does_depend_on_worker_count(
+    store: SignalStore, index
+) -> None:
+    """The collate-side twin of the mask test above: PyTorch runs collate_fn inside the
+    worker process, so an unseeded augmentor is exactly as exposed to per-worker torch RNG
+    seeding as an unseeded mask strategy."""
+    positions = np.arange(16)
+
+    def read(workers: int) -> torch.Tensor:
+        loader = make_loader(
+            val_dataset(store, index, positions),
+            batch_size=4,
+            num_workers=workers,
+            seed=7,
+            collate_fn=TwoViewCollate(Jitter(0.3)),
+        )
+        return _collect_by_row(loader)
+
+    assert not torch.equal(read(0), read(2))
+
+
+def test_a_seeded_two_view_collate_does_not_depend_on_worker_count(
+    store: SignalStore, index
+) -> None:
+    positions = np.arange(16)
+
+    def read(workers: int) -> torch.Tensor:
+        loader = make_loader(
+            val_dataset(store, index, positions),
+            batch_size=4,
+            num_workers=workers,
+            seed=7,
+            collate_fn=TwoViewCollate(Jitter(0.3), seed=42),
+        )
+        return _collect_by_row(loader)
+
+    assert torch.equal(read(0), read(2))
 
 
 def test_the_seed_actually_changes_the_order(store: SignalStore, index) -> None:
@@ -396,3 +522,64 @@ def test_two_view_collate_writes_under_the_configured_target_key() -> None:
 def test_two_view_collate_rejects_an_empty_batch() -> None:
     with pytest.raises(ValueError, match="empty batch"):
         TwoViewCollate(nn.Identity())([])
+
+
+# --- TwoViewCollate.seed: two views as a function of the batch's rows, not call order --
+
+
+class _RandomTag(nn.Module):
+    """An augmentor that actually draws from torch's global RNG (unlike ``_Tag`` above,
+    whose per-instance counter is deterministic by construction and so cannot tell a
+    seeded fork_rng apart from an unseeded one)."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + torch.randn(())
+
+
+def test_an_unseeded_collate_differs_across_repeated_calls() -> None:
+    items = _items(4)
+    collate = TwoViewCollate(_RandomTag())
+    draws = [collate(items)["x"].clone() for _ in range(5)]
+    assert not all(torch.equal(draws[0], draw) for draw in draws)
+
+
+def test_a_seeded_collate_is_identical_across_repeated_calls() -> None:
+    items = _items(4)
+    collate = TwoViewCollate(_RandomTag(), seed=42)
+    draws = [collate(items)["x"].clone() for _ in range(5)]
+    assert all(torch.equal(draws[0], draw) for draw in draws)
+
+
+def test_a_seeded_collate_still_gives_the_two_views_different_noise() -> None:
+    """Determinism must not collapse the two views onto each other -- fork_rng reseeds
+    once per batch and augment is still called twice against the continuing stream inside
+    it, so the two calls draw different values."""
+    items = _items(4)
+    batch = TwoViewCollate(_RandomTag(), seed=42)(items)
+    first_view, second_view = batch["x"][:4], batch["x"][4:]
+    assert not torch.equal(first_view, second_view)
+
+
+def test_a_seeded_collate_leaves_the_outer_rng_stream_untouched() -> None:
+    """fork_rng's whole point: whatever a caller draws from torch's global RNG right after
+    a seeded collate call must be exactly what it would have drawn had the collate call
+    not happened at all."""
+    items = _items(4)  # built once, outside either seeded region below: _items itself
+    # reseeds the global RNG as a side effect, which would contaminate the comparison if
+    # it ran between the two `torch.manual_seed(123)` calls instead of before both.
+
+    torch.manual_seed(123)
+    expected = torch.randn(4)
+
+    torch.manual_seed(123)
+    TwoViewCollate(_RandomTag(), seed=999)(items)
+    after = torch.randn(4)
+
+    assert torch.equal(after, expected)
+
+
+def test_a_seeded_collate_varies_with_the_seed() -> None:
+    items = _items(4)
+    a = TwoViewCollate(_RandomTag(), seed=1)(items)["x"]
+    b = TwoViewCollate(_RandomTag(), seed=2)(items)["x"]
+    assert not torch.equal(a, b)
