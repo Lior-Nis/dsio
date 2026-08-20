@@ -12,7 +12,8 @@ pytest.importorskip("sklearn")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader, Dataset  # noqa: E402
 
-from dsio.nn import Conv1dEncoder, CrossEntropy, DsioModule, Jitter  # noqa: E402
+from dsio.nn.components import Conv1dEncoder, CrossEntropy, Jitter  # noqa: E402
+from dsio.nn.module import DsioModule  # noqa: E402
 from dsio.ssl import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
 
 

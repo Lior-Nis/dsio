@@ -29,7 +29,7 @@ no knowledge of the framework underneath. `cross_validate(folds, fit_predict, ..
 whole interface.
 
 **`dsio.eval` is a leaf, enforced by import-linter.** It may not import `data`, `splits`,
-`train`, `runs`, `artifacts`, `tracking` or `cli`. The moment it can see a `WindowIndex` or a
+`train`, `runs`, `artifacts` or `cli`. The moment it can see a `WindowIndex` or a
 `Run`, someone types one into a signature and the loop stops being usable for tabular,
 forecast and torch alike. Dependency points the other way: `splits` builds folds, runners
 call the loop.

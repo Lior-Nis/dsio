@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from dsio.artifacts import (
+from dsio.artifacts.store import (
     ModelRef,
     ModelRegistry,
     RegistryIntegrityError,
     compute_provenance_digest,
     promotion_blockers,
 )
-from dsio.runs import EnvState, GitState
+from dsio.runs.provenance import EnvState, GitState
 
 
 def test_versions_increment_and_pin() -> None:

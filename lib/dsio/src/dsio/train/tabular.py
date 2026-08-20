@@ -27,7 +27,8 @@ from pydantic import Field, model_validator
 
 from dsio.config.registry import Registry
 from dsio.config.schema import TASKS, TaskConfig
-from dsio.eval import Fold, FoldPrediction, cross_validate, write_report
+from dsio.eval.contract import Fold, FoldPrediction, write_report
+from dsio.eval.loop import cross_validate
 from dsio.eval.metrics import METRICS
 from dsio.train.runner import preflight, runner
 

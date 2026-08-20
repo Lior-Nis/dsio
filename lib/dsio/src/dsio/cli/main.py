@@ -1,23 +1,14 @@
-"""The composition root.
+"""The composition root: mounts the one command the CLI has.
 
-Sub-apps are mounted here and nowhere else, so no command module imports a sibling. The
-rule is a linter contract because command modules that reach into each other's private
-helpers are how gating logic drifts apart between subcommands.
+A command exists only if it is needed before there is a Python session — everything else
+happens where Python is already available, in a repo you own. That leaves ``run``.
 """
 
 from __future__ import annotations
 
 import typer
 
-from dsio.cli import (
-    artifacts_cmd,
-    data_cmd,
-    eval_cmd,
-    matrix_cmd,
-    run_cmd,
-    runs_cmd,
-    splits_cmd,
-)
+from dsio.cli import run_cmd
 from dsio.cli.envelope import emit, failure
 
 app = typer.Typer(
@@ -27,14 +18,16 @@ app = typer.Typer(
     add_completion=False,
 )
 
-app.add_typer(runs_cmd.app, name="runs")
-app.add_typer(artifacts_cmd.app, name="models")
-app.add_typer(data_cmd.app, name="data")
-app.add_typer(splits_cmd.app, name="splits")
-app.add_typer(eval_cmd.app, name="eval")
-# matrix_cmd's commands sit at the top level: `dsio matrix`, `dsio search`.
-app.registered_commands.extend(matrix_cmd.app.registered_commands)
-# run_cmd's commands sit at the top level: `dsio run`, `dsio presets`.
+
+@app.callback()
+def _dsio() -> None:
+    """Reproducible ML/DL experimentation."""
+
+
+# A Typer app with exactly one registered command collapses into that command directly,
+# which would silence the ``run`` keyword and swallow it as the preset argument instead.
+# The callback above forces Typer to keep building a command group, so ``dsio run`` stays
+# the explicit, literal invocation the spec calls for.
 app.registered_commands.extend(run_cmd.app.registered_commands)
 
 

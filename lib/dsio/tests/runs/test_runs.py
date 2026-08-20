@@ -9,9 +9,11 @@ import pytest
 
 from dsio.config import RunConfig
 from dsio.contracts import NonCanonicalValueError, sha256_of
-from dsio.runs import RunLedger, RunStatus, capture_env, capture_git, seed_everything
-from dsio.runs.record import CONFIG_FILE, PATCH_FILE, REPRODUCE_FILE, RUN_FILE
-from dsio.train import execute, load_runners
+from dsio.runs.provenance import capture_env, capture_git
+from dsio.runs.record import CONFIG_FILE, PATCH_FILE, REPRODUCE_FILE, RUN_FILE, RunLedger, RunStatus
+from dsio.runs.seeding import seed_everything
+from dsio.train import load_runners
+from dsio.train.runner import execute
 
 
 def _start(ledger: RunLedger, config: RunConfig, **kwargs: object) -> object:

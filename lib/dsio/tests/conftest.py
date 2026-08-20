@@ -14,8 +14,7 @@ import pytest
 
 from dsio.artifacts.store import REGISTRY_ROOT_ENV
 from dsio.config import RunConfig
-from dsio.runs import RunLedger
-from dsio.runs.record import RUNS_ROOT_ENV
+from dsio.runs.record import RUNS_ROOT_ENV, RunLedger
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +63,8 @@ def _spine_preset() -> None:
     The spine ships no presets — those belong to a project. Registering one here keeps
     these tests self-contained instead of depending on a generated project existing.
     """
-    from dsio.config import PRESETS, RunConfig, preset
+    from dsio.config import RunConfig, preset
+    from dsio.config.presets import PRESETS
     from dsio.train import load_runners
     from dsio.train.tabular import TabularTask
 

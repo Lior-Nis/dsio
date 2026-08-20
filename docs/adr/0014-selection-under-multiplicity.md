@@ -2,6 +2,9 @@
 
 Status: accepted (2026-08-19)
 Implements: the plan's Phase 7.
+Superseded (2026-08-20): `multiplicity.py` and `select.py` are deleted. Only the
+effective-sample-size maths survives, in `eval/ess.py`; the selection-under-multiplicity
+machinery this ADR argues for is gone.
 
 ## Context
 

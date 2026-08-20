@@ -15,7 +15,6 @@ bug with Zarr handles and fixed it the same way.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -55,37 +54,7 @@ class MmapReader:
         self._array = None  # type: ignore[assignment]
 
 
-class FileReader:
-    """Positional reads through the file API, for filesystems where mmap misbehaves.
-
-    Network filesystems are the usual reason: an mmap over NFS can turn a page fault into
-    a silent stall or a SIGBUS on truncation, which is far worse than a slow read.
-    """
-
-    def __init__(self, path: Path, dtype: np.dtype, channels: int, n_rows: int) -> None:
-        self._fd = os.open(path, os.O_RDONLY)
-        self._dtype = dtype
-        self._channels = channels
-        self._n_rows = n_rows
-        self._row_bytes = int(dtype.itemsize) * channels
-
-    def read_rows(self, start: int, n_rows: int) -> np.ndarray:
-        want = n_rows * self._row_bytes
-        raw = os.pread(self._fd, want, start * self._row_bytes)
-        if len(raw) != want:
-            raise ReadError(
-                f"short read at row {start}: wanted {want} bytes, got {len(raw)}; "
-                "the payload is truncated"
-            )
-        return np.frombuffer(raw, dtype=self._dtype).reshape(n_rows, self._channels)
-
-    def close(self) -> None:
-        if self._fd >= 0:
-            os.close(self._fd)
-            self._fd = -1
-
-
-BACKENDS: dict[str, type] = {"mmap": MmapReader, "file": FileReader}
+BACKENDS: dict[str, type] = {"mmap": MmapReader}
 
 
 def open_reader(
@@ -100,6 +69,7 @@ def open_reader(
         cls = BACKENDS[backend]
     except KeyError:
         raise ReadError(
-            f"unknown storage backend {backend!r}; known: {', '.join(sorted(BACKENDS))}"
+            f"unknown backend {backend!r}; the store is memory-mapped (ADR 0005). "
+            "A sharded streaming backend is the planned extension, not a fallback."
         ) from None
     return cls(path, dtype, channels, n_rows)

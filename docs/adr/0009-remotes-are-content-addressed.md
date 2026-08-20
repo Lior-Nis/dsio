@@ -1,6 +1,9 @@
 # 9. The committed manifest is the remote index, and objects are addressed by content
 
 Status: accepted (2026-08-18)
+Suspended (2026-08-20): the implementation is removed with `data/remote.py` because cloud
+training is deferred. The decision is not overturned — revisit it on its merits when the
+cloud design has real requirements to answer to.
 Implements: the plan's Phase 2 remote, and the fresh-clone verification test.
 
 ## Context

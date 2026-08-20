@@ -9,15 +9,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from dsio.data import (  # noqa: E402, entity_examples
-    SignalExamples,
-    SignalStore,
-    WindowSpec,
-    build_index,
-    entity_examples,  # noqa: E402
-)
-from dsio.nn import WindowDataset, make_loader  # noqa: E402
-from dsio.splits import SplitSpec, folds_from_splits, generate  # noqa: E402
+from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
+from dsio.data.store import SignalStore  # noqa: E402
+from dsio.data.views import WindowSpec, build_index  # noqa: E402
+from dsio.nn.data import WindowDataset, make_loader  # noqa: E402
+from dsio.splits.folds import folds_from_splits  # noqa: E402
+from dsio.splits.models import SplitFile  # noqa: E402
 
 
 @pytest.fixture
@@ -37,6 +34,27 @@ def store(tmp_path: Path) -> SignalStore:
 @pytest.fixture
 def index(store: SignalStore):
     return build_index(store, WindowSpec(length=100, stride=50))
+
+
+def _kfold3(store: SignalStore) -> list[SplitFile]:
+    """Three hand-picked folds over the store's six groups, each a train/val/test split."""
+    digest = entity_examples(store).digest
+    folds = [
+        {"test": ["p0", "p1"], "val": ["p2"], "train": ["p3", "p4", "p5"]},
+        {"test": ["p2", "p3"], "val": ["p4"], "train": ["p0", "p1", "p5"]},
+        {"test": ["p4", "p5"], "val": ["p0"], "train": ["p1", "p2", "p3"]},
+    ]
+    return [
+        SplitFile(
+            store=store.path.name,
+            store_manifest_sha256=digest,
+            name="k3",
+            fold=i,
+            counts={part: len(members) for part, members in parts.items()},
+            parts=parts,
+        )
+        for i, parts in enumerate(folds)
+    ]
 
 
 def test_items_are_channels_first(store: SignalStore, index) -> None:
@@ -59,7 +77,7 @@ def test_the_window_matches_a_direct_store_read(store: SignalStore, index) -> No
 
 def test_a_fold_costs_positions_not_a_dataset(store: SignalStore, index) -> None:
     """The payoff of the index layer: five folds are five position arrays, not five copies."""
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = _kfold3(store)
     folds = folds_from_splits(SignalExamples(store, index), splits)
     datasets = [WindowDataset(store, index, fold.train) for fold in folds]
     assert all(dataset.store is store for dataset in datasets), "one store, shared"
@@ -96,7 +114,7 @@ def test_a_foreign_index_is_rejected(store: SignalStore, index, tmp_path: Path) 
 
 
 def test_groups_are_reachable_for_leak_checking(store: SignalStore, index) -> None:
-    splits = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
+    splits = _kfold3(store)
     fold = folds_from_splits(SignalExamples(store, index), splits)[0]
     train = WindowDataset(store, index, fold.train)
     test = WindowDataset(store, index, fold.test)

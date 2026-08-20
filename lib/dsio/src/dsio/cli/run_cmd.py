@@ -8,9 +8,12 @@ from typing import Annotated, Any
 import typer
 
 from dsio.cli.envelope import json_command
-from dsio.config import PRESETS, RunConfig, load_preset_modules, preset_parameters, resolve
-from dsio.runs import RunLedger, RunStatus, seed_everything
-from dsio.train import check, execute, load_runners
+from dsio.config.presets import PRESETS, load_preset_modules, preset_parameters, resolve
+from dsio.config.schema import RunConfig
+from dsio.runs.record import RunLedger, RunStatus
+from dsio.runs.seeding import seed_everything
+from dsio.train import load_runners
+from dsio.train.runner import check, execute
 
 app = typer.Typer(help="Execute a preset as a tracked run.", no_args_is_help=True)
 
@@ -24,7 +27,9 @@ def _bootstrap() -> None:
 @app.command("run")
 @json_command
 def run(
-    preset: Annotated[str, typer.Argument(help="Name of a registered preset.")],
+    preset: Annotated[
+        str | None, typer.Argument(help="Preset to run; omit to list them.")
+    ] = None,
     overrides: Annotated[
         list[str] | None,
         typer.Argument(help="key=value or nested.path=value overrides."),
@@ -36,7 +41,24 @@ def run(
         bool, typer.Option("--summary", help="Omit the resolved config from the output.")
     ] = False,
 ) -> dict[str, Any]:
-    """Resolve ``preset``, apply ``overrides``, and run it under the ledger."""
+    """Resolve ``preset``, apply ``overrides``, and run it under the ledger.
+
+    Called bare, with no preset, it lists every registered preset and the arguments it
+    accepts instead of running anything.
+    """
+    if preset is None:
+        _bootstrap()
+        return {
+            "presets": {
+                name: [
+                    param
+                    for param in preset_parameters(name)
+                    if param not in {"args", "kwargs"}
+                ]
+                for name in PRESETS.names()
+            }
+        }
+
     _bootstrap()
     config = resolve(preset, list(overrides or []))
     _preflight(config)
@@ -85,20 +107,3 @@ def _preflight(config: RunConfig) -> None:
     typo cost a coffee break. Resolving every name up front costs microseconds.
     """
     check(config)
-
-
-@app.command("presets")
-@json_command
-def list_presets() -> dict[str, Any]:
-    """List every registered preset and the arguments it accepts."""
-    _bootstrap()
-    return {
-        "presets": {
-            name: [
-                param
-                for param in preset_parameters(name)
-                if param not in {"args", "kwargs"}
-            ]
-            for name in PRESETS.names()
-        }
-    }

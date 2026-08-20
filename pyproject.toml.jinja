@@ -14,7 +14,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 dependencies = [
-    "dsio[{{ modality }}{% if tracker != 'none' %},{{ tracker }}{% endif %}]",
+    "dsio[{{ modality }}]",
 ]
 
 # How dsio finds your presets. Without this, `dsio run` sees nothing.

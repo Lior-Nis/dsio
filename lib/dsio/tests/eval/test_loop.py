@@ -7,15 +7,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.eval import (
+from dsio.eval.contract import (
     EvalError,
     Fold,
     FoldPrediction,
     OutOfFold,
-    cross_validate,
     read_report,
     write_report,
 )
+from dsio.eval.loop import cross_validate
 
 
 def linear_folds(n_rows: int, k: int) -> list[Fold]:

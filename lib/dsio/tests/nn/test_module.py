@@ -9,20 +9,16 @@ pytest.importorskip("lightning")
 
 from torch import nn  # noqa: E402
 
-from dsio.nn import (  # noqa: E402
-    AUGMENTORS,
-    BACKBONES,
-    HEADS,
-    LOSSES,
-    ComponentError,
+from dsio.nn.components import (  # noqa: E402
     Conv1dEncoder,
     CrossEntropy,
-    DsioModule,
     InstanceStandardize,
     Jitter,
     MLP1d,
     RandomScale,
 )
+from dsio.nn.module import ComponentError, DsioModule  # noqa: E402
+from dsio.nn.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
 
 
 def tiny_module(**overrides) -> DsioModule:  # type: ignore[no-untyped-def]

@@ -19,12 +19,9 @@ dependencies = [
 tabular = ["scikit-learn>=1.9", "xgboost>=3.4", "polars>=1.30", "pyarrow>=18"]
 forecast = ["statsforecast>=2.1", "mlforecast>=1.1"]
 torch = ["torch>=2.6", "lightning>=2.5", "torchmetrics>=1.6"]
-data = ["fsspec>=2025.1", "pyarrow>=18"]
+data = ["pyarrow>=18"]
 # zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
 legacy = ["zarr>=3.0"]
-search = ["optuna>=4.5"]
-mlflow = ["mlflow>=3.0"]
-wandb = ["wandb>=0.19"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
@@ -39,17 +36,11 @@ dev = [
     "import-linter>=2.1",
     "types-pyyaml>=6.0",
     "scikit-learn>=1.9",
-    # fsspec is an optional extra for users, but a required dev dependency: the remote
-    # push/pull path must be exercised in CI against a local filesystem, or the fresh-clone
-    # reproduction test is only a claim.
-    "fsspec>=2025.1",
-    # CPU torch, for the same reason as fsspec: the component chain and the Lightning
+    # CPU torch: the component chain and the Lightning
     # runner must run in CI, which has no GPU. A generated project overrides the source
     # below to get CUDA wheels — uv sources are not propagated to consumers of dsio.
     "torch>=2.6",
     "lightning>=2.5",
-    # Same reasoning again: the search path must run in CI or its resumability is a claim.
-    "optuna>=4.5",
 ]
 
 [[tool.uv.index]]
@@ -134,22 +125,14 @@ forbidden_modules = [
     "dsio.train",
     "dsio.runs",
     "dsio.artifacts",
-    "dsio.tracking",
     "dsio.cli",
 ]
 
 [[tool.importlinter.contracts]]
-# CLI command modules must not import each other. algua added this contract after command
-# modules started reaching into each other's private helpers, which is how gating logic
-# drifts apart between subcommands.
-name = "CLI command modules are mutually independent"
-type = "independence"
-modules = [
-    "dsio.cli.run_cmd",
-    "dsio.cli.runs_cmd",
-    "dsio.cli.artifacts_cmd",
-    "dsio.cli.data_cmd",
-    "dsio.cli.splits_cmd",
-    "dsio.cli.eval_cmd",
-    "dsio.cli.matrix_cmd",
-]
+# data/adapters.py used a function-local import to dodge this cycle. The layer
+# direction is splits -> data, one way; a local import that hides a cycle is a
+# cycle, and the next person to add one will not know it was deliberate.
+name = "The data layer never imports splits"
+type = "forbidden"
+source_modules = ["dsio.data"]
+forbidden_modules = ["dsio.splits"]

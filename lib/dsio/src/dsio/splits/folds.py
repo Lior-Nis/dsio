@@ -81,7 +81,7 @@ def load_folds(
 
 
 def fold_paths(root: Path | str, name: str) -> list[Path]:
-    """Every fold file written by ``write_splits`` for a split name, in fold order.
+    """Every fold file committed under a split name, in fold order.
 
     Sorted by the fold number parsed from the filename rather than lexically, so ten folds
     do not come back as 0, 1, 10, 2 — an ordering bug that produces a perfectly plausible
@@ -95,7 +95,8 @@ def fold_paths(root: Path | str, name: str) -> list[Path]:
         if single.is_file():
             return [single]
         raise SplitError(
-            f"no split files under {directory}; generate them with `dsio splits make`"
+            f"no split files under {directory}; commit a split file there first — dsio "
+            "reads splits, it does not generate them"
         )
 
     def ordinal(path: Path) -> int:
@@ -114,12 +115,18 @@ def _assert_test_parts_are_disjoint(folds: Sequence[Fold]) -> None:
     were duplicated. The loop would catch this too, but catching it here means it fails
     before anything is fitted rather than after the last fold.
     """
-    seen: dict[int, str] = {}
-    for fold in folds:
-        for position in fold.test.tolist():
-            if position in seen:
-                raise SplitError(
-                    f"example {position} is in the test part of both {seen[position]!r} "
-                    f"and {fold.name!r}; folds must test disjoint examples"
-                )
-            seen[position] = fold.name
+    positions = (
+        np.concatenate([fold.test for fold in folds]) if folds else np.empty(0, dtype=np.int64)
+    )
+    values, counts = np.unique(positions, return_counts=True)
+    repeated = values[counts > 1]
+    if repeated.size:
+        owners = {
+            int(position): [fold.name for fold in folds if position in set(fold.test.tolist())]
+            for position in repeated[:5].tolist()
+        }
+        detail = "; ".join(f"{pos} in {' and '.join(names)}" for pos, names in owners.items())
+        raise SplitError(
+            f"{repeated.size} example(s) appear in more than one test part; "
+            f"folds must test disjoint examples: {detail}"
+        )

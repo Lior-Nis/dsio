@@ -14,8 +14,8 @@ artifacts/
 **Why npz and not parquet.** numpy is a hard dependency of the spine; pyarrow is an
 optional extra. Making the contract depend on an extra would leave the single most
 important artifact in the system untested in a bare install, and would drag pyarrow into a
-torch-only project that has no other use for it. ``np.load`` reads these in one line, and
-``dsio eval export`` converts to parquet where that is wanted.
+torch-only project that has no other use for it. ``np.load`` reads these in one line;
+converting to parquet, or anything else, is the reader's business.
 
 **Why out-of-fold predictions are the artifact and not just the metrics.** A metric is a
 lossy summary chosen before you knew what you would need to ask. Predictions answer

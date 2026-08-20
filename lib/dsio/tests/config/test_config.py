@@ -6,18 +6,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from dsio.config import (
-    PRESETS,
-    RunConfig,
-    apply_override,
-    load_preset_modules,
-    parse_scalar,
-    preset_parameters,
-    resolve,
-)
-from dsio.config.overrides import OverrideError
+from dsio.config import RunConfig
+from dsio.config.overrides import OverrideError, apply_override, parse_scalar
+from dsio.config.presets import PRESETS, load_preset_modules, preset_parameters, resolve
 from dsio.config.registry import DuplicateComponentError, Registry, UnknownComponentError
-from dsio.train import check, load_runners
+from dsio.train import load_runners
+from dsio.train.runner import check
 
 
 def test_config_is_frozen(config: RunConfig) -> None:

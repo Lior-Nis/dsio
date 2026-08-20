@@ -23,8 +23,7 @@ from pydantic import ValidationError
 from dsio.artifacts.store import RegistryIntegrityError
 from dsio.config.overrides import OverrideError
 from dsio.config.registry import DuplicateComponentError, UnknownComponentError
-from dsio.data.cache import CacheError
-from dsio.data.remote import RemoteError, RemoteIntegrityError
+from dsio.data.staging import StagingError
 from dsio.data.store import StoreError
 from dsio.eval.contract import EvalError
 from dsio.splits.models import SplitError
@@ -40,7 +39,6 @@ class ErrorCode(StrEnum):
     NOT_FOUND = "not_found"
     INTEGRITY = "integrity"
     LEAKAGE = "leakage"
-    REMOTE = "remote"
     BLOCKED = "blocked"
     INTERNAL = "internal"
 
@@ -61,11 +59,7 @@ _CODES: list[tuple[type[BaseException], ErrorCode, bool]] = [
     # split — and the second is a bug report.
     (RegistryIntegrityError, ErrorCode.INTEGRITY, False),
     (StoreError, ErrorCode.INTEGRITY, False),
-    (CacheError, ErrorCode.INTEGRITY, False),
-    (RemoteIntegrityError, ErrorCode.INTEGRITY, False),
-    # A missing object or an unconfigured remote is a setup problem, not a transient one;
-    # transient network failures surface as OSError and are already marked retryable.
-    (RemoteError, ErrorCode.REMOTE, False),
+    (StagingError, ErrorCode.INTEGRITY, False),
     # Leakage is separated from ordinary invalid input because it is the one failure class
     # that must never be retried around or suppressed by an automated caller.
     (SplitError, ErrorCode.LEAKAGE, False),

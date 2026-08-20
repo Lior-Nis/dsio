@@ -2,6 +2,9 @@
 
 Status: accepted (2026-08-18)
 Implements: the plan's Phase 6, and its "matrix resumability" verification test.
+Superseded (2026-08-20): `matrix/` is deleted. Resume no longer comes from a matrix
+consulting the ledger before dispatch — it comes from re-running one fold as its own
+process, which is naturally idempotent because the run ledger still keys on config hash.
 
 ## Context
 

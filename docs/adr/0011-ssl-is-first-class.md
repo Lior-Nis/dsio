@@ -123,6 +123,6 @@ torch runners. `dsio.eval` remains a leaf.
 
 What is deliberately not built: no momentum encoder (BYOL/MoCo), no JEPA-style latent
 prediction, no multi-crop. Each is a new `SslMethod` and none is needed to prove the seam.
-Embedding caching is also not wired to the stage cache yet — `SslModule.predict_step`
+Embedding caching is also not wired to `dsio.data.staging` yet — `SslModule.predict_step`
 returns embeddings and `encode` is the stable seam, so the pieces exist, but the cached
 artifact does not.

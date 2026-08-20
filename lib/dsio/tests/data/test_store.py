@@ -8,15 +8,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.data import (
-    Entity,
-    SignalStore,
-    StoreError,
-    WindowSpec,
-    WindowView,
-    build_index,
-    load_or_build,
-)
 from dsio.data.format import (
     FORMAT_VERSION,
     HEADER_SIZE,
@@ -25,6 +16,8 @@ from dsio.data.format import (
     IndexFormatError,
     IndexHeader,
 )
+from dsio.data.store import Entity, SignalStore, StoreError
+from dsio.data.views import WindowSpec, WindowView, build_index, load_or_build
 
 
 @pytest.fixture
