@@ -37,6 +37,8 @@ def test_a_failed_build_leaves_nothing_behind(tmp_path: Path):
     with pytest.raises(StagingError):
         stage("windows", {"length": 500}, build, root=tmp_path)
 
+    assert list(tmp_path.rglob("*.partial")) == []
+
     def good(out: Path) -> None:
         out.write_bytes(b"complete")
 
