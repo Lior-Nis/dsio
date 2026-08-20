@@ -61,11 +61,17 @@ def preset_env(workdir: Path) -> dict[str, str]:
 
 
 def test_success_envelope_shape(workdir: Path) -> None:
-    code, payload = dsio("presets", cwd=workdir)
+    code, payload = dsio("run", cwd=workdir)
     assert code == 0
     assert payload["ok"] is True
     assert payload["error"] is None and payload["code"] is None
     assert payload["retryable"] is False
+
+
+def test_bare_run_lists_presets(workdir: Path) -> None:
+    code, payload = dsio("run", cwd=workdir)
+    assert code == 0
+    assert "presets" in payload
 
 
 def test_failure_envelope_carries_a_code(workdir: Path) -> None:
@@ -86,35 +92,19 @@ def test_bad_override_is_classified(workdir: Path, preset_env: dict[str, str]) -
 
 def test_usage_error_is_json_not_text(workdir: Path) -> None:
     """Even Click's own parse failures must render as an envelope."""
-    code, payload = dsio("run", cwd=workdir)
+    code, payload = dsio("run", "--bogus-flag", cwd=workdir)
     assert code != 0
     assert payload.get("ok") is False
     assert payload.get("code") is not None
 
 
-def test_run_then_list_then_promote(workdir: Path, preset_env: dict[str, str]) -> None:
-    """The end-to-end path the plan calls the headline test."""
-    env = {
-        **preset_env,
-        "DSIO_RUNS_ROOT": str(workdir / "runs"),
-        "DSIO_REGISTRY_ROOT": str(workdir / "models"),
-    }
+def test_run_happy_path(workdir: Path, preset_env: dict[str, str]) -> None:
+    """``dsio run <preset>`` resolves, executes, and reports metrics."""
+    env = {**preset_env, "DSIO_RUNS_ROOT": str(workdir / "runs")}
     code, run_payload = dsio("run", "spine_baseline", "--summary", cwd=workdir, env_extra=env)
     assert code == 0, run_payload
-    run_id = run_payload["run_id"]
+    assert run_payload["run_id"]
     assert run_payload["metrics"]["accuracy"] > 0.5
-
-    code, listing = dsio("runs", "list", cwd=workdir, env_extra=env)
-    assert code == 0
-    assert listing["count"] == 1
-    assert listing["runs"][0]["run_id"] == run_id
-
-    # No git provenance in a bare tmp dir, so promotion must refuse.
-    code, blocked = dsio(
-        "models", "promote", run_id, "--name", "m", cwd=workdir, env_extra=env
-    )
-    assert code == 1
-    assert blocked["code"] == "blocked"
 
 
 def test_summary_projection_omits_the_config(

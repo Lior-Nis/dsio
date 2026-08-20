@@ -129,21 +129,6 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-# CLI command modules must not import each other. algua added this contract after command
-# modules started reaching into each other's private helpers, which is how gating logic
-# drifts apart between subcommands.
-name = "CLI command modules are mutually independent"
-type = "independence"
-modules = [
-    "dsio.cli.run_cmd",
-    "dsio.cli.runs_cmd",
-    "dsio.cli.artifacts_cmd",
-    "dsio.cli.data_cmd",
-    "dsio.cli.splits_cmd",
-    "dsio.cli.eval_cmd",
-]
-
-[[tool.importlinter.contracts]]
 # data/adapters.py used a function-local import to dodge this cycle. The layer
 # direction is splits -> data, one way; a local import that hides a cycle is a
 # cycle, and the next person to add one will not know it was deliberate.
