@@ -64,7 +64,10 @@ We do **not** adopt `LightningCLI`: it is YAML-config-driven, which ADR 0001 rej
 
 No Copier, no Jinja, no `.copier-answers.yml`. The workspace collapses to a single
 distribution rooted at `src/dsio/` with one `pyproject.toml`, so the repo runs itself:
-`uv sync && uv run pytest` is green in a fresh clone.
+`uv sync --extra cpu && uv run pytest` is green in a fresh clone. Selecting an accelerator
+extra is mandatory — a bare `uv sync` installs no torch, deliberately, so a bare `uv run
+pytest` fails loudly at collection instead of silently pulling several gigabytes of CUDA
+wheel you may not want.
 
 Projects clone, add components in the same tree, and pull improvements with
 `git remote add upstream … && git merge upstream/main`. The root README's claim that "a
@@ -73,7 +76,9 @@ every project renamed its package. Fixing the package name removes the reason fo
 template.
 
 Cost accepted: the `project → dsio` direction was enforced by packaging (the spine could not
-name a project). It is now an import-linter rule instead of a structural impossibility.
+name a project). In a single package there is no second package for that direction to point
+between, so it does not become a lint rule — it ceases to exist. Project code lives inside
+`src/dsio/` now, not beside it.
 
 ### 3. Storage: flat binary, memory-mapped
 

@@ -18,7 +18,6 @@ dependencies = [
 [project.optional-dependencies]
 tabular = ["scikit-learn>=1.9", "xgboost>=3.4", "polars>=1.30", "pyarrow>=18"]
 forecast = ["statsforecast>=2.1", "mlforecast>=1.1"]
-torch = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
 data = ["pyarrow>=18"]
 # zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
 legacy = ["zarr>=3.0"]
@@ -31,14 +30,14 @@ legacy = ["zarr>=3.0"]
 # nor the dev group, leaves a torch-needing import unresolved: a bare `uv run` with
 # no extra selected must fail loudly on a missing import, not silently fall back to
 # downloading a multi-gigabyte default wheel.
-cpu = ["torch>=2.7", "lightning>=2.5"]
-gpu = ["torch>=2.7", "lightning>=2.5"]
+cpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
+gpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
 
-# The spine is developed and tested standalone: `uv sync && uv run pytest`.
-# A generated project pulls it in as a workspace member and brings its own dev group.
+# dsio is one package, developed and tested in place: `uv sync --extra cpu && uv run pytest`.
+# There is no separate generated project and no workspace; this dev group is the only one.
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -100,7 +99,6 @@ packages = ["src/dsio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
 
 # ---------------------------------------------------------------------------
 # The spine is held to a stricter bar than project code. See docs/adr/.

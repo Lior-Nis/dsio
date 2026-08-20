@@ -21,5 +21,5 @@ ENV DSIO_RUNS_ROOT=/data/runs \
     DSIO_REGISTRY_ROOT=/data/models \
     PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["uv", "run", "dsio"]
+ENTRYPOINT ["uv", "run", "--extra", "cpu", "dsio"]
 CMD ["--help"]

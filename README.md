@@ -15,7 +15,7 @@ fight.
 git clone https://github.com/<you>/dsio my-project
 cd my-project
 git remote rename origin upstream
-uv sync --extra gpu           # or --extra cpu on a machine without an NVIDIA GPU
+uv sync --locked --extra gpu   # or --extra cpu on a machine without an NVIDIA GPU
 uv run dsio run                # lists the presets
 uv run dsio run spine_baseline
 ```
@@ -27,7 +27,7 @@ platform's default wheel is already CUDA-enabled (`torch 2.13.0+cu130`, `cuda.is
 == True` on an RTX 5070 Ti, next to `2.13.0+cpu` from `cpu`); if that ever stops being true,
 `gpu` needs an explicit CUDA index again.
 
-Add your components under `src/dsio/` — a backbone in `model/`, a preset in `presets.py`.
+Add your components under `src/dsio/` — a backbone in `nn/`, a preset in `presets.py`.
 Later, pull spine improvements without losing your work:
 
 ```bash
@@ -52,9 +52,7 @@ stores/ views/    canonical data and derived indices (manifests committed)
 ```
 
 `docs/adr/0018-a-repository-not-a-template.md` records why this replaced the earlier
-two-distribution Copier layout, and the one guarantee that move gives up: `project → dsio`,
-never the reverse, used to be enforced by packaging and is now an import-linter contract
-instead.
+two-distribution Copier layout.
 
 ## Principles
 
@@ -77,7 +75,7 @@ conventions.
 ## Developing
 
 ```bash
-uv sync --extra cpu
+uv sync --locked --extra cpu
 uv run --extra cpu pytest -q && uv run --extra cpu ruff check . && uv run --extra cpu mypy && uv run --extra cpu lint-imports
 ```
 

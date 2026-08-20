@@ -47,8 +47,9 @@ def load_preset_modules() -> list[str]:
     """Import modules that define presets, returning the ones that loaded.
 
     Discovery is by module list: ``_BUILTIN_PRESET_MODULES`` plus whatever
-    ``DSIO_PRESET_MODULES`` names, so a project adds its own presets alongside the
-    ones dsio ships without dsio needing to know the project's package name.
+    ``DSIO_PRESET_MODULES`` names, so a project adds its own preset modules under
+    ``src/dsio/`` and lists them in the environment variable to have them imported
+    alongside the ones dsio ships, with no registration step beyond that.
 
     A declared module that fails to import is an error, not a skip: a silently
     empty preset list is indistinguishable from a project with no presets, and the
