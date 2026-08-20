@@ -21,6 +21,7 @@ from dsio.data.store import DATA_ROOT_ENV  # noqa: E402
 from dsio.eval import read_report  # noqa: E402
 from dsio.nn import LABELS, labels  # noqa: E402
 from dsio.runs import RunLedger  # noqa: E402
+from dsio.splits import SplitFile  # noqa: E402
 from dsio.train import check, execute  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
     Component,
@@ -30,7 +31,6 @@ from dsio.train.torch_task import (  # noqa: E402
     build_module,
     sanitise_metric,
 )
-from splitgen import kfold_split_files, write_split_files  # noqa: E402
 
 
 @pytest.fixture
@@ -59,12 +59,25 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 out[entity.start_row : entity.end_row] = float(entity.attrs["positive"])
             return out
 
+    # Three hand-picked folds over the eight groups, each mixing positive and negative
+    # subjects across train/val/test so the separable-signal test below has both classes
+    # to learn from and to score against in every part.
     store = SignalStore(root / "tone")
-    write_split_files(
-        kfold_split_files(entity_examples(store), 3, name="k3", seed=0),
-        name="k3",
-        root=tmp_path / "splits",
-    )
+    digest = entity_examples(store).digest
+    folds = [
+        {"test": ["p0", "p1", "p2"], "val": ["p3"], "train": ["p4", "p5", "p6", "p7"]},
+        {"test": ["p3", "p4", "p5"], "val": ["p6"], "train": ["p0", "p1", "p2", "p7"]},
+        {"test": ["p6", "p7"], "val": ["p0"], "train": ["p1", "p2", "p3", "p4", "p5"]},
+    ]
+    for fold, parts in enumerate(folds):
+        SplitFile(
+            store=store.path.name,
+            store_manifest_sha256=digest,
+            name="k3",
+            fold=fold,
+            counts={part: len(members) for part, members in parts.items()},
+            parts=parts,
+        ).save(tmp_path / "splits" / "k3" / f"fold{fold}.yaml")
     return tmp_path
 
 
@@ -101,7 +114,7 @@ def test_preflight_catches_a_typo_before_any_data_is_read(corpus: Path) -> None:
 def test_preflight_requires_the_split_files_to_exist(corpus: Path) -> None:
     """Splits are provenance; their absence is an error, not licence to invent some."""
     config = RunConfig(name="nosplit", task=make_task(corpus, split="never_made"))
-    with pytest.raises(Exception, match="dsio splits make"):
+    with pytest.raises(Exception, match="commit a split file"):
         check(config)
 
 

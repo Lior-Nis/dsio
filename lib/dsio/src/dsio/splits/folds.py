@@ -95,7 +95,8 @@ def fold_paths(root: Path | str, name: str) -> list[Path]:
         if single.is_file():
             return [single]
         raise SplitError(
-            f"no split files under {directory}; generate them with `dsio splits make`"
+            f"no split files under {directory}; commit a split file there first — dsio "
+            "reads splits, it does not generate them"
         )
 
     def ordinal(path: Path) -> int:

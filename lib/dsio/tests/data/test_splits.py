@@ -9,7 +9,6 @@ import pytest
 
 from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index, entity_examples
 from dsio.splits import SplitError, SplitFile, assert_no_row_overlap, resolve
-from splitgen import kfold_split_files
 
 
 @pytest.fixture
@@ -32,6 +31,26 @@ def store(tmp_path: Path) -> SignalStore:
 @pytest.fixture
 def index(store: SignalStore):
     return build_index(store, WindowSpec(length=500, stride=200))
+
+
+def _fold0(store: SignalStore) -> SplitFile:
+    """One hand-picked fold covering all nine groups, mutually disjoint across parts.
+
+    A literal fixture, not a generated one — a project's own split generator would write
+    something like this file and commit it; the tests below only need one to read.
+    """
+    return SplitFile(
+        store=store.path.name,
+        store_manifest_sha256=entity_examples(store).digest,
+        name="k3",
+        fold=0,
+        counts={"train": 6, "val": 1, "test": 2},
+        parts={
+            "train": ["p2", "p3", "p4", "p5", "p6", "p7"],
+            "val": ["p8"],
+            "test": ["p0", "p1"],
+        },
+    )
 
 
 # --- the check that matters most ----------------------------------------------------
@@ -62,8 +81,7 @@ def test_split_with_neither_groups_nor_time_is_rejected() -> None:
 
 def test_no_raw_row_appears_in_two_parts(store: SignalStore, index) -> None:
     """The structural guarantee, verified directly rather than assumed."""
-    split = kfold_split_files(entity_examples(store), 3, name="k3")[0]
-    assert_no_row_overlap(resolve(SignalExamples(store, index), split))
+    assert_no_row_overlap(resolve(SignalExamples(store, index), _fold0(store)))
 
 
 def test_row_overlap_is_detectable_when_it_exists(store: SignalStore, index) -> None:
@@ -100,12 +118,27 @@ def test_foreign_schema_is_rejected(tmp_path: Path) -> None:
         SplitFile.load(path)
 
 
+def test_to_yaml_header_states_counts_and_group_key() -> None:
+    """The header is read in a diff without parsing the body, so these two lines — what
+    the leakage boundary is, and how big each part is — must actually be there."""
+    split = SplitFile(
+        store="s",
+        name="k3",
+        fold=0,
+        group_key="subject",
+        counts={"train": 2, "test": 1},
+        parts={"train": ["a", "b"], "test": ["c"]},
+    )
+    header = split.to_yaml()
+    assert "# group key: subject  <- the leakage boundary" in header
+    assert "# counts: test=1, train=2" in header
+
+
 # --- resolution ---------------------------------------------------------------------
 
 
 def test_resolve_produces_disjoint_group_sets(store: SignalStore, index) -> None:
-    split = kfold_split_files(entity_examples(store), 3, name="k3")[0]
-    parts = resolve(SignalExamples(store, index), split)
+    parts = resolve(SignalExamples(store, index), _fold0(store))
     seen: set[str] = set()
     for sub in parts.values():
         groups = set(sub.groups.tolist())
@@ -114,22 +147,19 @@ def test_resolve_produces_disjoint_group_sets(store: SignalStore, index) -> None
 
 
 def test_resolve_accounts_for_every_window(store: SignalStore, index) -> None:
-    split = kfold_split_files(entity_examples(store), 3, name="k3")[0]
-    parts = resolve(SignalExamples(store, index), split)
+    parts = resolve(SignalExamples(store, index), _fold0(store))
     assert sum(len(sub) for sub in parts.values()) == len(index)
 
 
 def test_resolve_rejects_a_split_from_another_store(store: SignalStore, index) -> None:
-    split = kfold_split_files(entity_examples(store), 3, name="k3")[0]
-    foreign = split.model_copy(update={"store": "somewhere_else"})
+    foreign = _fold0(store).model_copy(update={"store": "somewhere_else"})
     with pytest.raises(SplitError, match="was built for"):
         resolve(SignalExamples(store, index), foreign)
 
 
 def test_resolve_rejects_a_stale_store_digest(store: SignalStore, index) -> None:
     """A split computed against different data must not silently apply to new data."""
-    split = kfold_split_files(entity_examples(store), 3, name="k3")[0]
-    stale = split.model_copy(update={"store_manifest_sha256": "0" * 64})
+    stale = _fold0(store).model_copy(update={"store_manifest_sha256": "0" * 64})
     with pytest.raises(SplitError, match="regenerate the split"):
         resolve(SignalExamples(store, index), stale)
 

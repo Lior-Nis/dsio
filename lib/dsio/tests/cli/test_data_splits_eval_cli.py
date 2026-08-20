@@ -20,8 +20,8 @@ from dsio.config.schema import RunConfig
 from dsio.data import SignalStore, entity_examples
 from dsio.runs import RunLedger
 from dsio.runs.record import RUNS_ROOT_ENV
+from dsio.splits import SplitFile
 from dsio.train import execute, load_runners
-from splitgen import kfold_split_files, write_split_files
 
 
 def dsio(*args: str, cwd: Path, env_extra: dict[str, str] | None = None) -> tuple[int, dict]:
@@ -181,15 +181,26 @@ def test_an_unconfigured_remote_is_its_own_error_code(workdir: Path) -> None:
 def _write_k3_splits(workdir: Path) -> None:
     """Split files are a project's own output now; the CLI only reads them.
 
-    Building the fixture directly (rather than through a removed ``splits make``) is what
+    Writing the fixture directly (rather than through a removed ``splits make``) is what
     ``show`` and ``check`` below actually exercise: reading and proving a committed split.
+    Three hand-picked folds over the store's nine groups, each covering all of them.
     """
     store = SignalStore(workdir / "stores" / "cohort")
-    write_split_files(
-        kfold_split_files(entity_examples(store), 3, name="k3"),
-        name="k3",
-        root=workdir / "splits",
-    )
+    digest = entity_examples(store).digest
+    folds = [
+        {"test": ["p0", "p1", "p2"], "val": ["p3"], "train": ["p4", "p5", "p6", "p7", "p8"]},
+        {"test": ["p3", "p4", "p5"], "val": ["p6"], "train": ["p0", "p1", "p2", "p7", "p8"]},
+        {"test": ["p6", "p7", "p8"], "val": ["p0"], "train": ["p1", "p2", "p3", "p4", "p5"]},
+    ]
+    for fold, parts in enumerate(folds):
+        SplitFile(
+            store=store.path.name,
+            store_manifest_sha256=digest,
+            name="k3",
+            fold=fold,
+            counts={part: len(members) for part, members in parts.items()},
+            parts=parts,
+        ).save(workdir / "splits" / "k3" / f"fold{fold}.yaml")
 
 
 def test_splits_check_proves_no_row_overlap(workdir: Path) -> None:
@@ -247,7 +258,7 @@ def test_splits_show_projects_group_lists_by_default(workdir: Path) -> None:
 def test_splits_check_says_how_to_make_missing_files(workdir: Path) -> None:
     code, payload = dsio("splits", "check", "stores/cohort", "--name", "nope", cwd=workdir)
     assert code == 1
-    assert "dsio splits make" in payload["error"]
+    assert "commit a split file" in payload["error"]
 
 
 # --- dsio eval ----------------------------------------------------------------------

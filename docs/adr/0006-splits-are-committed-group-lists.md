@@ -3,6 +3,17 @@
 Status: accepted (2026-08-17)
 Amends: ADR 0004, item 6, which recommended *Repeatable Splitting* by hash of a stable ID.
 
+Amended (2026-08-20): Generation moved out of the package. `SplitSpec`, `StratifyKey`,
+`BalanceReport` and the `stratified_kfold` scheme described below no longer exist in
+`dsio` — a project now writes its own offline generation script (sklearn's splitters cover
+the non-temporal schemes) and commits the YAML it produces. The committed group-list
+format this ADR argues for is unchanged, `dsio` still reads and validates it exactly as
+described, and the purged/embargoed walk-forward maths in "Temporal splits are the other
+half" is unaffected — that scheme has no sklearn equivalent and stays in the package. The
+example split file's `# scheme: stratified_kfold, ...` header line is accordingly no
+longer something `SplitFile.to_yaml()` can emit; a project's own generator is free to
+record its own provenance in `notes` instead.
+
 ## Context
 
 ADR 0004 proposed deriving splits from `hash(subject_id) % 100 < 80`, on the grounds that
