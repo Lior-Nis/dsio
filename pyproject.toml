@@ -24,11 +24,15 @@ data = ["pyarrow>=18"]
 legacy = ["zarr>=3.0"]
 # torch ships one wheel per accelerator, and they cannot coexist in a resolution.
 # CI has no GPU and wants the small CPU wheel; a local Blackwell card (sm_120) needs
-# cu128 or it fails at model-build time with "no kernel image is available for
-# execution on the device". Declaring both as conflicting extras lets one lockfile
-# serve both: `uv sync --extra cpu` in CI, `uv sync --extra cu128` locally.
-cpu = ["torch>=2.7"]
-cu128 = ["torch>=2.7"]
+# a CUDA build or it fails at model-build time with "no kernel image is available
+# for execution on the device". Declaring both as conflicting extras lets one
+# lockfile serve both: `uv sync --extra cpu` in CI, `uv sync --extra gpu` locally.
+# Both carry the full Lightning stack (not just torch) so that neither extra alone,
+# nor the dev group, leaves a torch-needing import unresolved: a bare `uv run` with
+# no extra selected must fail loudly on a missing import, not silently fall back to
+# downloading a multi-gigabyte default wheel.
+cpu = ["torch>=2.7", "lightning>=2.5"]
+gpu = ["torch>=2.7", "lightning>=2.5"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
@@ -43,33 +47,26 @@ dev = [
     "import-linter>=2.1",
     "types-pyyaml>=6.0",
     "scikit-learn>=1.9",
-    # torch itself now resolves through the cpu/cu128 extras (see [tool.uv.sources]
-    # below), so the bare "torch>=2.6" pin is gone. lightning does not resolve
-    # through either accelerator extra — it lives only in the "torch" extra, which
-    # is about optional modality support, not accelerator choice — so it stays here
-    # unconditionally; that is what keeps the Lightning path exercised by
-    # `uv sync --extra cpu` alone, matching CI.
-    "lightning>=2.5",
 ]
 
+# torch and lightning are declared only in the cpu/gpu extras (above), not here.
+# A bare `uv sync` with no extra selected must leave torch and lightning uninstalled,
+# so that a bare `uv run pytest` fails loudly on ModuleNotFoundError instead of
+# silently resolving an unpinned, CUDA-bundled default wheel for the "no extra" fork.
 [tool.uv]
-conflicts = [[{ extra = "cpu" }, { extra = "cu128" }]]
+conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
-
+# No index is declared for the gpu extra: the default PyPI torch wheel for this
+# platform is already CUDA-enabled (2.13.0+cu130, newer than the pytorch-cu128
+# index's 2.11.0+cu128), so pinning to a specific CUDA index would make the gpu
+# extra resolve an *older* torch than the unpinned default — the wrong direction.
 [tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu", extra = "cpu" },
-    { index = "pytorch-cu128", extra = "cu128" },
-]
+torch = [{ index = "pytorch-cpu", extra = "cpu" }]
 
 [tool.ruff]
 line-length = 100
