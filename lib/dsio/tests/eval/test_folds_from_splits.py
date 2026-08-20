@@ -25,6 +25,7 @@ from dsio.splits import (
     load_folds,
     walk_forward,
 )
+from dsio.splits.folds import _assert_test_parts_are_disjoint
 
 
 @pytest.fixture
@@ -189,7 +190,7 @@ def test_overlapping_test_parts_across_folds_are_rejected(store: SignalStore, in
     """Each file is individually valid; only comparing them reveals the double-count."""
     splits = _kfold3(store)
     duplicated = [splits[0], splits[0].model_copy(update={"fold": 1})]
-    with pytest.raises(SplitError, match="test part of both"):
+    with pytest.raises(SplitError, match="disjoint"):
         folds_from_splits(SignalExamples(store, index), duplicated)
 
 
@@ -279,3 +280,41 @@ def _mask(size: int, positions: np.ndarray) -> np.ndarray:
     mask = np.zeros(size, dtype=bool)
     mask[positions] = True
     return mask
+
+
+# --- disjointness check, vectorised ---------------------------------------------------
+
+
+def test_overlapping_test_parts_are_rejected() -> None:
+    a = Fold(index=0, train=np.array([2, 3]), test=np.array([0, 1]), val=None, name="a")
+    b = Fold(index=1, train=np.array([3]), test=np.array([1, 2]), val=None, name="b")
+    with pytest.raises(SplitError, match="disjoint"):
+        _assert_test_parts_are_disjoint([a, b])
+
+
+def test_disjoint_test_parts_pass() -> None:
+    a = Fold(index=0, train=np.array([2, 3]), test=np.array([0, 1]), val=None, name="a")
+    b = Fold(index=1, train=np.array([0, 1]), test=np.array([2, 3]), val=None, name="b")
+    _assert_test_parts_are_disjoint([a, b])
+
+
+# NOTE: `Fold.__post_init__` (eval/contract.py) already rejects a fold whose own
+# train and test overlap. Every fold constructed here must be internally valid, or
+# the test fails in the constructor and never reaches the function under test.
+
+
+def test_large_fold_set_is_fast() -> None:
+    # train=[-1] is a sentinel outside every fold's non-negative test range, so each
+    # fold stays internally disjoint (Fold.__post_init__) no matter which test slice
+    # it is given below.
+    folds = [
+        Fold(
+            index=i,
+            train=np.array([-1]),
+            test=np.arange(i * 200_000, (i + 1) * 200_000),
+            val=None,
+            name=f"f{i}",
+        )
+        for i in range(10)
+    ]
+    _assert_test_parts_are_disjoint(folds)

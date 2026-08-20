@@ -115,12 +115,18 @@ def _assert_test_parts_are_disjoint(folds: Sequence[Fold]) -> None:
     were duplicated. The loop would catch this too, but catching it here means it fails
     before anything is fitted rather than after the last fold.
     """
-    seen: dict[int, str] = {}
-    for fold in folds:
-        for position in fold.test.tolist():
-            if position in seen:
-                raise SplitError(
-                    f"example {position} is in the test part of both {seen[position]!r} "
-                    f"and {fold.name!r}; folds must test disjoint examples"
-                )
-            seen[position] = fold.name
+    positions = (
+        np.concatenate([fold.test for fold in folds]) if folds else np.empty(0, dtype=np.int64)
+    )
+    values, counts = np.unique(positions, return_counts=True)
+    repeated = values[counts > 1]
+    if repeated.size:
+        owners = {
+            int(position): [fold.name for fold in folds if position in set(fold.test.tolist())]
+            for position in repeated[:5].tolist()
+        }
+        detail = "; ".join(f"{pos} in {' and '.join(names)}" for pos, names in owners.items())
+        raise SplitError(
+            f"{repeated.size} example(s) appear in more than one test part; "
+            f"folds must test disjoint examples: {detail}"
+        )
