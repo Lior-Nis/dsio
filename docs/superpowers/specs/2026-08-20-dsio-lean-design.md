@@ -398,16 +398,25 @@ Recorded so re-entry is planned rather than improvised:
 
 ---
 
-## ADRs to write
+## ADRs
 
-1. **Lightning is the only training path** — records decision 1 and the four deleted
-   neutrality abstractions; supersedes the multi-modality scope of the original spec.
-2. **MLflow is the source of truth; runs fail without it** — supersedes ADR 0002. Records the
-   artifact-not-param resolution and the Postgres single-point-of-failure risk.
-3. **The process boundary is the fold boundary** — records decision 6 and where each
-   guarantee moved.
-4. **The repository is a repository, not a template** — records decision 2 and the downgrade
-   of the project→dsio direction from structural to lint-enforced.
+Written 2026-08-20:
+
+1. **ADR 0015 — Lightning is the only first-class training path.** Decision 1 and the four
+   deleted neutrality abstractions; supersedes the original spec's multi-modality scope and
+   ADR 0013.
+2. **ADR 0016 — MLflow is the source of truth, and a run fails without it.** Supersedes
+   ADR 0002; records the artifact-not-param resolution and the Postgres single-point-of-failure
+   risk with its backup requirement.
+3. **ADR 0017 — The process boundary is the fold boundary.** Decision 6, where each guarantee
+   moved, and the one it does *not* preserve: nothing now enforces that all N folds ran.
+   Supersedes ADR 0012 and, in mechanism, ADR 0008 and 0010.
+4. **ADR 0018 — This is a repository, not a template.** Decision 2, why the "a fork can only
+   merge" premise was false, and the downgrade of the project→dsio direction from structural
+   impossibility to lint contract.
+
+Each records its implementation status: 0015 is partially implemented (Plan 1 deleted the
+neutrality abstractions; the rest is Plan 2), 0018 is Plan 2, and 0016 and 0017 are Plan 3.
 
 Existing ADRs 0001 (config in Python), 0003 (never block, gate at promotion) and 0005
 (flat-binary store) stand unchanged. ADR 0004's survey stands as history.
