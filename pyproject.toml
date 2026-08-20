@@ -26,7 +26,7 @@ legacy = ["zarr>=3.0"]
 [project.scripts]
 dsio = "dsio.cli.main:main"
 
-# The spine is developed and tested standalone: `cd lib/dsio && uv sync && uv run pytest`.
+# The spine is developed and tested standalone: `uv sync && uv run pytest`.
 # A generated project pulls it in as a workspace member and brings its own dev group.
 [dependency-groups]
 dev = [
@@ -54,6 +54,11 @@ torch = [{ index = "pytorch-cpu" }]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+# ADR proof-of-concept scripts are historical documentation, not shipped code, and
+# were never in scope when the spine lived at lib/dsio (ruff ran from that directory
+# and never reached docs/). Running from the repository root would otherwise sweep
+# them in for the first time.
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "BLE", "SIM", "RUF"]
