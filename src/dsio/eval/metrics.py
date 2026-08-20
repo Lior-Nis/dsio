@@ -1,4 +1,4 @@
-"""Metrics, implemented in numpy and registered by name.
+"""Metrics, registered by name. Regression through torchmetrics; classification in numpy.
 
 Two reasons these are not simply re-exported from scikit-learn.
 
@@ -10,8 +10,25 @@ sklearn to compute an RMSE.
 **Control over the one that matters.** Average precision is dsio's headline metric for
 imbalanced problems, and it is the metric people most often compute wrongly: the trapezoid
 interpolation used by ``auc(recall, precision)`` is optimistically biased. The step-wise
-sum here is the correct estimator, and ``tests/eval/test_metrics.py`` pins it against
-scikit-learn to 1e-12 so "we wrote our own" never becomes "ours is subtly different".
+sum here is the correct estimator, and ``tests/eval/test_metrics.py`` pins it — and every
+other metric here — against scikit-learn to 1e-12, so "we wrote our own" never becomes
+"ours is subtly different".
+
+torch is a hard dependency now, so the regression metrics (``rmse``, ``mae``, ``r2``,
+``smape``) call ``torchmetrics.functional``, which reduces correctly across devices.
+The eight classification metrics — ``accuracy``, ``balanced_accuracy``, ``f1``,
+``f1_macro``, ``precision``, ``recall``, ``average_precision``, ``roc_auc`` — stay in
+numpy on purpose: torchmetrics 1.9's classification functionals hard-cast confusion-matrix
+counts through ``.float()`` (``roc_auc``/``average_precision`` promote through a bare
+Python ``1.0`` instead, which follows ``torch`` 's default dtype rather than the input's),
+so every one of them is float32 internally no matter what dtype goes in. Measured against
+this file's own fixtures that is an ~1e-8 to ~3e-8 disagreement with scikit-learn's
+float64 result — three to four orders of magnitude past the 1e-12 pin the average-precision
+test exists to enforce. The only way to close that gap is to mutate
+``torch.set_default_dtype`` process-wide for the duration of the call, which is not a
+trade a metrics module gets to make on every other tensor computation running at the same
+time. ``log_loss`` has no ``torchmetrics`` counterpart at all, so it is a direct torch
+formula rather than a numpy one.
 
 A metric takes ``(y_true, y_pred, y_score)`` and returns one float. ``y_score`` is the
 continuous output — probability of the positive class, or the regression value — and is
@@ -24,6 +41,8 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import numpy as np
+import torch
+from torchmetrics import functional as tmf
 
 from dsio.config.registry import Registry
 
@@ -211,9 +230,11 @@ def _average_ranks(values: np.ndarray) -> np.ndarray:
 
 @metric("log_loss")
 def log_loss(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None) -> float:
-    truth = _binary(y_true)
-    score = np.clip(_require_score(y_score, "log_loss"), 1e-15, 1 - 1e-15)
-    return float(-np.mean(truth * np.log(score) + (1 - truth) * np.log(1 - score)))
+    """Binary cross-entropy. No ``torchmetrics`` function computes this; the formula is
+    the same one that used to run in numpy, just evaluated in torch."""
+    truth = torch.from_numpy(_binary(y_true).astype(np.float64))
+    score = torch.from_numpy(np.clip(_require_score(y_score, "log_loss"), 1e-15, 1 - 1e-15))
+    return float(-torch.mean(truth * torch.log(score) + (1 - truth) * torch.log(1 - score)))
 
 
 @metric("positive_rate")
@@ -228,39 +249,35 @@ def positive_rate(
     return float(np.mean(_binary(y_true)))
 
 
-# --- regression ---------------------------------------------------------------------
+# --- regression: torchmetrics, dtype preserved end to end ---------------------------
+
+
+def _tensor(values: np.ndarray) -> torch.Tensor:
+    return torch.from_numpy(np.asarray(values, dtype=np.float64))
 
 
 @metric("rmse")
 def rmse(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None) -> float:
-    residual = np.asarray(y_true, dtype=np.float64) - np.asarray(y_pred, dtype=np.float64)
-    return float(np.sqrt(np.mean(residual**2)))
+    return float(tmf.mean_squared_error(_tensor(y_pred), _tensor(y_true), squared=False))
 
 
 @metric("mae")
 def mae(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None) -> float:
-    residual = np.asarray(y_true, dtype=np.float64) - np.asarray(y_pred, dtype=np.float64)
-    return float(np.mean(np.abs(residual)))
+    return float(tmf.mean_absolute_error(_tensor(y_pred), _tensor(y_true)))
 
 
 @metric("r2")
 def r2(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None) -> float:
-    truth = np.asarray(y_true, dtype=np.float64)
-    total = float(np.sum((truth - truth.mean()) ** 2))
-    if total == 0.0:
+    truth = _tensor(y_true)
+    if torch.var(truth, unbiased=False) == 0.0:
+        # torchmetrics silently returns 0.0 here; a constant target makes R^2 undefined,
+        # not zero, and averaging a wrong 0.0 into a report is worse than refusing.
         raise MetricError("r2 is undefined when the target is constant")
-    residual = float(np.sum((truth - np.asarray(y_pred, dtype=np.float64)) ** 2))
-    return 1.0 - residual / total
+    return float(tmf.r2_score(_tensor(y_pred), truth))
 
 
 @metric("smape")
 def smape(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None) -> float:
     """Symmetric MAPE, the standard forecasting error. Bounded, so a near-zero actual
     cannot make one horizon dominate the whole score."""
-    truth = np.asarray(y_true, dtype=np.float64)
-    predicted = np.asarray(y_pred, dtype=np.float64)
-    denominator = np.abs(truth) + np.abs(predicted)
-    ratio = np.where(denominator == 0.0, 0.0, np.abs(truth - predicted) / np.where(
-        denominator == 0.0, 1.0, denominator
-    ))
-    return float(2.0 * np.mean(ratio))
+    return float(tmf.symmetric_mean_absolute_percentage_error(_tensor(y_pred), _tensor(y_true)))
