@@ -1,4 +1,10 @@
-"""The online probe and RankMe: measuring pretraining without a bash polling daemon."""
+"""The online probe and RankMe: general representation-quality tools, as callbacks.
+
+Moved from ``tests/ssl/test_probe.py`` when Task 6b dissolved ``dsio.ssl``; the tests
+themselves are unchanged, because ``OnlineProbe`` and ``RankMeMonitor`` never depended on
+anything SSL-specific — they measure any :class:`~dsio.nn.module.DsioModule` that can
+``encode``, pretrained or supervised alike.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ from torch.utils.data import DataLoader, Dataset  # noqa: E402
 
 from dsio.nn.components import Conv1dEncoder, CrossEntropy  # noqa: E402
 from dsio.nn.module import DsioModule  # noqa: E402
-from dsio.ssl import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
+from dsio.train.callbacks import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
 
 
 class Toy(Dataset):

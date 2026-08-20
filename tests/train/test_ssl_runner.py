@@ -1,4 +1,11 @@
-"""Pretraining and the encoder handoff, with the hardcoded-path bug made unrepresentable."""
+"""Pretraining and the encoder handoff, with the hardcoded-path bug made unrepresentable.
+
+Task 6b deleted the pretext-objective registry (``dsio.ssl.methods``): a pretraining task
+now names its ``backbone``/``head``/``loss`` directly, exactly like a supervised
+``TorchTask``, plus exactly one of ``mask`` or ``augmentor``. ``pretrain_task()`` below
+picks the right head/loss/mask/augmentor for a given ``method`` name purely as test
+scaffolding — ``SslPretrainTask`` itself has no ``method`` field any more.
+"""
 
 from __future__ import annotations
 
@@ -81,25 +88,41 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 WINDOW = WindowSpec(length=128, stride=64, label_policy="majority")
 
 
+#: Which head/loss/mask/augmentor a given pretext shape needs. Test scaffolding only:
+#: SslPretrainTask itself has no notion of a "method" name, just backbone/head/loss plus
+#: exactly one of mask/augmentor.
+_METHOD_COMPONENTS: dict[str, dict[str, object]] = {
+    "mae": {
+        "head": Component(name="mae_decoder"),
+        "loss": Component(name="masked_mse"),
+        "mask": Component(name="span", params={"ratio": 0.5, "span": 16}),
+    },
+    "simclr": {
+        "head": Component(name="simclr_projector"),
+        "loss": Component(name="nt_xent"),
+        "augmentor": Component(name="jitter", params={"sigma": 0.2}),
+    },
+    "vicreg": {
+        "head": Component(name="vicreg_projector"),
+        "loss": Component(name="vicreg"),
+        "augmentor": Component(name="jitter", params={"sigma": 0.2}),
+    },
+}
+
+
 def pretrain_task(root: Path, method: str = "mae", **overrides) -> SslPretrainTask:  # type: ignore[no-untyped-def]
-    extra: dict[str, object] = {}
-    if method == "mae":
-        extra["mask"] = Component(name="span", params={"ratio": 0.5, "span": 16})
-    else:
-        extra["augmentor"] = Component(name="jitter", params={"sigma": 0.2})
     defaults = dict(
         store="tone",
         window=WINDOW,
         split="k3",
         splits_root=root / "splits",
-        method=Component(name=method),
         backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 16, "depth": 1}),
         transform=Component(name="instance_standardize"),
         register_as=f"enc_{method}",
         labels="tone",
         batch_size=16,
         trainer=TrainerConfig(max_epochs=2, accelerator="cpu", devices=1, checkpoint=False),
-        **extra,
+        **_METHOD_COMPONENTS[method],
     )
     return SslPretrainTask(**{**defaults, **overrides})
 
@@ -120,16 +143,22 @@ def run(config: RunConfig, root: Path):  # type: ignore[no-untyped-def]
 # --- config -------------------------------------------------------------------------
 
 
-def test_mae_without_a_mask_is_rejected(corpus: Path) -> None:
-    with pytest.raises(ValueError, match="needs a mask"):
+def test_neither_mask_nor_augmentor_is_rejected(corpus: Path) -> None:
+    """Without one of the two, nothing tells this task which training-dataset contract
+    to build."""
+    with pytest.raises(ValueError, match="exactly one of"):
         pretrain_task(corpus, "mae", mask=None)
 
 
-def test_a_view_method_without_an_augmentor_is_rejected(corpus: Path) -> None:
+def test_both_mask_and_augmentor_is_rejected(corpus: Path) -> None:
     """Both views would be identical and the objective degenerate — a loss that goes
-    straight to zero and an encoder that has learned nothing."""
-    with pytest.raises(ValueError, match="two views"):
-        pretrain_task(corpus, "simclr", augmentor=None)
+    straight to zero and an encoder that has learned nothing — if augmentor were even
+    consulted; setting both at once is ambiguous about which contract to build, so it is
+    rejected rather than silently preferring one."""
+    with pytest.raises(ValueError, match="exactly one of"):
+        pretrain_task(
+            corpus, "simclr", mask=Component(name="span", params={"ratio": 0.5, "span": 16})
+        )
 
 
 def test_preflight_resolves_probe_only_names(corpus: Path) -> None:
@@ -152,6 +181,18 @@ def test_every_method_pretrains_and_registers_an_encoder(method: str, corpus: Pa
     version = ModelRegistry().versions(f"enc_{method}")[-1]
     assert version.run_id == active.run_id
     assert version.size_bytes > 0
+
+
+@pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
+def test_every_method_produces_a_real_validation_loss(method: str, corpus: Path) -> None:
+    """There is no ``SslModule.validation_step`` any more to special-case this away: the
+    held-out fold goes through the same masked-dataset or two-view-collated contract as
+    training, so DsioModule's one generic step produces a genuine val/loss for every
+    method, not just the contrastive ones ``ContrastiveModule`` used to keep it for."""
+    config = RunConfig(name=f"pre_{method}", seed=0, task=pretrain_task(corpus, method))
+    _, metrics = run(config, corpus)
+    assert "val_loss" in metrics
+    assert np.isfinite(metrics["val_loss"])
 
 
 def test_pretraining_writes_no_evaluation_report(corpus: Path) -> None:

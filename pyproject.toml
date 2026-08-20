@@ -17,9 +17,9 @@ dependencies = [
 
 [project.optional-dependencies]
 # Not tabular training any more (that runner is deleted; ADR 0015) — scikit-learn is
-# the linear probe's dependency now (`dsio.ssl.probe`), and `tests/eval/test_metrics.py`
-# pins the hand-rolled metrics against it. xgboost, polars and pyarrow had no importer
-# left in `src/` and are gone.
+# the linear probe's dependency now (`dsio.train.callbacks`), and `tests/eval/
+# test_metrics.py` pins the hand-rolled metrics against it. xgboost, polars and pyarrow
+# had no importer left in `src/` and are gone.
 tabular = ["scikit-learn>=1.9"]
 data = ["pyarrow>=18"]
 # torch ships one wheel per accelerator, and they cannot coexist in a resolution.

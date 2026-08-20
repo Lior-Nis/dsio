@@ -14,7 +14,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from dsio.nn.registry import backbone, head, loss, preprocessor, transform, view_augmentor
+from dsio.nn.registry import augmentor, backbone, head, loss, preprocessor, transform
 
 
 def _check_3d(x: torch.Tensor, who: str) -> None:
@@ -108,6 +108,47 @@ def mlp_head(in_dim: int = 64, hidden: int = 64, out_dim: int = 2) -> nn.Module:
 def identity_head() -> nn.Module:
     """For pretraining, where the loss consumes features directly."""
     return nn.Identity()
+
+
+@head("mae_decoder")
+def mae_decoder_head(in_dim: int, channels: int, length: int, hidden_mult: int = 2) -> nn.Module:
+    """MAE's reconstruction head: predict every position of the original window, back in
+    the ``[channels, length]`` shape the input arrived in.
+
+    Registered like any other head, moved here from the deleted ``ssl.methods.
+    MaskedReconstruction.build_head`` — ``ssl_task.py`` now builds it through ``HEADS`` and
+    ``_accepted`` exactly the way ``torch_task.py`` builds a classification head, which is
+    what let the pretext objective stop being a separate kind of thing that builds its own
+    head. Its output only makes sense paired with :class:`MaskedMSE` and a masked
+    :class:`~dsio.nn.data.WindowDataset` target, which is why
+    :func:`~dsio.nn.module.export_encoder` never ships it with the encoder.
+    """
+    return nn.Sequential(
+        nn.Linear(in_dim, in_dim * hidden_mult),
+        nn.GELU(),
+        nn.Linear(in_dim * hidden_mult, channels * length),
+        nn.Unflatten(-1, (channels, length)),
+    )
+
+
+@head("simclr_projector")
+def simclr_projector_head(in_dim: int, out_dim: int = 64) -> nn.Module:
+    """SimCLR's projection head: NT-Xent compares windows in this space, not the encoder's
+    own feature space — moved here from the deleted ``ssl.methods.SimCLR.build_head``."""
+    return nn.Sequential(nn.Linear(in_dim, in_dim), nn.ReLU(), nn.Linear(in_dim, out_dim))
+
+
+@head("vicreg_projector")
+def vicreg_projector_head(in_dim: int, out_dim: int = 64) -> nn.Module:
+    """VICReg's projection head, moved here from the deleted ``ssl.methods.VICReg.
+    build_head``. The ``BatchNorm1d`` matters: :class:`VICReg`'s variance term assumes a
+    projector that does not itself normalise away the collapse it exists to detect."""
+    return nn.Sequential(
+        nn.Linear(in_dim, in_dim * 2),
+        nn.BatchNorm1d(in_dim * 2),
+        nn.ReLU(),
+        nn.Linear(in_dim * 2, out_dim),
+    )
 
 
 # --- losses -------------------------------------------------------------------------
@@ -212,6 +253,145 @@ class MaskedMSE(nn.Module):
         }
 
 
+def _pair_halves(
+    prediction: torch.Tensor, target: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split a two-view batch into its matched halves, from the pair-index target alone.
+
+    ``target[i]`` names ``i``'s partner — the same window, a second independent
+    augmentation — and the relation is symmetric: ``target[target[i]] == i``. Taking the
+    smaller index of each pair gives one representative per match, and indexing ``target``
+    at those positions gives the other, which recovers the two view-halves a loss like
+    :class:`VICReg` needs without assuming how the batch is laid out (a contiguous "first
+    half / second half", interleaved, or anything else) — only the index relationship
+    :class:`~dsio.nn.data.TwoViewCollate` promises.
+    """
+    order = torch.arange(target.shape[0], device=target.device)
+    first = (order < target).nonzero(as_tuple=True)[0]
+    return prediction[first], prediction[target[first]]
+
+
+@loss("nt_xent")
+class NTXent(nn.Module):
+    """SimCLR's contrastive loss, over a batch :class:`~dsio.nn.data.TwoViewCollate` built.
+
+    ``prediction`` is the whole batch's projected embeddings — ``2 * batch`` rows, two per
+    window — and ``target`` is each row's pair index, exactly the ``(arange(2 * batch) +
+    batch) % (2 * batch)`` computation the deleted ``ssl.methods.SimCLR.step()`` used to do
+    inline. Every row that is not a window's own partner is a negative, so the batch size is
+    part of the objective rather than a performance knob: halving it changes what is being
+    optimised, which is worth stating because dsio's cache treats batch size as speed-only
+    for every other purpose.
+
+    This is the whole of what ``SimCLR.step()`` used to do: with the views and the pair
+    index already built by the time a loss sees them, NT-Xent needs nothing but
+    ``(prediction, target)`` — no batch dict, no subclass.
+    """
+
+    def __init__(self, temperature: float = 0.2) -> None:
+        super().__init__()
+        if temperature <= 0:
+            raise ValueError(f"temperature must be positive, got {temperature}")
+        self.temperature = temperature
+
+    def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if prediction.shape[0] < 4:
+            raise ValueError(
+                "nt_xent needs at least two windows per view; the batch has no negatives"
+            )
+        z = nn.functional.normalize(prediction, dim=-1)
+        similarity = (z @ z.T) / self.temperature
+        similarity.fill_diagonal_(float("-inf"))
+        return nn.functional.cross_entropy(similarity, target)
+
+    def diagnostics(
+        self, prediction: torch.Tensor, target: torch.Tensor, x: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """``mean_abs_cosine``: SimCLR's collapse tell. A collapsed encoder maps every
+        window to the same point; the loss does not obviously misbehave, but the mean
+        off-diagonal cosine similarity goes to 1.0. ``nt_xent`` is repeated here under its
+        own name, identical to ``{stage}/loss`` — that is the metric name earlier
+        pretraining runs logged, and dropping it would silently break a dashboard built
+        against it.
+        """
+        with torch.no_grad():
+            z = nn.functional.normalize(prediction, dim=-1)
+            similarity = (z @ z.T) / self.temperature
+            similarity.fill_diagonal_(float("-inf"))
+            nt_xent = nn.functional.cross_entropy(similarity, target)
+            n = z.shape[0]
+            off_diagonal = (z @ z.T).fill_diagonal_(0.0).abs().sum() / (n * (n - 1))
+        return {"nt_xent": nt_xent, "mean_abs_cosine": off_diagonal}
+
+
+@loss("vicreg")
+class VICReg(nn.Module):
+    """Variance-Invariance-Covariance regularisation: no negatives, no momentum encoder —
+    collapse is prevented by an explicit variance term instead.
+
+    Reads the same pair-index ``target`` :class:`NTXent` does, but only to recover which two
+    rows are one window's pair (:func:`_pair_halves`); the variance and covariance terms are
+    then per-view marginal statistics computed from ``prediction`` alone, and the invariance
+    term is an indexed MSE over the two halves the pair index selects. That is what makes
+    ``(prediction, target)`` sufficient here too — nothing this needs lives outside the
+    batch of predictions and the index naming each row's partner.
+    """
+
+    def __init__(
+        self,
+        sim_weight: float = 25.0,
+        var_weight: float = 25.0,
+        cov_weight: float = 1.0,
+        target_std: float = 1.0,
+    ) -> None:
+        super().__init__()
+        self.sim_weight = sim_weight
+        self.var_weight = var_weight
+        self.cov_weight = cov_weight
+        self.target_std = target_std
+
+    def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        za, zb = _pair_halves(prediction, target)
+        if za.shape[0] < 2:
+            raise ValueError("vicreg needs at least two pairs to estimate variance")
+        invariance = nn.functional.mse_loss(za, zb)
+        variance = 0.5 * (self._variance(za) + self._variance(zb))
+        covariance = 0.5 * (self._covariance(za) + self._covariance(zb))
+        return (
+            self.sim_weight * invariance
+            + self.var_weight * variance
+            + self.cov_weight * covariance
+        )
+
+    def diagnostics(
+        self, prediction: torch.Tensor, target: torch.Tensor, x: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """``embedding_std`` is the number to watch: if it sits below ``target_std``, the
+        representation is collapsing regardless of what the total loss is doing."""
+        za, zb = _pair_halves(prediction, target)
+        with torch.no_grad():
+            invariance = nn.functional.mse_loss(za, zb)
+            variance = 0.5 * (self._variance(za) + self._variance(zb))
+            covariance = 0.5 * (self._covariance(za) + self._covariance(zb))
+            std = za.std(dim=0).mean()
+        return {
+            "invariance": invariance,
+            "variance_penalty": variance,
+            "covariance": covariance,
+            "embedding_std": std,
+        }
+
+    def _variance(self, z: torch.Tensor) -> torch.Tensor:
+        std = torch.sqrt(z.var(dim=0) + 1e-4)
+        return torch.relu(self.target_std - std).mean()
+
+    def _covariance(self, z: torch.Tensor) -> torch.Tensor:
+        centred = z - z.mean(dim=0)
+        cov = (centred.T @ centred) / (z.shape[0] - 1)
+        off_diagonal = cov.pow(2).sum() - cov.pow(2).diagonal().sum()
+        return off_diagonal / z.shape[1]
+
+
 # --- transforms and preprocessors ---------------------------------------------------
 
 
@@ -259,10 +439,11 @@ class FixedStandardize(nn.Module):
         return (x - self.mean) / (self.std + self.eps)
 
 
-# --- view augmentors (contrastive SSL only; DsioModule has no stochastic slot) ------
+# --- view augmentors, for two-view contrastive collation (DsioModule itself has no ------
+# --- stochastic slot; see TwoViewCollate in nn/data.py) ---------------------------------
 
 
-@view_augmentor("jitter")
+@augmentor("jitter")
 class Jitter(nn.Module):
     """Additive Gaussian noise, scaled per channel by that channel's own spread.
 
@@ -281,7 +462,7 @@ class Jitter(nn.Module):
         return x + torch.randn_like(x) * scale
 
 
-@view_augmentor("random_scale")
+@augmentor("random_scale")
 class RandomScale(nn.Module):
     """Multiply each channel by a random gain, for amplitude-invariant features."""
 
@@ -299,6 +480,6 @@ class RandomScale(nn.Module):
         return x * gain
 
 
-@view_augmentor("none")
+@augmentor("none")
 def no_augmentation() -> nn.Module:
     return nn.Identity()

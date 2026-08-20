@@ -16,9 +16,12 @@ from dsio.nn.components import (  # noqa: E402
     Jitter,
     MLP1d,
     RandomScale,
+    mae_decoder_head,
+    simclr_projector_head,
+    vicreg_projector_head,
 )
-from dsio.nn.module import ComponentError, DsioModule  # noqa: E402
-from dsio.nn.registry import BACKBONES, HEADS, LOSSES, VIEW_AUGMENTORS  # noqa: E402
+from dsio.nn.module import ComponentError, DsioModule, export_encoder  # noqa: E402
+from dsio.nn.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
 
 
 def tiny_module(**overrides) -> DsioModule:  # type: ignore[no-untyped-def]
@@ -122,6 +125,91 @@ def test_predict_step_reports_the_rows_it_predicted(batch: torch.Tensor) -> None
     assert out["prediction"].shape == (4, 2)
 
 
+# --- predict is a config choice, not a subclass --------------------------------------
+#
+# There used to be a separate SslModule whose only real difference from DsioModule was
+# this: predict_step returned an embedding, not a classification. Task 6b deleted that
+# subclass in favour of a `predict` constructor argument, branched on here instead of on
+# `isinstance`.
+
+
+def test_predict_defaults_to_running_the_whole_chain() -> None:
+    module = tiny_module()
+    assert module.predict == "prediction"
+
+
+def test_predict_embedding_stops_before_the_head(batch: torch.Tensor) -> None:
+    module = tiny_module(predict="embedding").eval()
+    rows = torch.tensor([1, 2, 3, 4])
+    out = module.predict_step({"x": batch, "row": rows}, 0)
+    assert set(out) == {"row", "embedding"}
+    assert torch.equal(out["row"], rows)
+    with torch.no_grad():
+        assert torch.equal(out["embedding"], module.encode(batch))
+
+
+def test_predict_choice_is_recorded_in_hyperparameters() -> None:
+    """"Visible in the recorded config instead of implied by a type": save_hyperparameters
+    is what a checkpoint's hparams and a run's provenance both read."""
+    module = tiny_module(predict="embedding")
+    assert module.hparams["predict"] == "embedding"
+
+
+def test_an_unknown_predict_value_is_rejected() -> None:
+    with pytest.raises(ComponentError, match="predict"):
+        tiny_module(predict="logits")  # type: ignore[arg-type]
+
+
+# --- export_encoder --------------------------------------------------------------------
+#
+# Moved from the deleted tests/ssl/test_methods.py::test_the_exported_encoder_excludes_
+# the_objective_head, generalised: encoder_state used to be a method only SslModule had,
+# so the property could only be checked on modules built through it. export_encoder is a
+# free function over any DsioModule now, so this checks the property directly, including
+# the fail-then-restore proof the task brief asks for: break the exclusion, watch the
+# assertion fail, then restore it and confirm the source is unchanged.
+
+
+def test_export_encoder_excludes_the_head(batch: torch.Tensor) -> None:
+    module = tiny_module()
+    state = export_encoder(module)
+    assert state, "the encoder must export something"
+    assert all(not key.startswith("head.") for key in state)
+    assert any(key.startswith("backbone.") for key in state)
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        mae_decoder_head(8, channels=2, length=64),
+        simclr_projector_head(8, out_dim=4),
+        vicreg_projector_head(8, out_dim=4),
+    ],
+    ids=["mae_decoder", "simclr_projector", "vicreg_projector"],
+)
+def test_export_encoder_excludes_every_real_pretext_head(head, batch: torch.Tensor) -> None:
+    """The property that matters in practice: not just "some head" but each of the three
+    actual objective heads a pretraining run builds -- a decoder trained to reconstruct
+    masked spans, or a projector trained only to compare views, has no meaning outside the
+    pretext task, and shipping it invites someone to load it as though it were part of the
+    model."""
+    module = tiny_module(head=head)
+    state = export_encoder(module)
+    assert state
+    assert all(not key.startswith("head.") for key in state)
+    assert any(key.startswith("backbone.") for key in state)
+
+
+def test_export_encoder_keeps_preprocessor_and_transform(batch: torch.Tensor) -> None:
+    module = tiny_module(
+        preprocessor=nn.Linear(2, 2), transform=nn.Identity(), head=nn.Linear(8, 2)
+    )
+    state = export_encoder(module)
+    assert any(key.startswith("preprocessor.") for key in state)
+    assert any(key.startswith("backbone.") for key in state)
+    assert all(not key.startswith("head.") for key in state)
+
+
 # --- components ---------------------------------------------------------------------
 
 
@@ -181,7 +269,7 @@ def test_registries_expose_the_builtins() -> None:
     assert {"mlp1d", "conv1d"} <= set(BACKBONES.names())
     assert {"linear", "mlp", "identity"} <= set(HEADS.names())
     assert {"cross_entropy", "bce", "mse"} <= set(LOSSES.names())
-    assert {"jitter", "random_scale", "none"} <= set(VIEW_AUGMENTORS.names())
+    assert {"jitter", "random_scale", "none"} <= set(AUGMENTORS.names())
 
 
 def test_an_unknown_component_suggests_a_close_name() -> None:

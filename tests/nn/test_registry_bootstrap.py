@@ -8,7 +8,7 @@ every torch/ssl_pretrain preset would fail at model-build time with "unknown
 backbone/head/loss".
 
 This can't be checked in-process: sibling test modules (``tests/nn/test_module.py``,
-``tests/ssl/test_methods.py``, ``tests/ssl/test_probe.py``) import
+``tests/nn/test_components.py``, ``tests/train/test_callbacks.py``) import
 ``dsio.nn.components`` at collection time, which populates the registries before any
 test body runs — regardless of whether ``dsio.nn.__init__`` still does the import
 itself. A subprocess that imports only ``dsio.nn.registry`` is the only way to see

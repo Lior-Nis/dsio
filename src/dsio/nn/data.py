@@ -24,6 +24,14 @@ the continuous analogue of MLM's ``-100``: a masked item's target holds the true
 every position the mask hid, and NaN everywhere it did not, so a mask-aware loss reads
 ``(prediction, target)`` and nothing else to know which positions to score — no batch dict,
 no subclass. See :class:`~dsio.nn.components.MaskedMSE`.
+
+**A contrastive target only exists once a whole batch does.** SimCLR's negatives are "every
+other window in the batch" and VICReg's invariance term needs to know which two rows are one
+window's pair — neither is a fact about one item, so neither can live on the dataset the way
+MAE's sentinel does. :class:`TwoViewCollate` builds both at collate time instead: it
+augments each raw window twice and stacks the ``2 * batch`` views, with the target carrying
+each row's pair index. See :class:`~dsio.nn.components.NTXent` and
+:class:`~dsio.nn.components.VICReg`, which read that index and nothing else.
 """
 
 from __future__ import annotations
@@ -33,14 +41,15 @@ from typing import Any
 
 import numpy as np
 import torch
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex
+from dsio.nn.masking import apply_mask
 from dsio.runs.seeding import dataloader_kwargs
-from dsio.ssl.masking import apply_mask
 
-#: What a masking strategy from :mod:`dsio.ssl.masking` looks like from here: called with
+#: What a masking strategy from :mod:`dsio.nn.masking` looks like from here: called with
 #: one window at a time (a fake batch of one), returning a boolean hide-mask of the same
 #: shape's time axis.
 MaskStrategy = Callable[[torch.Tensor], torch.Tensor]
@@ -207,6 +216,45 @@ def val_dataset(
     )
 
 
+class TwoViewCollate:
+    """Batch collate that builds two augmented views per window, with a target carrying
+    each row's pair index.
+
+    Where MAE's pretext target lives on the dataset (a NaN sentinel written per item), a
+    contrastive one only exists once a whole batch does: SimCLR's negatives are "every other
+    row in the batch" and VICReg's invariance term needs to know which two rows are one
+    window's pair. Both are facts about the *collated* batch, not about one item, so this is
+    where they are built — the item-level dataset underneath is unchanged: whatever
+    :func:`val_dataset` would hand a downstream classifier, raw and unmasked, since building
+    two views needs no per-item mask.
+
+    Each raw window is augmented twice, independently (``augment`` is stochastic), and the
+    resulting ``2 * batch`` views are stacked so window ``i``'s two views sit at positions
+    ``i`` and ``i + batch``. ``target[i]`` names ``i``'s partner: exactly the
+    ``(arange(2 * batch) + batch) % (2 * batch)`` computation a contrastive loss used to
+    compute inside its own training step. Moving it here is what lets that loss become an
+    ordinary ``(prediction, target)`` loss — no batch dict, no subclass — because a
+    ``(prediction, target)`` loss already receives the whole batch's predictions, and the
+    negatives are just "every row that is not my partner". See
+    :class:`~dsio.nn.components.NTXent` and :class:`~dsio.nn.components.VICReg`.
+    """
+
+    def __init__(self, augment: nn.Module, target_key: str = "y") -> None:
+        self.augment = augment
+        self.target_key = target_key
+
+    def __call__(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        if not items:
+            raise ValueError("cannot collate an empty batch")
+        x = torch.stack([item["x"] for item in items])
+        row = torch.as_tensor([item["row"] for item in items])
+        batch = x.shape[0]
+        with torch.no_grad():
+            views = torch.cat([self.augment(x), self.augment(x)], dim=0)
+        pair = (torch.arange(2 * batch, device=views.device) + batch) % (2 * batch)
+        return {"x": views, self.target_key: pair, "row": row.repeat(2)}
+
+
 def make_loader(
     dataset: WindowDataset,
     *,
@@ -215,13 +263,16 @@ def make_loader(
     num_workers: int = 0,
     seed: int = 42,
     drop_last: bool = False,
+    collate_fn: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
 ) -> DataLoader[dict[str, Any]]:
     """Build a DataLoader whose result does not depend on the worker count.
 
     Seeding the process is not enough: each worker gets its own RNG, so without an explicit
     generator and ``worker_init_fn`` the shuffle order and any augmentation randomness vary
     with ``num_workers`` — which would make a result depend on a performance knob and put
-    it straight into dsio's list of things that must never change an answer.
+    it straight into dsio's list of things that must never change an answer. That guarantee
+    extends to ``collate_fn``: PyTorch runs it inside the worker process, so
+    :class:`TwoViewCollate`'s own randomness is exactly as protected as a masking strategy's.
     """
     kwargs: dict[str, Any] = dict(dataloader_kwargs(seed))
     if num_workers > 0:
@@ -233,5 +284,6 @@ def make_loader(
         shuffle=shuffle,
         num_workers=num_workers,
         drop_last=drop_last,
+        collate_fn=collate_fn,
         **kwargs,
     )

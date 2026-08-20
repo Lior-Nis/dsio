@@ -1,4 +1,12 @@
-"""The online probe and representation-quality metrics, as callbacks.
+"""Representation-quality callbacks: a linear probe and an unsupervised rank estimate.
+
+Moved here from ``dsio.ssl.probe`` when Task 6b dissolved the ``ssl/`` directory: a linear
+model fit on frozen features, and the effective rank of an embedding matrix, are general
+representation-quality tools, not SSL-specific ones. Both work on any
+:class:`~dsio.nn.module.DsioModule` that can produce features via ``encode`` — a supervised
+classifier's backbone is exactly as measurable this way as a pretrained one's, which is why
+this lives under ``dsio.train`` next to every other callback rather than under a directory
+named for one training paradigm.
 
 The usual shape for this is infrastructure: a callback that submits a downstream training
 job, plus a loop that polls a checkpoint directory and tracks what it has already probed. Its
@@ -10,7 +18,10 @@ callback removes the scheduler entirely.
 
 **Why probe during pretraining at all.** The SSL loss is not monotonically related to
 downstream quality; a run whose loss is still falling can already have passed its best
-representation. Without a probe there is no signal to stop on.
+representation. Without a probe there is no signal to stop on. Nothing here is limited to
+that use, though — running :class:`OnlineProbe` or :class:`RankMeMonitor` against a
+supervised run's own validation loop is exactly as meaningful, and costs nothing extra to
+support since neither callback knows or cares which kind of run it was attached to.
 """
 
 from __future__ import annotations

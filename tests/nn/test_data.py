@@ -10,13 +10,21 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from torch import nn  # noqa: E402
+
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
-from dsio.nn.data import WindowDataset, make_loader, train_dataset, val_dataset  # noqa: E402
+from dsio.nn.data import (  # noqa: E402
+    TwoViewCollate,
+    WindowDataset,
+    make_loader,
+    train_dataset,
+    val_dataset,
+)
+from dsio.nn.masking import CausalMask  # noqa: E402
 from dsio.splits.folds import folds_from_splits  # noqa: E402
 from dsio.splits.models import SplitFile  # noqa: E402
-from dsio.ssl.masking import CausalMask  # noqa: E402
 
 
 @pytest.fixture
@@ -310,3 +318,81 @@ def test_workers_read_the_store_independently(store: SignalStore, index) -> None
     batches = [batch["x"] for batch in loader]
     assert sum(batch.shape[0] for batch in batches) == 16
     assert all(torch.isfinite(batch).all() for batch in batches)
+
+
+# --- TwoViewCollate --------------------------------------------------------------------
+#
+# Moved here from the deleted tests/ssl/test_methods.py: SimCLR and VICReg no longer build
+# their two views inside a training step (dsio.ssl.methods.SimCLR/VICReg.step, both
+# deleted). Task 6b moved that to collate time instead, so what those tests used to check
+# about the pair-index target is now a property of TwoViewCollate, not of a pretext
+# objective, and lives here next to the rest of the loader machinery.
+
+class _Tag(nn.Module):
+    """A deterministic stand-in for a stochastic augmentor: each call adds a distinct
+    integer offset, so two independent calls are checkable rather than merely "different"."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.calls += 1
+        return x + self.calls
+
+
+def _items(n: int, channels: int = 2, length: int = 8) -> list[dict[str, object]]:
+    torch.manual_seed(0)
+    return [{"x": torch.randn(channels, length), "row": i} for i in range(n)]
+
+
+def test_two_view_collate_stacks_two_views_into_the_batch_dimension() -> None:
+    items = _items(5)
+    batch = TwoViewCollate(nn.Identity())(items)
+    assert batch["x"].shape == (10, 2, 8)
+
+
+def test_two_view_collate_calls_augment_twice_independently() -> None:
+    """Each view is a separate, independent augmentation -- not the same call reused."""
+    items = _items(3)
+    tag = _Tag()
+    batch = TwoViewCollate(tag)(items)
+    assert tag.calls == 2
+    first_view, second_view = batch["x"][:3], batch["x"][3:]
+    raw = torch.stack([item["x"] for item in items])
+    assert torch.equal(first_view, raw + 1)
+    assert torch.equal(second_view, raw + 2)
+
+
+def test_two_view_collate_pair_index_names_each_rows_partner() -> None:
+    """window i's two views live at i and i + batch; target[i] must name the other one."""
+    items = _items(4)
+    batch = TwoViewCollate(nn.Identity())(items)
+    target = batch["y"]
+    assert torch.equal(target, torch.tensor([4, 5, 6, 7, 0, 1, 2, 3]))
+
+
+def test_two_view_collate_pair_index_is_involutive() -> None:
+    """The relation the recovered-halves loss (VICReg) depends on: target[target[i]] == i,
+    regardless of batch size."""
+    items = _items(7)
+    batch = TwoViewCollate(nn.Identity())(items)
+    target = batch["y"]
+    assert torch.equal(target[target], torch.arange(target.shape[0]))
+
+
+def test_two_view_collate_duplicates_the_row_for_each_view() -> None:
+    items = _items(3)
+    batch = TwoViewCollate(nn.Identity())(items)
+    assert torch.equal(batch["row"], torch.tensor([0, 1, 2, 0, 1, 2]))
+
+
+def test_two_view_collate_writes_under_the_configured_target_key() -> None:
+    items = _items(2)
+    batch = TwoViewCollate(nn.Identity(), target_key="pair")(items)
+    assert "pair" in batch and "y" not in batch
+
+
+def test_two_view_collate_rejects_an_empty_batch() -> None:
+    with pytest.raises(ValueError, match="empty batch"):
+        TwoViewCollate(nn.Identity())([])
