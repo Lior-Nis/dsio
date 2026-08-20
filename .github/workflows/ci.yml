@@ -8,16 +8,8 @@ on:
 jobs:
   spine:
     runs-on: ubuntu-latest
-    # The spine is a standalone package at lib/dsio. This repository's root is a
-    # Copier template whose root pyproject is `pyproject.toml.jinja`, so there is no
-    # root project for uv to find — every uv command must run from the package
-    # directory. This mirrors the documented developer workflow exactly:
-    # `cd lib/dsio && uv sync && uv run pytest && uv run ruff check . && uv run mypy`.
-    defaults:
-      run:
-        working-directory: lib/dsio
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Provenance tests need real history; a shallow clone breaks rev-parse.
           fetch-depth: 0
@@ -27,37 +19,16 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --locked
+        run: uv sync --locked --extra cpu
 
       - name: Tests
-        run: uv run pytest
+        run: uv run --extra cpu pytest
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --extra cpu ruff check .
 
       - name: Types
-        run: uv run mypy
+        run: uv run --extra cpu mypy
 
       - name: Import contracts
-        run: uv run lint-imports
-
-  fork-drift:
-    # A fork is expected to merge from upstream, not to edit the spine in place.
-    # This warns rather than fails: the boundary is a working agreement, and a fork
-    # that genuinely needs a local core change should not be blocked from shipping.
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Warn on local changes to src/dsio
-        run: |
-          base="origin/${{ github.base_ref }}"
-          changed=$(git diff --name-only "$base"...HEAD -- lib/dsio || true)
-          if [ -n "$changed" ]; then
-            echo "::warning::This branch modifies the shared spine:"
-            echo "$changed" | sed 's/^/  /'
-            echo "::warning::Send spine fixes upstream so every project gets them."
-          fi
+        run: uv run --extra cpu lint-imports
