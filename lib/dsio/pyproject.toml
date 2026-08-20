@@ -23,8 +23,6 @@ data = ["fsspec>=2025.1", "pyarrow>=18"]
 # zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
 legacy = ["zarr>=3.0"]
 search = ["optuna>=4.5"]
-mlflow = ["mlflow>=3.0"]
-wandb = ["wandb>=0.19"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
