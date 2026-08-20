@@ -14,17 +14,6 @@ from dsio.data.adapters import (
 from dsio.data.examples import Examples, ExamplesError, assert_consistent, group_attribute
 from dsio.data.format import DTypeCode, IndexFormatError, IndexHeader
 from dsio.data.readers import ReadError, SignalReader, open_reader
-from dsio.data.remote import (
-    REMOTE_ENV,
-    RemoteError,
-    RemoteIntegrityError,
-    Transfer,
-    pull,
-    push,
-    resolve_remote,
-    status,
-    write_remotes,
-)
 from dsio.data.staging import StagingError, stage
 from dsio.data.store import (
     DATA_ROOT_ENV,
@@ -46,7 +35,6 @@ from dsio.data.views import (
 
 __all__ = [
     "DATA_ROOT_ENV",
-    "REMOTE_ENV",
     "DTypeCode",
     "Entity",
     "Examples",
@@ -55,8 +43,6 @@ __all__ = [
     "IndexHeader",
     "KeyedExamples",
     "ReadError",
-    "RemoteError",
-    "RemoteIntegrityError",
     "SignalExamples",
     "SignalReader",
     "SignalStore",
@@ -65,7 +51,6 @@ __all__ = [
     "StoreError",
     "StoreManifest",
     "TableExamples",
-    "Transfer",
     "WindowIndex",
     "WindowSpec",
     "WindowView",
@@ -77,10 +62,5 @@ __all__ = [
     "list_stores",
     "load_or_build",
     "open_reader",
-    "pull",
-    "push",
-    "resolve_remote",
     "stage",
-    "status",
-    "write_remotes",
 ]

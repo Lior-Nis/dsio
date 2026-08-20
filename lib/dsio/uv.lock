@@ -341,7 +341,6 @@ dependencies = [
 
 [package.optional-dependencies]
 data = [
-    { name = "fsspec" },
     { name = "pyarrow" },
 ]
 forecast = [
@@ -366,7 +365,6 @@ torch = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "fsspec" },
     { name = "import-linter" },
     { name = "lightning" },
     { name = "mypy" },
@@ -380,7 +378,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fsspec", marker = "extra == 'data'", specifier = ">=2025.1" },
     { name = "lightning", marker = "extra == 'torch'", specifier = ">=2.5" },
     { name = "mlforecast", marker = "extra == 'forecast'", specifier = ">=1.1" },
     { name = "numpy", specifier = ">=2.1" },
@@ -401,7 +398,6 @@ provides-extras = ["tabular", "forecast", "torch", "data", "legacy"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "fsspec", specifier = ">=2025.1" },
     { name = "import-linter", specifier = ">=2.1" },
     { name = "lightning", specifier = ">=2.5" },
     { name = "mypy", specifier = ">=1.14" },
