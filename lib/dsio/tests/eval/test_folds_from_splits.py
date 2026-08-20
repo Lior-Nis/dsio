@@ -190,7 +190,7 @@ def test_overlapping_test_parts_across_folds_are_rejected(store: SignalStore, in
     """Each file is individually valid; only comparing them reveals the double-count."""
     splits = _kfold3(store)
     duplicated = [splits[0], splits[0].model_copy(update={"fold": 1})]
-    with pytest.raises(SplitError, match="disjoint"):
+    with pytest.raises(SplitError, match=r"k3\[0\].*k3\[1\]"):
         folds_from_splits(SignalExamples(store, index), duplicated)
 
 
@@ -304,13 +304,15 @@ def test_disjoint_test_parts_pass() -> None:
 
 
 def test_large_fold_set_is_fast() -> None:
-    # train=[-1] is a sentinel outside every fold's non-negative test range, so each
-    # fold stays internally disjoint (Fold.__post_init__) no matter which test slice
-    # it is given below.
+    # train=[2_000_000] is one past the highest test position used below (10 folds of
+    # 200_000 each), so every fold stays internally disjoint (Fold.__post_init__) without
+    # relying on a negative index — real folds index real arrays, and a negative sentinel
+    # would silently wrap to the last row rather than raise if this pattern were copied
+    # somewhere that actually indexed with `.train`.
     folds = [
         Fold(
             index=i,
-            train=np.array([-1]),
+            train=np.array([2_000_000]),
             test=np.arange(i * 200_000, (i + 1) * 200_000),
             val=None,
             name=f"f{i}",

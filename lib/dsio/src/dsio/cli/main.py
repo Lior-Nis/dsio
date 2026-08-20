@@ -1,8 +1,7 @@
-"""The composition root.
+"""The composition root: mounts the one command the CLI has.
 
-Sub-apps are mounted here and nowhere else, so no command module imports a sibling. The
-rule is a linter contract because command modules that reach into each other's private
-helpers are how gating logic drifts apart between subcommands.
+A command exists only if it is needed before there is a Python session — everything else
+happens where Python is already available, in a repo you own. That leaves ``run``.
 """
 
 from __future__ import annotations
