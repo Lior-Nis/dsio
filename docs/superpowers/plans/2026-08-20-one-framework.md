@@ -250,56 +250,131 @@ DataModule gives a different dataset per stage."
 
 ---
 
-### Task 6: Dissolve `ssl/`
+### Task 6a: MAE through the dataset contract
 
-A directory named after a paradigm is a category error in a tree organised by technical kind, and it is how a junk drawer regrows. `ssl/` is 870 lines, of which only the module was ever structurally SSL — and after Task 5, not even that.
+**Amended 2026-08-21.** Task 6 was one task; execution showed it is two. Task 5 built the
+dataset's masking capability but migrated nothing — because rewiring MAE and deleting
+`SslModule`'s step override are one atomic change, not two. And a design hole surfaced that the
+plan did not anticipate, resolved by the ruling below.
+
+**The hole.** `MaskedReconstruction.step()` computes `error[hidden].mean()` — loss on masked
+positions only — and its docstring says why: averaging over every position lets the model win by
+copying visible input, which is *"indistinguishable from a model that learned something."* The
+generic `_common_step` computes `loss(prediction, target)` over the whole window and has no idea
+which positions were hidden, because `apply_mask` discards that inside `WindowDataset.__getitem__`.
+The spec solves this for MLM with a `-100` sentinel and says nothing for continuous signal.
+
+**Ruling: NaN is the continuous `-100`.** The target carries the original values at masked
+positions and `NaN` everywhere else. The loss selects `~torch.isnan(target)` **before** computing
+error — selecting after risks NaN propagating through autograd. This keeps `loss(pred, target)`
+exactly as specified: no batch dict, no subclass.
 
 **Files:**
-- Delete: `src/dsio/ssl/` entirely
-- Create: `src/dsio/train/callbacks.py`
-- Modify: `src/dsio/nn/components.py` (or new `heads.py`/`losses.py`), `src/dsio/nn/module.py`, `src/dsio/train/ssl_task.py`
-- Test: `tests/ssl/*` — repoint, do not delete wholesale
+- Modify: `src/dsio/nn/data.py` (target carries NaN outside masked positions)
+- Modify: `src/dsio/nn/components.py` or a new losses module (a mask-aware reconstruction loss)
+- Modify: `src/dsio/train/ssl_task.py` (build masked datasets; stop routing MAE through `SslMethod.step`)
+- Modify: `src/dsio/ssl/module.py` (delete `_common_step`), `src/dsio/ssl/methods.py` (delete the MAE branch)
+- Test: `tests/nn/test_data.py`, `tests/ssl/test_methods.py`, `tests/train/test_ssl_runner.py`
 
-**Interfaces:**
-- Produces: `dsio.nn.export_encoder(module) -> dict[str, torch.Tensor]`; a `predict` mode on the task config
+- [ ] **Step 1: Write the test that proves the sentinel works, before implementing it**
 
-- [ ] **Step 1: Move the components**
+The property: **a model that copies visible input must score worse than one that reconstructs
+masked positions.** That is the whole reason MAE masks its loss. Write it as a direct comparison —
+compute the loss for a prediction equal to the masked input, and for a prediction equal to the
+original signal, and assert the second is lower by a clear margin.
 
-`ssl/methods.py` (214) is head+loss pairs → register them as heads and losses. `ssl/masking.py` (157) is a transform → move to where Task 5 put the dataset's pretext transform. Neither is SSL-specific machinery; both are components.
+Run it, watch it fail, then implement. If this test cannot be made to fail against a whole-window
+loss, the sentinel is not doing its job and the ruling above is wrong — **stop and report that**.
 
-- [ ] **Step 2: `encoder_state` becomes a free function**
+- [ ] **Step 2: Make the dataset emit a sentinel target**
 
-It is an *export* concern, not a method. Move it to `src/dsio/nn/` as `export_encoder(module) -> dict[str, torch.Tensor]`, taking any module. **Keep its exclusion of the objective head and keep the reason in the docstring** — *"a decoder trained to reconstruct masked spans has no meaning outside the pretext task, and shipping it invites someone to load it as though it were part of the model."* That sentence is why the function exists.
+`WindowDataset.__getitem__`, in its masking branch, sets `x` to the masked window and the target
+to the original with `NaN` at every position the mask left visible. Keep `row` in the batch.
 
-- [ ] **Step 3: `predict_step` becomes a config choice**
+- [ ] **Step 3: Write the mask-aware loss**
 
-`SslModule.predict_step` returns embeddings rather than predictions. Add a field to the task config — `predict: Literal["prediction", "embedding"] = "prediction"` — and branch on it in `DsioModule.predict_step`. One class, no subclass, and the choice is visible in the recorded config rather than implied by a type.
+Selects valid positions first, then computes error over them:
+```python
+valid = ~torch.isnan(target)
+return functional.mse_loss(prediction[valid], target[valid])
+```
+Register it like any other loss. It takes `(prediction, target)` and nothing else.
 
-- [ ] **Step 4: Delete `SslModule` and the directory**
+- [ ] **Step 4: Rewire the MAE path and delete the override**
 
-With the step override gone (Task 5), `export_encoder` extracted, and predict mode configured, nothing remains. `git rm -r src/dsio/ssl`.
+`ssl_task.py` builds a masked `WindowDataset` for training and a plain one for validation. Delete
+`SslModule._common_step` and the MAE branch of `SslMethod.step`. **`SslModule` may still exist
+after this task** — its `predict_step` and `encoder_state` go in 6b.
 
-`ssl/probe.py` (194) → `src/dsio/train/callbacks.py`. A linear probe on frozen features is a general representation-quality tool, not an SSL one; say so in its docstring. `ssl/budget.py` (191) is a sweep over one config axis — **cut it**, and record in the commit message that it is a per-project experiment protocol.
+- [ ] **Step 5: Make the validation guarantee hard to get wrong**
 
-- [ ] **Step 5: Repoint the tests, do not delete them**
+A reviewer's finding on Task 5: the model can no longer mask during validation, but the *system*
+property still rests on a caller not passing `mask=` to the val loader. Give the DataModule
+separate `train_dataset()` / `val_dataset()` builders where **only the former accepts a mask**, so
+the mistake is unrepresentable rather than merely absent.
 
-`tests/ssl/` covers masking, methods, and the probe — all of which survive under new homes. Move those tests to match. Delete only what covered `budget.py` and the deleted module. **Say which you deleted and why each covered only deleted behaviour.**
+- [ ] **Step 6: VERIFY, and run the SSL runner directly**
 
-- [ ] **Step 6: Prove the export still excludes the head**
+`tests/train/test_ssl_runner.py` must pass — MAE especially. Contrastive still runs the old path;
+that is 6b.
 
-Write a test asserting `export_encoder` returns no key from the objective's head. **Then break it**: temporarily include the head, confirm the test fails, restore, confirm `git diff` is clean. This is the property most likely to rot silently — a wrong export produces a model that loads and is wrong.
-
-- [ ] **Step 7: VERIFY and commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A
-git commit -m "Dissolve ssl/: a paradigm is not a directory
+git commit -m "MAE through the dataset contract
 
-Methods were head+loss pairs, masking was a transform, the probe is a
-general representation tool, and the module's last reason to exist went
-when the dataset took over the paradigm. encoder_state is an export
-concern, so it is a function now; predict mode is config, not a subclass."
+The target carries NaN outside masked positions, so a mask-aware loss reads
+(pred, target) and nothing else. That is the continuous analogue of MLM's
+-100, and it is what lets the pretraining step override go."
 ```
+
+---
+
+### Task 6b: Contrastive collation, and dissolve `ssl/`
+
+**Files:**
+- Delete: `src/dsio/ssl/` entirely; `VIEW_AUGMENTORS` from `src/dsio/nn/registry.py`
+- Create: `src/dsio/train/callbacks.py`
+- Modify: `src/dsio/nn/`, `src/dsio/train/ssl_task.py`
+
+- [ ] **Step 1: Two views from collate, not from a model-side registry**
+
+Task 5 parked `jitter`/`random_scale` in a `VIEW_AUGMENTORS` registry as staging — a reviewer
+confirmed it is the old model-side mechanism renamed. Move view construction into the dataset and
+collate: V views per sample stacked into the batch dimension, with the target carrying the pair
+index. Then delete `VIEW_AUGMENTORS`.
+
+- [ ] **Step 2: `encoder_state` becomes a free function**
+
+Move it to `src/dsio/nn/` as `export_encoder(module) -> dict[str, torch.Tensor]`. **Keep its
+exclusion of the objective head and the reason in the docstring** — *"a decoder trained to
+reconstruct masked spans has no meaning outside the pretext task, and shipping it invites someone
+to load it as though it were part of the model."*
+
+- [ ] **Step 3: `predict_step` becomes a config choice**
+
+Add `predict: Literal["prediction", "embedding"] = "prediction"` to the task config and branch on
+it in `DsioModule.predict_step`. The choice becomes visible in the recorded config instead of
+implied by a type.
+
+- [ ] **Step 4: Delete `SslModule` and the directory**
+
+`ssl/methods.py` → heads and losses. `ssl/masking.py` → the dataset side. `ssl/probe.py` →
+`src/dsio/train/callbacks.py`, described as a general representation-quality tool. `ssl/budget.py`
+→ cut; it is a per-project experiment protocol.
+
+- [ ] **Step 5: Prove the export still excludes the head**
+
+Assert `export_encoder` returns no key from the objective's head. **Then break it** — include the
+head, watch the test fail, restore, confirm `git diff` clean. A wrong export produces a model that
+loads and is silently wrong.
+
+- [ ] **Step 6: Repoint the tests, VERIFY, commit**
+
+`tests/ssl/` covers masking, methods and the probe — all survive under new homes. Move them. Delete
+only what covered `budget.py` and the deleted module, and say why each covered only deleted
+behaviour.
 
 ---
 
