@@ -148,6 +148,31 @@ def test_a_project_preset_does_not_hide_the_builtin_ones(
     assert {"spine_baseline", "project_preset"} <= payload["presets"].keys()
 
 
+def test_dry_run_reports_a_pending_stage_and_writes_nothing(tmp_path: Path) -> None:
+    """`--dry-run`'s contract is resolve-and-validate-only. `spine_baseline`'s starter
+    corpus does not exist yet in a bare `tmp_path`, so this also proves the resulting
+    preflight failure is reported explicitly rather than either erroring out or
+    silently passing over it (see `dsio.cli.run_cmd`)."""
+    before = sorted(str(p) for p in tmp_path.rglob("*"))
+    code, payload = dsio("run", "spine_baseline", "--dry-run", cwd=tmp_path)
+    after = sorted(str(p) for p in tmp_path.rglob("*"))
+    assert code == 0, payload
+    assert payload["dry_run"] is True
+    assert payload.get("pending_stage")
+    assert before == after == []
+
+
+def test_running_for_real_stages_the_starter_corpus_and_completes(tmp_path: Path) -> None:
+    """The property this test's sibling above guards from the other side: a real
+    (non-dry-run) invocation stages the corpus itself and completes, so
+    `dsio run spine_baseline` still works end to end with no prior setup."""
+    code, payload = dsio("run", "spine_baseline", "--summary", cwd=tmp_path)
+    assert code == 0, payload
+    assert payload["status"] == "completed"
+    assert payload["metrics"]["accuracy"] == 1.0
+    assert (tmp_path / "splits" / "spine_starter" / "fold0.yaml").is_file()
+
+
 def test_failure_envelope_carries_a_code(workdir: Path) -> None:
     code, payload = dsio("run", "nope", "--dry-run", cwd=workdir)
     assert code == 1

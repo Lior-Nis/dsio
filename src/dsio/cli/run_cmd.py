@@ -8,10 +8,18 @@ from typing import Annotated, Any
 import typer
 
 from dsio.cli.envelope import json_command
-from dsio.config.presets import PRESETS, load_preset_modules, preset_parameters, resolve
+from dsio.config.presets import (
+    PRESETS,
+    STAGE_HOOKS,
+    load_preset_modules,
+    preset_parameters,
+    resolve,
+)
+from dsio.config.registry import UnknownComponentError
 from dsio.config.schema import RunConfig
 from dsio.runs.record import RunLedger, RunStatus
 from dsio.runs.seeding import seed_everything
+from dsio.splits.models import SplitError
 from dsio.train import load_runners
 from dsio.train.runner import check, execute
 
@@ -61,15 +69,34 @@ def run(
 
     _bootstrap()
     config = resolve(preset, list(overrides or []))
-    _preflight(config)
 
     if dry_run:
+        # Resolving must stay pure — "resolve and validate only" cannot itself write a
+        # file or register a label, so staging (below) never runs here. A preset with a
+        # stage hook may therefore preflight-fail purely because its prerequisites are
+        # not staged *yet*; that is reported explicitly rather than as a hard failure
+        # or silently passed over, so a reader sees "this would be staged first".
+        pending_stage: str | None = None
+        try:
+            _preflight(config)
+        except (UnknownComponentError, SplitError) as exc:
+            if preset not in STAGE_HOOKS:
+                raise
+            pending_stage = (
+                f"not staged yet; running for real (without --dry-run) stages it "
+                f"automatically — preflight said: {exc}"
+            )
         return {
             "preset": preset,
             "config_hash": config.config_hash,
             "dry_run": True,
+            **({"pending_stage": pending_stage} if pending_stage else {}),
             **({} if summary else {"config": config.to_dict()}),
         }
+
+    if preset in STAGE_HOOKS:
+        STAGE_HOOKS.get(preset)(config)
+    _preflight(config)
 
     seeds = seed_everything(config.seed)
     ledger = RunLedger()

@@ -11,7 +11,7 @@ not conflict when you merge.
 
 from __future__ import annotations
 
-from dsio.config.presets import preset
+from dsio.config.presets import preset, stage_hook
 from dsio.config.schema import RunConfig
 
 _STARTER = "spine_starter"
@@ -27,9 +27,13 @@ def spine_baseline(
 ) -> RunConfig:
     """Starter baseline: `dsio run spine_baseline` works verbatim in a fresh clone.
 
-    At its defaults this trains on a tiny synthetic tone-vs-noise signal it stages on
-    first run — not a real dataset. Replace `store`/`labels`/`split` with your own once
-    you have real data staged; overriding any of them opts out of the synthetic corpus.
+    At its defaults this trains on a tiny synthetic tone-vs-noise signal — not a real
+    dataset — staged by a registered stage hook (`_stage_if_default`, below) rather than
+    by this function: resolving a preset, including under `--dry-run`, must write
+    nothing and mutate no registry, so staging happens only on the path that is
+    actually about to execute. Overriding `store`, `labels` or `split` (not any
+    argument — `lr` and `seed` are unrelated to the corpus) opts out of the synthetic
+    corpus, since that means the caller is bringing their own staged data.
     """
     # Imported here, not at module scope, so that enumerating presets does not pay for
     # importing a task. Bare `dsio run` lists presets and their parameters by
@@ -37,9 +41,6 @@ def spine_baseline(
     # torch the day a built-in preset uses TorchTask.
     from dsio.data.views import WindowSpec
     from dsio.train.torch_task import Component, TorchTask, TrainerConfig
-
-    if (store, labels, split) == (_STARTER, _STARTER, _STARTER):
-        _stage_starter_corpus()
 
     return RunConfig(
         name=f"{store}-lr{lr}",
@@ -59,6 +60,23 @@ def spine_baseline(
             trainer=TrainerConfig(max_epochs=60, accelerator="cpu", devices=1, checkpoint=False),
         ),
     )
+
+
+@stage_hook("spine_baseline")
+def _stage_if_default(config: RunConfig) -> None:
+    """Stage the synthetic starter corpus — only called on the execute path, never
+    from `resolve()` or `--dry-run` (see `dsio.cli.run_cmd`), and only when
+    `store`/`labels`/`split` are still `spine_baseline`'s defaults, so a caller who
+    overrode any of them to point at their own data is never touched by this."""
+    from dsio.train.torch_task import TorchTask
+
+    task = config.task
+    if isinstance(task, TorchTask) and (task.store, task.labels, task.split) == (
+        _STARTER,
+        _STARTER,
+        _STARTER,
+    ):
+        _stage_starter_corpus()
 
 
 def _stage_starter_corpus() -> None:
