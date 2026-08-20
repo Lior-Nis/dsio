@@ -54,36 +54,3 @@ def git_repo(tmp_path: Path) -> Iterator[Path]:
     run("git", "add", "tracked.txt")
     run("git", "commit", "-q", "-m", "initial")
     yield repo
-
-
-@pytest.fixture(autouse=True)
-def _spine_preset() -> None:
-    """Register a preset the spine's own tests can resolve.
-
-    The spine ships no presets — those belong to a project. Registering one here keeps
-    these tests self-contained instead of depending on a generated project existing.
-    """
-    from dsio.config import RunConfig, preset
-    from dsio.config.presets import PRESETS
-    from dsio.train import load_runners
-    from dsio.train.tabular import TabularTask
-
-    load_runners()
-    if "spine_baseline" in PRESETS:
-        return
-
-    @preset
-    def spine_baseline(
-        dataset: str = "iris",
-        estimator: str = "logreg",
-        test_fraction: float = 0.25,
-        seed: int = 42,
-    ) -> RunConfig:
-        return RunConfig(
-            name=f"{dataset}-{estimator}",
-            seed=seed,
-            tags=("baseline", "tabular"),
-            task=TabularTask(
-                dataset=dataset, estimator=estimator, test_fraction=test_fraction
-            ),
-        )

@@ -14,7 +14,6 @@ import importlib
 import inspect
 import os
 from collections.abc import Callable
-from importlib.metadata import entry_points
 from typing import Any
 
 from dsio.config.overrides import apply_override, split_override
@@ -28,8 +27,10 @@ PRESETS: Registry[PresetFn] = Registry("preset")
 PRESET_MODULES_ENV = "DSIO_PRESET_MODULES"
 """Comma-separated module paths to import before resolving a preset."""
 
-PRESET_ENTRY_POINT_GROUP = "dsio.presets"
-"""Entry-point group projects use to advertise their preset modules."""
+#: Modules imported to register presets. A project adds its own module here, or names it
+#: in DSIO_PRESET_MODULES. Entry points are gone: they existed so the spine, shipped as a
+#: separate distribution, need not know a project's package name. There is one package now.
+_BUILTIN_PRESET_MODULES: tuple[str, ...] = ("dsio.presets",)
 
 
 class PresetError(ValueError):
@@ -45,20 +46,18 @@ def preset(fn: PresetFn) -> PresetFn:
 def load_preset_modules() -> list[str]:
     """Import modules that define presets, returning the ones that loaded.
 
-    Discovery is by entry point, so a project advertises its presets in its own
-    pyproject.toml and dsio never has to know the project's package name::
+    Discovery is by module list: ``_BUILTIN_PRESET_MODULES`` plus whatever
+    ``DSIO_PRESET_MODULES`` names, so a project adds its own presets alongside the
+    ones dsio ships without dsio needing to know the project's package name.
 
-        [project.entry-points."dsio.presets"]
-        pdm = "pdm.presets"
-
-    A declared entry point that fails to import is an error, not a skip: a silently
+    A declared module that fails to import is an error, not a skip: a silently
     empty preset list is indistinguishable from a project with no presets, and the
     difference matters at 2am.
     """
     loaded: list[str] = []
-    for entry in entry_points(group=PRESET_ENTRY_POINT_GROUP):
-        importlib.import_module(entry.value)
-        loaded.append(entry.value)
+    for module in _BUILTIN_PRESET_MODULES:
+        importlib.import_module(module)
+        loaded.append(module)
 
     configured = os.environ.get(PRESET_MODULES_ENV, "").strip()
     if configured:
