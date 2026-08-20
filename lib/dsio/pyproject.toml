@@ -22,7 +22,6 @@ torch = ["torch>=2.6", "lightning>=2.5", "torchmetrics>=1.6"]
 data = ["fsspec>=2025.1", "pyarrow>=18"]
 # zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
 legacy = ["zarr>=3.0"]
-search = ["optuna>=4.5"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
@@ -46,8 +45,6 @@ dev = [
     # below to get CUDA wheels — uv sources are not propagated to consumers of dsio.
     "torch>=2.6",
     "lightning>=2.5",
-    # Same reasoning again: the search path must run in CI or its resumability is a claim.
-    "optuna>=4.5",
 ]
 
 [[tool.uv.index]]
@@ -149,5 +146,4 @@ modules = [
     "dsio.cli.data_cmd",
     "dsio.cli.splits_cmd",
     "dsio.cli.eval_cmd",
-    "dsio.cli.matrix_cmd",
 ]
