@@ -75,7 +75,8 @@ class MaskedReconstruction:
     :class:`~dsio.nn.components.MaskedMSE`. That makes ``(x_masked, target)`` exactly the
     ``(prediction, target)`` shape the generic chain already knows how to consume, so this
     class no longer implements ``step``; it exists to build the reconstruction head, which
-    is method-specific in a way masking and loss selection are not.
+    is method-specific in a way masking and loss selection are not. Per-window target
+    normalisation moved with the mask, to ``WindowDataset(..., normalize_target=...)``.
     """
 
     def build_head(self, feature_dim: int, channels: int, length: int) -> nn.Module:

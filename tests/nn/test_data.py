@@ -131,9 +131,15 @@ def test_a_pretext_item_carries_the_masked_signal_and_a_sentinel_target(
 ) -> None:
     """The target is not the untouched window. It is the original value at every position
     the mask hid, and NaN everywhere it did not -- the continuous analogue of MLM's -100,
-    so a mask-aware loss knows what to score without a batch dict or a subclass."""
+    so a mask-aware loss knows what to score without a batch dict or a subclass.
+
+    normalize_target=False here: this test is about the sentinel's shape, not about
+    normalisation, which gets its own test below.
+    """
     mask = CausalMask(ratio=0.5)
-    dataset = WindowDataset(store, index, positions=np.array([7]), mask=mask)
+    dataset = WindowDataset(
+        store, index, positions=np.array([7]), mask=mask, normalize_target=False
+    )
     item = dataset[0]
     original = torch.from_numpy(store.read(int(index.starts[7]), 100).T).float()
     hidden = mask(original.unsqueeze(0)).squeeze(0)
@@ -162,6 +168,54 @@ def test_a_pretext_target_lands_under_the_configured_key(store: SignalStore, ind
     )
     item = dataset[0]
     assert "orig" in item and "y" not in item
+
+
+def test_normalize_target_prevents_a_loud_channel_from_dominating(tmp_path: Path) -> None:
+    """The property the deleted MaskedReconstruction.step()'s norm_target guarded, now
+    enforced on the dataset side: reconstructing raw amplitude makes a loss dominated by
+    whichever channel has the largest units, so normalising the target here is what keeps
+    a downstream loss from spending all its gradient on the loudest sensor.
+
+    To watch this fail: hardcode normalize_target=True on both datasets below (or compare
+    the *raw* dataset's own loud-vs-quiet ratio against the same threshold) and the loud
+    channel's target swamps the quiet one by ~100x either way, exactly like the assertion
+    on ``raw`` two lines down demonstrates for the un-normalised case.
+    """
+    rng = np.random.default_rng(0)
+    signal = rng.standard_normal((400, 2)).astype("float32")
+    signal[:, 0] *= 100.0  # channel 0 is two orders of magnitude louder than channel 1
+    path = tmp_path / "loud"
+    with SignalStore.builder(path, channels=2) as builder:
+        builder.add("p0", signal, group="p0")
+    loud_store = SignalStore(path)
+    loud_index = build_index(loud_store, WindowSpec(length=100, stride=50))
+
+    normalized = WindowDataset(
+        loud_store,
+        loud_index,
+        positions=np.array([0]),
+        mask=CausalMask(ratio=0.5),
+        normalize_target=True,
+    )[0]
+    raw = WindowDataset(
+        loud_store,
+        loud_index,
+        positions=np.array([0]),
+        mask=CausalMask(ratio=0.5),
+        normalize_target=False,
+    )[0]
+
+    hidden = ~torch.isnan(raw["y"])
+    raw_loud = raw["y"][0][hidden[0]].abs().mean()
+    raw_quiet = raw["y"][1][hidden[1]].abs().mean()
+    norm_loud = normalized["y"][0][hidden[0]].abs().mean()
+    norm_quiet = normalized["y"][1][hidden[1]].abs().mean()
+
+    assert raw_loud > raw_quiet * 20, "the fixture must actually be louder on channel 0"
+    assert norm_loud < norm_quiet * 5, (
+        "normalisation must bring the loud channel's target back down to the quiet "
+        "channel's scale, not leave it dominating"
+    )
 
 
 def test_validation_dataset_is_unmasked_by_construction(store: SignalStore, index) -> None:

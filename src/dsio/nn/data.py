@@ -62,6 +62,15 @@ class WindowDataset(Dataset[dict[str, Any]]):
     training dataset with a mask and a validation dataset without one is what makes "never
     mask a validation batch" a fact about which object was constructed, rather than a flag
     checked at call time.
+
+    ``normalize_target`` (only meaningful alongside ``mask``) standardises the *target*
+    per window, per channel — ``(x - mean) / (std + eps)`` computed over the whole
+    original window before masking — while ``x`` itself stays raw. Reconstructing raw
+    amplitude makes the loss dominated by whichever channel happens to have the largest
+    units, so the model spends its capacity on the loudest sensor instead of learning
+    something that generalises across channels. This is the same normalisation the deleted
+    ``MaskedReconstruction.step()`` used to apply; it moved here because the target it
+    normalises is now built here.
     """
 
     def __init__(
@@ -74,6 +83,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
         channels_first: bool = True,
         mask: MaskStrategy | None = None,
         target_key: str = "y",
+        normalize_target: bool = True,
     ) -> None:
         if index.store_name != store.path.name:
             raise ValueError(
@@ -96,6 +106,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
         self.channels_first = channels_first
         self.mask = mask
         self.target_key = target_key
+        self.normalize_target = normalize_target
 
     def __len__(self) -> int:
         return int(self.positions.size)
@@ -119,8 +130,16 @@ class WindowDataset(Dataset[dict[str, Any]]):
             # True and here that is "visible", the opposite of what x's masking used.
             hidden = self.mask(x.unsqueeze(0))
             item["x"] = apply_mask(x.unsqueeze(0), hidden).squeeze(0)
+            target_source = x
+            if self.normalize_target:
+                # Per-window, per-channel standardisation of the target only -- x (what
+                # the encoder sees) stays raw. Computed from the whole original window,
+                # before masking, exactly like the deleted step()'s norm_target math.
+                mean = x.mean(dim=-1, keepdim=True)
+                std = x.std(dim=-1, keepdim=True) + 1e-6
+                target_source = (x - mean) / std
             item[self.target_key] = apply_mask(
-                x.unsqueeze(0), ~hidden, value=float("nan")
+                target_source.unsqueeze(0), ~hidden, value=float("nan")
             ).squeeze(0)
         else:
             item["x"] = x
@@ -144,6 +163,7 @@ def train_dataset(
     channels_first: bool = True,
     mask: MaskStrategy | None = None,
     target_key: str = "y",
+    normalize_target: bool = True,
 ) -> WindowDataset:
     """Build the dataset a training loader gets. The only builder that can mask.
 
@@ -159,6 +179,7 @@ def train_dataset(
         channels_first=channels_first,
         mask=mask,
         target_key=target_key,
+        normalize_target=normalize_target,
     )
 
 

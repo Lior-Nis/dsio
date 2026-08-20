@@ -113,9 +113,17 @@ def build_method(task: SslPretrainTask) -> Any:
     A mask, when the task has one, no longer goes into the objective — it drives the
     *dataset's* masking instead (:func:`build_mask`). Only MAE has ever taken a mask
     Component, and MAE's objective no longer has anywhere to put one.
+
+    ``norm_target`` gets the same treatment for the same reason: it used to be a
+    ``MaskedReconstruction`` constructor argument, and the target it controls is now built
+    by the dataset (see :func:`build_normalize_target`), not the objective. It is popped
+    out of ``params`` here rather than left for ``factory(**params)`` to trip over, so an
+    existing config's ``method: {name: mae, params: {norm_target: false}}`` keeps working
+    instead of hard-failing with an unexpected-keyword ``TypeError``.
     """
     factory = METHODS.get(task.method.name)
     params = dict(task.method.params)
+    params.pop("norm_target", None)
     if task.augmentor is not None:
         params["augment"] = VIEW_AUGMENTORS.get(task.augmentor.name)(**task.augmentor.params)
     return factory(**params)
@@ -131,6 +139,17 @@ def build_mask(task: SslPretrainTask) -> MaskStrategy | None:
     if task.mask is None:
         return None
     return MASKS.get(task.mask.name)(**task.mask.params)
+
+
+def build_normalize_target(task: SslPretrainTask) -> bool:
+    """Whether MAE's training dataset should normalise its reconstruction target.
+
+    Reads ``task.method.params["norm_target"]`` for backward config compatibility — this
+    used to be ``MaskedReconstruction(norm_target=...)`` — defaulting to ``True`` to match
+    that constructor's old default. Meaningless for a method with no mask, so callers only
+    need it when :func:`build_mask` returned something.
+    """
+    return bool(task.method.params.get("norm_target", True))
 
 
 @runner("ssl_pretrain")
@@ -157,6 +176,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     # validation one, because their objective builds its own views from x.
     is_mae = task.method.name == "mae"
     mask = build_mask(task) if is_mae else None
+    normalize_target = build_normalize_target(task) if is_mae else True
 
     factory = BACKBONES.get(task.backbone.name)
     shape = _accepted(factory, {"channels": store.channels, "length": task.window.length})
@@ -181,7 +201,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     )
 
     train_loader = make_loader(
-        train_dataset(store, index, fold.train, mask=mask),
+        train_dataset(store, index, fold.train, mask=mask, normalize_target=normalize_target),
         batch_size=task.batch_size,
         shuffle=True,
         num_workers=task.num_workers,

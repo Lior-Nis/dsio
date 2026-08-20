@@ -30,6 +30,18 @@ out of it. Their objective never reads ``target_key`` either, so an unmasked val
 batch is exactly as usable to them as a training one; :class:`ContrastiveModule` restores a
 real validation step for that reason. Moving them onto the same dataset-driven contract as
 MAE is Task 6b.
+
+**The copy-vs-learned diagnostic survives training, off to the side of the step.** ADR
+0011: *"MAE logs masked and visible error separately... if visible error collapses while
+masked error does not, the model is copying."* ``self.loss`` alone cannot report this —
+:class:`~dsio.nn.components.MaskedMSE` reads only ``(prediction, target)`` and the whole
+point of the sentinel is that ``target`` no longer carries a visible-position value to
+compare against. ``SslModule.on_train_batch_end`` computes it instead, from ``batch["x"]``
+(which does still hold the true value at every visible position — masking only zeroes the
+hidden ones) and one extra ``eval()``-mode forward pass, gated on ``self.loss`` actually
+being a ``MaskedMSE`` so it is a no-op for anything built through
+:class:`ContrastiveModule`. This is an additive hook, not a step override: it runs
+alongside whatever ``training_step`` already did, rather than deciding what that was.
 """
 
 from __future__ import annotations
@@ -39,6 +51,7 @@ from typing import Any, cast
 import torch
 from torch import nn
 
+from dsio.nn.components import MaskedMSE
 from dsio.nn.module import DsioModule, Stage
 from dsio.ssl.methods import PretextObjective, SslMethod
 
@@ -71,6 +84,37 @@ class SslModule(DsioModule):
         """
         self.encode(batch["x"])
         return torch.zeros((), device=self.device)
+
+    def on_train_batch_end(
+        self, outputs: Any, batch: dict[str, Any], batch_idx: int
+    ) -> None:
+        """Log the masked-vs-visible reconstruction split, for the objective that has one.
+
+        A no-op unless ``self.loss`` is a :class:`~dsio.nn.components.MaskedMSE` — a
+        :class:`ContrastiveModule` (or any future subclass with a different loss) inherits
+        this hook but never triggers the body, so it never pays the extra forward pass and
+        never risks reading a ``target_key`` that, for it, is not a sentinel at all.
+        """
+        if not isinstance(self.loss, MaskedMSE):
+            return
+        x = batch["x"]
+        target = batch[self.target_key]
+        hidden = ~torch.isnan(target)
+        visible = ~hidden
+        was_training = self.training
+        self.eval()
+        try:
+            with torch.no_grad():
+                prediction = self(x)
+        finally:
+            self.train(was_training)
+        masked_mse = nn.functional.mse_loss(prediction[hidden], target[hidden])
+        # visible_mse compares the reconstruction against x, not target: x still carries
+        # the true value at every visible position (masking only zeroes the hidden ones),
+        # which is exactly what the sentinel target no longer does.
+        visible_mse = nn.functional.mse_loss(prediction[visible], x[visible])
+        self.log("train/masked_mse", masked_mse, batch_size=x.shape[0], on_epoch=True)
+        self.log("train/visible_mse", visible_mse, batch_size=x.shape[0], on_epoch=True)
 
     def predict_step(self, batch: dict[str, Any], batch_idx: int) -> dict[str, torch.Tensor]:
         """Predicting from a pretraining module means embedding, not classifying."""
