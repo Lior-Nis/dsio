@@ -3,10 +3,6 @@
 The spec is what you write; the YAML files are what it produces, and those get committed.
 Generation is reproducible from the spec, so nobody has to re-run it to read a result — and
 nobody hand-maintains the files either.
-
-Stratified assignment is **serpentine**, not random. Sorting groups by their stratified
-value and dealing them back and forth across folds keeps the totals close, which random
-assignment over a small number of groups reliably fails to do.
 """
 
 from __future__ import annotations
@@ -18,7 +14,6 @@ import numpy as np
 
 from dsio.data.examples import Examples, assert_consistent
 from dsio.splits.models import SplitError, SplitFile, SplitSpec
-from dsio.splits.stratify import BalanceReport, stratified_partition
 from dsio.splits.temporal import TemporalSpec, describe, walk_forward
 
 
@@ -81,12 +76,7 @@ def generate(
         return files
 
     if spec.scheme == "holdout":
-        if spec.keys:
-            buckets, hold_report = stratified_partition(
-                poolable, examples, spec.keys, 5, seed=spec.seed
-            )
-        else:
-            buckets, hold_report = _shuffled(poolable, spec.seed, 5), None
+        buckets = _shuffled(poolable, spec.seed, 5)
         flat = [g for bucket in buckets for g in bucket]
         n_test = max(1, round(len(flat) * spec.test_fraction))
         n_val = max(1, round(len(flat) * spec.val_fraction))
@@ -95,7 +85,7 @@ def generate(
             "val": sorted(flat[n_test : n_test + n_val]),
             "train": sorted(flat[n_test + n_val :] + pinned),
         }
-        return [_build(examples, spec, name, None, parts, manifest_sha, hold_report)]
+        return [_build(examples, spec, name, None, parts, manifest_sha)]
 
     k = spec.k
     if k > len(poolable):
@@ -103,13 +93,7 @@ def generate(
             f"cannot make {k} folds from {len(poolable)} splittable groups in "
             f"{examples.name!r}"
         )
-    report: BalanceReport | None = None
-    if spec.scheme == "stratified_kfold":
-        buckets, report = stratified_partition(
-            poolable, examples, spec.keys, k, seed=spec.seed
-        )
-    else:
-        buckets = _shuffled(poolable, spec.seed, k)
+    buckets = _shuffled(poolable, spec.seed, k)
     for fold in range(k):
         test = buckets[fold]
         val = _carve_validation(buckets, fold, k, spec.val_fraction)
@@ -118,7 +102,7 @@ def generate(
         parts = {"train": sorted(train + pinned), "test": sorted(test)}
         if val:
             parts["val"] = sorted(val)
-        files.append(_build(examples, spec, name, fold, parts, manifest_sha, report))
+        files.append(_build(examples, spec, name, fold, parts, manifest_sha))
     return files
 
 
@@ -168,7 +152,6 @@ def _build(
     fold: int | None,
     parts: dict[str, list[str]],
     manifest_sha: str | None,
-    balance: BalanceReport | None = None,
 ) -> SplitFile:
     covered = {g for groups in parts.values() for g in groups}
     missing = {str(g) for g in examples.groups} - covered
@@ -185,7 +168,6 @@ def _build(
         fold=fold,
         spec=spec,
         counts={part: len(groups) for part, groups in parts.items()},
-        balance=balance,
         parts=parts,
     )
 

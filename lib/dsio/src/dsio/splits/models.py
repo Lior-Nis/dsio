@@ -30,7 +30,6 @@ import yaml
 from pydantic import Field, model_validator
 
 from dsio.contracts import DsioModel, short_digest
-from dsio.splits.stratify import BalanceReport, StratifyKey
 from dsio.splits.temporal import TemporalBounds
 
 SCHEMA = "dsio.split/1"
@@ -38,7 +37,6 @@ SCHEMA = "dsio.split/1"
 Scheme = Literal[
     "holdout",
     "kfold",
-    "stratified_kfold",
     "leave_one_group_out",
     "explicit",
 ]
@@ -63,17 +61,6 @@ class SplitSpec(DsioModel):
     )
     k: int = Field(default=1, ge=1, description="Number of folds. 1 for holdout.")
     seed: int = Field(default=42, ge=0)
-    stratify: tuple[StratifyKey, ...] = Field(
-        default=(),
-        description=(
-            "Features to balance across folds — label, protocol, site, device, whatever "
-            "you know matters. Balanced jointly, not one at a time."
-        ),
-    )
-    stratify_by: str | None = Field(
-        default=None,
-        description="Shorthand for a single numeric key; expands into `stratify`.",
-    )
     val_fraction: float = Field(default=0.2, ge=0.0, lt=1.0)
     test_fraction: float = Field(default=0.2, ge=0.0, lt=1.0)
     always_train: tuple[str, ...] = Field(
@@ -88,31 +75,9 @@ class SplitSpec(DsioModel):
                 f"val_fraction + test_fraction must leave room for train, got "
                 f"{self.val_fraction} + {self.test_fraction}"
             )
-        if self.scheme in {"kfold", "stratified_kfold"} and self.k < 2:
+        if self.scheme == "kfold" and self.k < 2:
             raise ValueError(f"{self.scheme} needs k >= 2, got {self.k}")
-        if self.scheme == "stratified_kfold" and not (self.stratify or self.stratify_by):
-            raise ValueError(
-                "stratified_kfold requires stratify=[...] or the stratify_by shorthand"
-            )
-        names = [key.name for key in self.stratify]
-        duplicates = {n for n in names if names.count(n) > 1}
-        if duplicates:
-            raise ValueError(
-                f"stratify names a key more than once: {', '.join(sorted(duplicates))}"
-            )
         return self
-
-    @property
-    def keys(self) -> list[StratifyKey]:
-        """All stratification keys, with the shorthand expanded.
-
-        The shorthand exists because one numeric key is the common case; it must not become
-        a second code path, so it expands into the general form immediately.
-        """
-        keys = list(self.stratify)
-        if self.stratify_by and self.stratify_by not in {k.name for k in keys}:
-            keys.append(StratifyKey(name=self.stratify_by, kind="numeric"))
-        return keys
 
     @property
     def digest(self) -> str:
@@ -134,10 +99,6 @@ class SplitFile(DsioModel):
     fold: int | None = None
     spec: SplitSpec | None = None
     counts: dict[str, int] = Field(default_factory=dict)
-    balance: BalanceReport | None = Field(
-        default=None,
-        description="What stratification achieved. Recorded so a split can be judged.",
-    )
     notes: str | None = None
     parts: dict[str, list[str]] = Field(
         default_factory=dict,
@@ -200,7 +161,7 @@ class SplitFile(DsioModel):
         """Render with a human-readable provenance header.
 
         A split is meant to be read in a diff without parsing it, so the header states what
-        it is and what stratification achieved.
+        it is and how it was produced.
         """
         header = [
             f"# dsio split: {self.name}"
@@ -209,16 +170,10 @@ class SplitFile(DsioModel):
             f"# group key: {self.group_key}  <- the leakage boundary",
         ]
         if self.spec is not None:
-            header.append(
-                f"# scheme: {self.spec.scheme}"
-                + (f", stratified by {self.spec.stratify_by}" if self.spec.stratify_by else "")
-                + f", seed {self.spec.seed}"
-            )
+            header.append(f"# scheme: {self.spec.scheme}, seed {self.spec.seed}")
         header.append(
             "# counts: " + ", ".join(f"{part}={n}" for part, n in sorted(self.counts.items()))
         )
-        if self.balance is not None:
-            header.extend(self.balance.summary_lines())
         if self.temporal is not None:
             header.append(
                 f"# temporal: unit={self.temporal.time_unit}, "

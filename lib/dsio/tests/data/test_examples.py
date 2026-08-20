@@ -152,15 +152,6 @@ def test_splitting_works_on_a_dataset_that_is_only_grouping(table: TableExamples
     assert sum(len(part) for part in parts.values()) == len(table)
 
 
-def test_stratification_works_on_a_plain_table(table: TableExamples) -> None:
-    splits = generate(
-        table,
-        SplitSpec(scheme="stratified_kfold", k=2, stratify_by="score"),
-        name="s2",
-    )
-    assert all(split.balance is not None for split in splits)
-
-
 def test_folds_build_from_a_plain_table(table: TableExamples) -> None:
     splits = generate(table, SplitSpec(scheme="kfold", k=2), name="k2")
     folds = folds_from_splits(table, splits)

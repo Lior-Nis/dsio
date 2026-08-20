@@ -18,7 +18,6 @@ from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index, enti
 from dsio.splits import (
     SplitFile,
     SplitSpec,
-    StratifyKey,
     TemporalSpec,
     assert_no_row_overlap,
     fold_paths,
@@ -39,19 +38,11 @@ SPLITS_ROOT = Path("splits")
 def make(
     store: Annotated[Path, typer.Argument(help="Path to a store directory.")],
     name: Annotated[str, typer.Option(help="Name for this split family.")],
-    scheme: Annotated[str, typer.Option(help="kfold, stratified_kfold, ...")] = "kfold",
+    scheme: Annotated[str, typer.Option(help="kfold, holdout, leave_one_group_out, explicit")] = (
+        "kfold"
+    ),
     k: Annotated[int, typer.Option(help="Number of folds.")] = 5,
     seed: Annotated[int, typer.Option(help="Assignment seed.")] = 42,
-    stratify: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--stratify",
-            help=(
-                "Attribute to balance across folds, as name or name:numeric. "
-                "Repeatable; keys are balanced jointly, not one at a time."
-            ),
-        ),
-    ] = None,
     always_train: Annotated[
         list[str] | None,
         typer.Option("--always-train", help="Groups pinned to train. Repeatable."),
@@ -65,12 +56,10 @@ def make(
     published number should never require re-running a generator.
     """
     signal = SignalStore(store)
-    keys = tuple(_stratify_key(value) for value in (stratify or []))
     spec = SplitSpec(
         scheme=scheme,  # type: ignore[arg-type]
         k=k,
         seed=seed,
-        stratify=keys,
         always_train=tuple(always_train or []),
     )
     paths = write_splits(entity_examples(signal), spec, name=name, root=root)
@@ -82,32 +71,10 @@ def make(
         "count": len(paths),
         "paths": [str(path) for path in paths],
         "folds": [
-            {
-                "fold": file.fold,
-                "counts": file.counts,
-                "balance": (
-                    None if file.balance is None else file.balance.model_dump(mode="json")
-                ),
-            }
+            {"fold": file.fold, "counts": file.counts}
             for file in files
         ],
     }
-
-
-def _stratify_key(value: str) -> StratifyKey:
-    """Parse ``name`` or ``name:kind``.
-
-    The kind is explicit rather than sniffed from the data. An integer-valued severity
-    grade and an integer event count are both numeric on inspection, but one wants its
-    distribution matched across folds and the other wants its total matched — and guessing
-    produces a split that looks balanced and is not.
-    """
-    name, _, kind = value.partition(":")
-    if kind and kind not in ("categorical", "numeric"):
-        raise ValueError(
-            f"unknown stratify kind {kind!r} in {value!r}; use 'categorical' or 'numeric'"
-        )
-    return StratifyKey(name=name, kind=kind or "categorical")  # type: ignore[arg-type]
 
 
 @app.command("make-temporal")
@@ -168,7 +135,6 @@ def show(
         "group_key": split.group_key,
         "counts": split.counts,
         "parts": {part: len(members) for part, members in split.parts.items()},
-        "balance": None if split.balance is None else split.balance.model_dump(mode="json"),
         "temporal": None if split.temporal is None else split.temporal.model_dump(mode="json"),
     }
     if groups:

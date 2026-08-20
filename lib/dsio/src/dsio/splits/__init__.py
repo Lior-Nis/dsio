@@ -15,7 +15,6 @@ from dsio.splits.generate import (
 )
 from dsio.splits.models import SCHEMA, Scheme, SplitError, SplitFile, SplitSpec
 from dsio.splits.resolve import assert_no_row_overlap, resolve, resolve_masks, summarise
-from dsio.splits.stratify import BalanceReport, KeyBalance, StratifyKey
 from dsio.splits.temporal import (
     TemporalBounds,
     TemporalError,
@@ -28,13 +27,10 @@ from dsio.splits.temporal import (
 
 __all__ = [
     "SCHEMA",
-    "BalanceReport",
-    "KeyBalance",
     "Scheme",
     "SplitError",
     "SplitFile",
     "SplitSpec",
-    "StratifyKey",
     "TemporalBounds",
     "TemporalError",
     "TemporalSpec",

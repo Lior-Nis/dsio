@@ -187,27 +187,6 @@ def test_splits_make_writes_committable_files(workdir: Path) -> None:
         assert (workdir / path).read_text().startswith("# dsio split:")
 
 
-def test_splits_make_stratifies_on_a_named_key(workdir: Path) -> None:
-    code, payload = dsio(
-        "splits", "make", "stores/cohort",
-        "--name", "strat", "--scheme", "stratified_kfold", "--k", "3",
-        "--stratify", "events:numeric",
-        cwd=workdir,
-    )
-    assert code == 0
-    assert payload["folds"][0]["balance"] is not None
-
-
-def test_splits_make_rejects_an_unknown_stratify_kind(workdir: Path) -> None:
-    code, payload = dsio(
-        "splits", "make", "stores/cohort",
-        "--name", "bad", "--scheme", "stratified_kfold", "--stratify", "events:guess",
-        cwd=workdir,
-    )
-    assert code == 1
-    assert "categorical" in payload["error"]
-
-
 def test_splits_check_proves_no_row_overlap(workdir: Path) -> None:
     """The guarantee the whole layer exists for, verified rather than asserted."""
     dsio("splits", "make", "stores/cohort", "--name", "k3", "--k", "3", cwd=workdir)

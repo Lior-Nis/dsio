@@ -14,7 +14,6 @@ from dsio.splits import (
     SplitSpec,
     assert_no_row_overlap,
     generate,
-    group_values,
     resolve,
     write_splits,
 )
@@ -95,20 +94,6 @@ def test_every_group_is_tested_exactly_once_across_folds(store: SignalStore) -> 
     folds = generate(entity_examples(store), SplitSpec(scheme="kfold", k=3), name="k3")
     tested = [g for split in folds for g in split.parts["test"]]
     assert sorted(tested) == sorted(store.groups)
-
-
-def test_stratification_balances_better_than_shuffling(store: SignalStore) -> None:
-    """Serpentine assignment is the reason this is not a hash function."""
-    values = group_values(entity_examples(store), "events")
-
-    def spread(spec: SplitSpec) -> float:
-        folds = generate(entity_examples(store), spec, name="x")
-        totals = [sum(values[g] for g in f.parts["test"]) for f in folds]
-        return float(np.std(totals))
-
-    stratified = spread(SplitSpec(scheme="stratified_kfold", k=3, stratify_by="events"))
-    shuffled = spread(SplitSpec(scheme="kfold", k=3, seed=1))
-    assert stratified <= shuffled
 
 
 def test_leave_one_group_out_yields_one_fold_per_group(store: SignalStore) -> None:
@@ -192,17 +177,6 @@ def test_split_file_round_trips(store: SignalStore, tmp_path: Path) -> None:
     restored = SplitFile.load(paths[0])
     assert restored.parts == generate(entity_examples(store), SplitSpec(scheme="kfold", k=3),
         name="k3")[0].parts
-
-
-def test_split_file_carries_a_readable_header(store: SignalStore) -> None:
-    """A split is scientific provenance; it should be readable without parsing."""
-    split = generate(
-        entity_examples(store), SplitSpec(scheme="stratified_kfold", k=3,
-            stratify_by="events"), name="k3"
-    )[0]
-    header = split.to_yaml()
-    assert "# group key: group  <- the leakage boundary" in header
-    assert "stratified by events" in header
 
 
 def test_foreign_schema_is_rejected(tmp_path: Path) -> None:
