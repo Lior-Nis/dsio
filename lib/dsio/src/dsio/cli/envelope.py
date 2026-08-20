@@ -23,8 +23,8 @@ from pydantic import ValidationError
 from dsio.artifacts.store import RegistryIntegrityError
 from dsio.config.overrides import OverrideError
 from dsio.config.registry import DuplicateComponentError, UnknownComponentError
-from dsio.data.cache import CacheError
 from dsio.data.remote import RemoteError, RemoteIntegrityError
+from dsio.data.staging import StagingError
 from dsio.data.store import StoreError
 from dsio.eval.contract import EvalError
 from dsio.splits.models import SplitError
@@ -61,7 +61,7 @@ _CODES: list[tuple[type[BaseException], ErrorCode, bool]] = [
     # split — and the second is a bug report.
     (RegistryIntegrityError, ErrorCode.INTEGRITY, False),
     (StoreError, ErrorCode.INTEGRITY, False),
-    (CacheError, ErrorCode.INTEGRITY, False),
+    (StagingError, ErrorCode.INTEGRITY, False),
     (RemoteIntegrityError, ErrorCode.INTEGRITY, False),
     # A missing object or an unconfigured remote is a setup problem, not a transient one;
     # transient network failures surface as OSError and are already marked retryable.

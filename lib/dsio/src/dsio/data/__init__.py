@@ -11,23 +11,6 @@ from dsio.data.adapters import (
     TableExamples,
     entity_examples,
 )
-from dsio.data.cache import (
-    CACHE_ROOT_ENV,
-    BytesCodec,
-    CacheEntry,
-    CacheError,
-    CachePolicy,
-    Codec,
-    CodePolicy,
-    ConfigPolicy,
-    EnvPolicy,
-    ExplicitVersionPolicy,
-    JsonCodec,
-    NpzCodec,
-    NumpyCodec,
-    StageCache,
-    cache_root,
-)
 from dsio.data.examples import Examples, ExamplesError, assert_consistent, group_attribute
 from dsio.data.format import DTypeCode, IndexFormatError, IndexHeader
 from dsio.data.readers import ReadError, SignalReader, open_reader
@@ -42,6 +25,7 @@ from dsio.data.remote import (
     status,
     write_remotes,
 )
+from dsio.data.staging import StagingError, stage
 from dsio.data.store import (
     DATA_ROOT_ENV,
     Entity,
@@ -61,28 +45,15 @@ from dsio.data.views import (
 )
 
 __all__ = [
-    "CACHE_ROOT_ENV",
     "DATA_ROOT_ENV",
     "REMOTE_ENV",
-    "BytesCodec",
-    "CacheEntry",
-    "CacheError",
-    "CachePolicy",
-    "CodePolicy",
-    "Codec",
-    "ConfigPolicy",
     "DTypeCode",
     "Entity",
-    "EnvPolicy",
     "Examples",
     "ExamplesError",
-    "ExplicitVersionPolicy",
     "IndexFormatError",
     "IndexHeader",
-    "JsonCodec",
     "KeyedExamples",
-    "NpzCodec",
-    "NumpyCodec",
     "ReadError",
     "RemoteError",
     "RemoteIntegrityError",
@@ -90,7 +61,7 @@ __all__ = [
     "SignalReader",
     "SignalStore",
     "SignalStoreBuilder",
-    "StageCache",
+    "StagingError",
     "StoreError",
     "StoreManifest",
     "TableExamples",
@@ -100,7 +71,6 @@ __all__ = [
     "WindowView",
     "assert_consistent",
     "build_index",
-    "cache_root",
     "data_root",
     "entity_examples",
     "group_attribute",
@@ -110,6 +80,7 @@ __all__ = [
     "pull",
     "push",
     "resolve_remote",
+    "stage",
     "status",
     "write_remotes",
 ]

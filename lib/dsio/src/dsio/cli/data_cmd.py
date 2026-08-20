@@ -13,7 +13,7 @@ from typing import Annotated, Any
 import typer
 
 from dsio.cli.envelope import json_command
-from dsio.data import SignalStore, StageCache, WindowSpec, build_index, load_or_build
+from dsio.data import SignalStore, WindowSpec, build_index, load_or_build
 from dsio.data.remote import Transfer, pull, push, status
 from dsio.data.store import SIGNAL_FILE
 from dsio.data.views import index_path
@@ -210,32 +210,3 @@ def _transfer_payload(name: str, transfers: list[Transfer], *, dry_run: bool) ->
     }
 
 
-cache_app = typer.Typer(help="Inspect the stage cache.", no_args_is_help=True)
-app.add_typer(cache_app, name="cache")
-
-
-@cache_app.command("ls")
-@json_command
-def cache_ls(
-    root: Annotated[Path, typer.Option(help="Cache directory.")] = Path("cache"),
-    stage: Annotated[str | None, typer.Option(help="Only entries for this stage.")] = None,
-) -> dict[str, Any]:
-    """List cached stage outputs, newest first."""
-    cache = StageCache(root)
-    entries = cache.entries(stage)
-    return {
-        "root": str(root),
-        "count": len(entries),
-        "bytes": cache.size_bytes(),
-        "entries": [
-            {
-                "stage": entry.stage,
-                "key": entry.key,
-                "version": entry.version,
-                "bytes": entry.output_bytes,
-                "seconds": entry.seconds,
-                "created_at": entry.created_at,
-            }
-            for entry in entries
-        ],
-    }
