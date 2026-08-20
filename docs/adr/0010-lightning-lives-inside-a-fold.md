@@ -2,6 +2,10 @@
 
 Status: accepted (2026-08-18)
 Implements: the plan's Phase 4 (torch runner), and ADR 0004 items 9 and 10.
+Superseded in part by ADR 0017 (accepted 2026-08-20, implemented in Plan 3): Lightning's
+loop no longer sits inside a fold loop, because there is no fold loop — one run is one fold.
+The component chain and its enforced invariants survive; ADR 0015 makes them the only
+training path rather than one of three.
 
 ## Context
 

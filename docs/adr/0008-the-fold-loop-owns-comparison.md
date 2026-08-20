@@ -2,6 +2,10 @@
 
 Status: accepted (2026-08-18)
 Implements: ADR 0004 items 8 and 11; the plan's Phase 3.
+Superseded in mechanism by ADR 0017 (accepted 2026-08-20, implemented in Plan 3): the
+in-process fold loop is removed and one run trains one fold. The noise-floor rule this ADR
+introduced — an improvement is a win only if it exceeds the floor — survives unchanged, as
+does the paired floor. Only the loop goes.
 
 ## Context
 
