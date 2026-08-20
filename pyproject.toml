@@ -16,11 +16,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tabular = ["scikit-learn>=1.9", "xgboost>=3.4", "polars>=1.30", "pyarrow>=18"]
-forecast = ["statsforecast>=2.1", "mlforecast>=1.1"]
+# Not tabular training any more (that runner is deleted; ADR 0015) — scikit-learn is
+# the linear probe's dependency now (`dsio.ssl.probe`), and `tests/eval/test_metrics.py`
+# pins the hand-rolled metrics against it. xgboost, polars and pyarrow had no importer
+# left in `src/` and are gone.
+tabular = ["scikit-learn>=1.9"]
 data = ["pyarrow>=18"]
-# zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
-legacy = ["zarr>=3.0"]
 # torch ships one wheel per accelerator, and they cannot coexist in a resolution.
 # CI has no GPU and wants the small CPU wheel; a local Blackwell card (sm_120) needs
 # a CUDA build or it fails at model-build time with "no kernel image is available

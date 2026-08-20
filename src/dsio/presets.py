@@ -17,23 +17,41 @@ from dsio.config.schema import RunConfig
 
 @preset
 def spine_baseline(
-    dataset: str = "iris",
-    estimator: str = "logreg",
-    test_fraction: float = 0.25,
+    store: str = "spine_starter",
+    labels: str = "spine_starter",
+    split: str = "spine_starter",
+    lr: float = 1e-3,
     seed: int = 42,
 ) -> RunConfig:
-    """Starter baseline. Replace the task with your own once you have data staged."""
+    """Starter baseline. Replace the task with your own once you have data staged.
+
+    `store`, `labels` and `split` name a corpus, a label provider and a committed split
+    this project has not staged yet — `LABELS` intentionally ships with no built-in
+    entries, so resolving this with its defaults preflights loudly until you register
+    your own label provider and commit a split file, same as any other project preset.
+    """
     # Imported here, not at module scope, so that enumerating presets does not pay for
     # importing a task. Bare `dsio run` lists presets and their parameters by
     # introspecting signatures; it never constructs a config, so it must not pull in
     # torch the day a built-in preset uses TorchTask.
-    from dsio.train.tabular import TabularTask
+    from dsio.data.views import WindowSpec
+    from dsio.train.torch_task import Component, TorchTask, TrainerConfig
 
     return RunConfig(
-        name=f"{dataset}-{estimator}",
+        name=f"{store}-lr{lr}",
         seed=seed,
-        tags=("baseline", "tabular"),
-        task=TabularTask(
-            dataset=dataset, estimator=estimator, test_fraction=test_fraction
+        tags=("baseline", "torch"),
+        task=TorchTask(
+            store=store,
+            window=WindowSpec(length=64, stride=32, label_policy="majority"),
+            labels=labels,
+            split=split,
+            backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 8, "depth": 1}),
+            head=Component(name="linear", params={"out_dim": 2}),
+            loss=Component(name="cross_entropy", params={"threshold": 0.5}),
+            transform=Component(name="instance_standardize"),
+            lr=lr,
+            metrics=("accuracy",),
+            trainer=TrainerConfig(max_epochs=2, accelerator="cpu", devices=1, checkpoint=False),
         ),
     )

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -22,11 +25,10 @@ def test_config_is_frozen(config: RunConfig) -> None:
 
 def test_unknown_field_is_rejected() -> None:
     """A schema that accepts unknown keys turns a typo into a silently ignored setting."""
-    from dsio.train.tabular import TabularTask
+    from dsio.train.torch_task import TrainerConfig
 
-    load_runners()
     with pytest.raises(ValidationError):
-        TabularTask(dataset="iris", estimatorr="logreg")  # type: ignore[call-arg]
+        TrainerConfig(max_epochsz=1)  # type: ignore[call-arg]
 
 
 def test_config_round_trips_through_yaml(config: RunConfig) -> None:
@@ -109,22 +111,50 @@ def test_preset_argument_beats_config_path() -> None:
     """A dotless token matching a preset parameter sets the argument, not the config."""
     load_runners()
     load_preset_modules()
-    config = resolve("spine_baseline", ["estimator=random_forest"])
-    assert config.task.estimator == "random_forest"  # type: ignore[attr-defined]
-    assert config.name.endswith("random_forest")
+    config = resolve("spine_baseline", ["lr=0.01"])
+    assert config.task.lr == 0.01  # type: ignore[attr-defined]
+    assert config.name.endswith("lr0.01")
 
 
 def test_dotted_token_reaches_the_config() -> None:
     load_runners()
     load_preset_modules()
-    config = resolve("spine_baseline", ["task.test_fraction=0.4"])
-    assert config.task.test_fraction == 0.4  # type: ignore[attr-defined]
+    config = resolve("spine_baseline", ["task.batch_size=64"])
+    assert config.task.batch_size == 64  # type: ignore[attr-defined]
 
 
-def test_every_preset_composes_validates_and_preflights() -> None:
-    """The cheapest guard against config rot: every registered preset must still build."""
+def test_every_preset_composes_validates_and_preflights(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cheapest guard against config rot: every registered preset must still build.
+
+    `spine_baseline`'s defaults name a label and a split its own docstring says a user
+    must stage first (`LABELS` ships with no built-in entries by design — see
+    `tests/nn/test_registry_bootstrap.py`). So this guard stages exactly that — a
+    registered label and a committed split file — under a scratch `cwd`, the same
+    prerequisite any project preset's preflight assumes, rather than weakening the
+    check to skip preflighting altogether.
+    """
+    from dsio.nn.registry import LABELS, labels
+    from dsio.splits.models import SplitFile
+
+    monkeypatch.chdir(tmp_path)
     load_runners()
     load_preset_modules()
+
+    if "spine_starter" not in LABELS:
+
+        @labels("spine_starter")
+        def _spine_starter_labels(store: Any) -> Any:  # pragma: no cover - never called
+            raise NotImplementedError
+
+    SplitFile(
+        store="spine_starter",
+        name="spine_starter",
+        fold=0,
+        parts={"train": ["g0", "g1"], "val": ["g2"], "test": ["g3"]},
+    ).save(tmp_path / "splits" / "spine_starter" / "fold0.yaml")
+
     assert PRESETS.names(), "no presets registered; discovery is broken"
     for name in PRESETS.names():
         config = resolve(name)
