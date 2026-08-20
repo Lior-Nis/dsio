@@ -27,8 +27,9 @@ from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
-from dsio.nn import AUGMENTORS, BACKBONES, LABELS, TRANSFORMS, WindowDataset, make_loader
-from dsio.splits import fold_paths, load_folds
+from dsio.nn.data import WindowDataset, make_loader
+from dsio.nn.registry import AUGMENTORS, BACKBONES, LABELS, TRANSFORMS
+from dsio.splits.folds import fold_paths, load_folds
 from dsio.ssl.masking import MASKS
 from dsio.ssl.methods import METHODS
 from dsio.ssl.module import SslModule

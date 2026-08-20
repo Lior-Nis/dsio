@@ -7,8 +7,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index, entity_examples
-from dsio.splits import SplitError, SplitFile, assert_no_row_overlap, resolve
+from dsio.data.adapters import SignalExamples, entity_examples
+from dsio.data.store import SignalStore
+from dsio.data.views import WindowSpec, build_index
+from dsio.splits.models import SplitError, SplitFile
+from dsio.splits.resolve import assert_no_row_overlap, resolve
 
 
 @pytest.fixture

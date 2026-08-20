@@ -13,19 +13,19 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.data import SignalExamples, SignalStore, WindowSpec, build_index, entity_examples
-from dsio.eval import Fold, FoldPrediction, cross_validate
-from dsio.splits import (
-    SplitError,
-    SplitFile,
-    TemporalSpec,
-    describe,
+from dsio.data.adapters import SignalExamples, entity_examples
+from dsio.data.store import SignalStore
+from dsio.data.views import WindowSpec, build_index
+from dsio.eval.contract import Fold, FoldPrediction
+from dsio.eval.loop import cross_validate
+from dsio.splits.folds import (
+    _assert_test_parts_are_disjoint,
     fold_paths,
     folds_from_splits,
     load_folds,
-    walk_forward,
 )
-from dsio.splits.folds import _assert_test_parts_are_disjoint
+from dsio.splits.models import SplitError, SplitFile
+from dsio.splits.temporal import TemporalSpec, describe, walk_forward
 
 
 @pytest.fixture

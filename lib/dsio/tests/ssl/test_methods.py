@@ -9,7 +9,7 @@ pytest.importorskip("lightning")
 
 from torch import nn  # noqa: E402
 
-from dsio.nn import Conv1dEncoder, Jitter  # noqa: E402
+from dsio.nn.components import Conv1dEncoder, Jitter  # noqa: E402
 from dsio.ssl import (  # noqa: E402
     METHODS,
     MaskedReconstruction,

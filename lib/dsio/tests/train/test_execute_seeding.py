@@ -15,8 +15,9 @@ from pathlib import Path
 import pytest
 
 from dsio.config.schema import RunConfig
-from dsio.runs import RunLedger
-from dsio.train import execute, load_runners
+from dsio.runs.record import RunLedger
+from dsio.train import load_runners
+from dsio.train.runner import execute
 from dsio.train.tabular import TabularTask
 
 

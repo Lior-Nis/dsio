@@ -14,13 +14,14 @@ pytest.importorskip("sklearn")
 
 from dsio.artifacts.store import REGISTRY_ROOT_ENV, ModelRegistry  # noqa: E402
 from dsio.config.schema import RunConfig  # noqa: E402
-from dsio.data import SignalStore, WindowSpec, entity_examples  # noqa: E402
-from dsio.data.store import DATA_ROOT_ENV  # noqa: E402
-from dsio.eval import read_report  # noqa: E402
-from dsio.nn import LABELS, labels  # noqa: E402
-from dsio.runs import RunLedger  # noqa: E402
-from dsio.splits import SplitFile  # noqa: E402
-from dsio.train import check, execute  # noqa: E402
+from dsio.data.adapters import entity_examples  # noqa: E402
+from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
+from dsio.data.views import WindowSpec  # noqa: E402
+from dsio.eval.contract import read_report  # noqa: E402
+from dsio.nn.registry import LABELS, labels  # noqa: E402
+from dsio.runs.record import RunLedger  # noqa: E402
+from dsio.splits.models import SplitFile  # noqa: E402
+from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
     Component,
@@ -229,7 +230,7 @@ def test_a_pinned_encoder_loads_into_a_downstream_run(corpus: Path, pretrained: 
 def test_a_tampered_digest_fails_closed(corpus: Path, pretrained: EncoderRef) -> None:
     """There is no path to hardcode and no way to say 'latest', so the remaining risk is a
     swapped artifact — which the registry re-hashes and refuses."""
-    from dsio.nn import BACKBONES
+    from dsio.nn.registry import BACKBONES
 
     backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     wrong = pretrained.model_copy(update={"digest": "0" * 64})
@@ -249,7 +250,7 @@ def test_freezing_actually_freezes(corpus: Path, pretrained: EncoderRef) -> None
     """Both halves. A frozen BatchNorm whose running statistics keep updating is not
     frozen, and the difference shows up as a probe that mysteriously outperforms its own
     linear separability."""
-    from dsio.nn import BACKBONES
+    from dsio.nn.registry import BACKBONES
 
     backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     report = load_encoder(pretrained, backbone=backbone)
@@ -262,7 +263,7 @@ def test_freezing_actually_freezes(corpus: Path, pretrained: EncoderRef) -> None
 def test_finetuning_leaves_the_encoder_trainable(corpus: Path, pretrained: EncoderRef) -> None:
     """A probe measures what the representation already contains; a finetune measures what
     it is a good starting point for. Reporting one as the other overstates the result."""
-    from dsio.nn import BACKBONES
+    from dsio.nn.registry import BACKBONES
 
     backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     load_encoder(pretrained.model_copy(update={"freeze": False}), backbone=backbone)
@@ -274,7 +275,7 @@ def test_loading_into_a_different_architecture_is_refused(
 ) -> None:
     """Silently loading a subset of weights produces a model that is part pretrained and
     part random, and reports as though it were fully pretrained."""
-    from dsio.nn import BACKBONES
+    from dsio.nn.registry import BACKBONES
 
     mismatched = BACKBONES.get("conv1d")(channels=2, hidden=64, out_dim=16, depth=3)
     with pytest.raises(Exception):
@@ -288,7 +289,7 @@ def test_the_loaded_weights_actually_differ_from_a_fresh_init(
     initialised — every other test here would still pass."""
     import torch
 
-    from dsio.nn import BACKBONES
+    from dsio.nn.registry import BACKBONES
 
     fresh = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     before = [p.detach().clone() for p in fresh.parameters()]

@@ -9,15 +9,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from dsio.data import (  # noqa: E402, entity_examples
-    SignalExamples,
-    SignalStore,
-    WindowSpec,
-    build_index,
-    entity_examples,  # noqa: E402
-)
-from dsio.nn import WindowDataset, make_loader  # noqa: E402
-from dsio.splits import SplitFile, folds_from_splits  # noqa: E402
+from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
+from dsio.data.store import SignalStore  # noqa: E402
+from dsio.data.views import WindowSpec, build_index  # noqa: E402
+from dsio.nn.data import WindowDataset, make_loader  # noqa: E402
+from dsio.splits.folds import folds_from_splits  # noqa: E402
+from dsio.splits.models import SplitFile  # noqa: E402
 
 
 @pytest.fixture

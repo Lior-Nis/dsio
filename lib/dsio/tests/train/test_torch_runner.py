@@ -16,13 +16,14 @@ pytest.importorskip("torch")
 pytest.importorskip("lightning")
 
 from dsio.config.schema import RunConfig  # noqa: E402
-from dsio.data import SignalStore, WindowSpec, entity_examples  # noqa: E402
-from dsio.data.store import DATA_ROOT_ENV  # noqa: E402
-from dsio.eval import read_report  # noqa: E402
-from dsio.nn import LABELS, labels  # noqa: E402
-from dsio.runs import RunLedger  # noqa: E402
-from dsio.splits import SplitFile  # noqa: E402
-from dsio.train import check, execute  # noqa: E402
+from dsio.data.adapters import entity_examples  # noqa: E402
+from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
+from dsio.data.views import WindowSpec  # noqa: E402
+from dsio.eval.contract import read_report  # noqa: E402
+from dsio.nn.registry import LABELS, labels  # noqa: E402
+from dsio.runs.record import RunLedger  # noqa: E402
+from dsio.splits.models import SplitFile  # noqa: E402
+from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
     Component,
     TorchTask,
@@ -237,9 +238,9 @@ def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> N
 
 def test_no_group_is_both_trained_on_and_tested(corpus: Path, tmp_path: Path) -> None:
     """The leakage guarantee, verified at the level the runner actually consumes."""
-    from dsio.data import SignalExamples
+    from dsio.data.adapters import SignalExamples
     from dsio.data.views import load_or_build
-    from dsio.splits import fold_paths, load_folds
+    from dsio.splits.folds import fold_paths, load_folds
 
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)

@@ -8,9 +8,12 @@ from typing import Annotated, Any
 import typer
 
 from dsio.cli.envelope import json_command
-from dsio.config import PRESETS, RunConfig, load_preset_modules, preset_parameters, resolve
-from dsio.runs import RunLedger, RunStatus, seed_everything
-from dsio.train import check, execute, load_runners
+from dsio.config.presets import PRESETS, load_preset_modules, preset_parameters, resolve
+from dsio.config.schema import RunConfig
+from dsio.runs.record import RunLedger, RunStatus
+from dsio.runs.seeding import seed_everything
+from dsio.train import load_runners
+from dsio.train.runner import check, execute
 
 app = typer.Typer(help="Execute a preset as a tracked run.", no_args_is_help=True)
 

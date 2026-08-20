@@ -7,18 +7,21 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.data import SignalExamples, SignalStore, StoreError, WindowSpec, build_index
-from dsio.splits import (
-    SplitFile,
+from dsio.data.adapters import SignalExamples
+from dsio.data.store import SignalStore, StoreError
+from dsio.data.views import WindowSpec, build_index
+from dsio.splits.models import SplitFile
+from dsio.splits.resolve import resolve
+from dsio.splits.temporal import (
     TemporalBounds,
     TemporalError,
     TemporalSpec,
     TimeSpan,
-    resolve,
+    apply,
+    describe,
     walk_forward,
     window_times,
 )
-from dsio.splits.temporal import apply, describe
 
 
 def _temporal_folds(
@@ -254,8 +257,8 @@ def test_generated_temporal_split_resolves(market: SignalStore, index) -> None:
 def test_a_temporal_split_needs_a_dataset_with_a_clock(market: SignalStore, index) -> None:
     """Returning None from times() is what makes purged splitting unavailable rather than
     silently wrong on data that has an order but no meaningful clock."""
-    from dsio.data import TableExamples
-    from dsio.splits import SplitError
+    from dsio.data.adapters import TableExamples
+    from dsio.splits.models import SplitError
 
     folds = _temporal_folds(SignalExamples(market, index), TemporalSpec(n_splits=1), name="wf")
     timeless = TableExamples(

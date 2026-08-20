@@ -9,16 +9,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dsio.data import (
-    Examples,
-    ExamplesError,
-    KeyedExamples,
-    TableExamples,
-    assert_consistent,
-    group_attribute,
-)
-from dsio.data.examples import check
-from dsio.splits import SplitFile, folds_from_splits, resolve
+from dsio.data.adapters import TableExamples
+from dsio.data.examples import Examples, ExamplesError, assert_consistent, check, group_attribute
+from dsio.splits.folds import folds_from_splits
+from dsio.splits.models import SplitFile
+from dsio.splits.resolve import resolve
 
 
 @pytest.fixture
@@ -39,7 +34,6 @@ def table() -> TableExamples:
 
 def test_the_adapters_satisfy_the_protocol(table: TableExamples) -> None:
     assert isinstance(table, Examples)
-    assert isinstance(KeyedExamples(name="k", keys=["a", "b"]), Examples)
 
 
 def test_a_non_dataset_is_rejected_with_a_useful_message() -> None:
@@ -122,24 +116,6 @@ def test_the_digest_reflects_the_grouping_not_the_features() -> None:
     assert a.digest != c.digest
 
 
-# --- keyed examples --------------------------------------------------------------------------
-
-
-def test_keys_default_to_being_their_own_group() -> None:
-    """An explicit statement that the records are independent, rather than a silent
-    assumption of it."""
-    keyed = KeyedExamples(name="docs", keys=["d1", "d2", "d3"])
-    assert keyed.groups.tolist() == ["d1", "d2", "d3"]
-
-
-def test_keys_survive_subsetting() -> None:
-    """Predictions join back to the record they came from by name, not by position."""
-    keyed = KeyedExamples(name="docs", keys=["d1", "d2", "d3"], groups=["c", "c", "d"])
-    part = keyed.subset(np.array([True, False, True]))
-    assert part.keys.tolist() == ["d1", "d3"]
-    assert part.groups.tolist() == ["c", "d"]
-
-
 # --- the whole split layer, on data with no features at all -----------------------------------
 
 
@@ -187,36 +163,9 @@ def test_folds_build_from_a_plain_table(table: TableExamples) -> None:
 def test_a_table_cannot_prove_row_overlap_and_says_why(table: TableExamples) -> None:
     """The signal-specific check is not part of the protocol, and asking for it on a
     dataset with nothing underneath to overlap must explain rather than crash."""
-    from dsio.splits import assert_no_row_overlap
+    from dsio.splits.resolve import assert_no_row_overlap
 
     splits = _table_kfold(table)
     parts = resolve(table, splits[0])
     with pytest.raises(Exception, match="no\n *covered_rows|covered_rows"):
         assert_no_row_overlap(parts)
-
-
-def test_a_keyed_dataset_splits_by_a_coarser_group() -> None:
-    """Documents grouped by conversation: the leakage boundary is not the record."""
-    keyed = KeyedExamples(
-        name="turns",
-        keys=[f"t{i}" for i in range(12)],
-        groups=[f"conv{i // 4}" for i in range(12)],
-    )
-    # One hand-picked group held out per fold — the trivial leave-one-group-out shape.
-    splits = [
-        SplitFile(
-            store=keyed.name,
-            store_manifest_sha256=keyed.digest,
-            name="k3",
-            fold=i,
-            counts={"train": 8, "test": 4},
-            parts={
-                "train": [g for g in ("conv0", "conv1", "conv2") if g != held],
-                "test": [held],
-            },
-        )
-        for i, held in enumerate(("conv0", "conv1", "conv2"))
-    ]
-    folds = folds_from_splits(keyed, splits)
-    for fold in folds:
-        assert not (set(keyed.groups[fold.train]) & set(keyed.groups[fold.test]))

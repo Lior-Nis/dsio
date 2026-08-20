@@ -37,9 +37,12 @@ from dsio.contracts import DsioModel
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
-from dsio.eval import Fold, FoldPrediction, cross_validate, write_report
+from dsio.eval.contract import Fold, FoldPrediction, write_report
+from dsio.eval.loop import cross_validate
 from dsio.eval.metrics import METRICS
-from dsio.nn import (
+from dsio.nn.data import WindowDataset, make_loader
+from dsio.nn.module import DsioModule
+from dsio.nn.registry import (
     AUGMENTORS,
     BACKBONES,
     HEADS,
@@ -47,11 +50,8 @@ from dsio.nn import (
     LOSSES,
     PREPROCESSORS,
     TRANSFORMS,
-    DsioModule,
-    WindowDataset,
-    make_loader,
 )
-from dsio.splits import fold_paths, load_folds
+from dsio.splits.folds import fold_paths, load_folds
 from dsio.train.runner import preflight, runner
 
 if TYPE_CHECKING:

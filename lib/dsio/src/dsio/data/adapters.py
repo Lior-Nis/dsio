@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from dsio.contracts import sha256_of_bytes, short_digest
+from dsio.contracts import sha256_of_bytes
 from dsio.data.examples import ExamplesError
 from dsio.data.views import window_times
 
@@ -198,61 +198,6 @@ class SignalExamples:
 
     def __repr__(self) -> str:
         return f"SignalExamples({self.name!r}, n={len(self):,})"
-
-
-def _masked_times(
-    times: tuple[np.ndarray, np.ndarray] | None, mask: np.ndarray
-) -> tuple[np.ndarray, np.ndarray] | None:
-    return None if times is None else (times[0][mask], times[1][mask])
-
-
-class KeyedExamples(TableExamples):
-    """Examples identified by an explicit key — a document id, a task id, an episode id.
-
-    The shape most non-array work takes: a list of things with names, where the group is
-    often the key itself (one document per document) or a coarser cluster (all turns of one
-    conversation). Keeping the keys means a prediction can be joined back to the record it
-    came from without relying on position.
-    """
-
-    def __init__(
-        self,
-        *,
-        name: str,
-        keys: Sequence[str],
-        groups: Sequence[Any] | np.ndarray | None = None,
-        attributes: Mapping[str, Sequence[Any] | np.ndarray] | None = None,
-        times: tuple[np.ndarray, np.ndarray] | None = None,
-        digest: str | None = None,
-    ) -> None:
-        self._keys = np.asarray(list(keys), dtype=object)
-        super().__init__(
-            name=name,
-            # No grouping given means each example is its own group: an explicit statement
-            # that the records are independent, rather than a silent assumption of it.
-            groups=self._keys if groups is None else groups,
-            attributes=attributes,
-            times=times,
-            digest=digest or short_digest(list(map(str, keys))),
-        )
-
-    @property
-    def keys(self) -> np.ndarray:
-        return self._keys
-
-    def subset(self, mask: np.ndarray) -> KeyedExamples:
-        mask = np.asarray(mask, dtype=bool)
-        return KeyedExamples(
-            name=self.name,
-            keys=self._keys[mask].tolist(),
-            groups=self.groups[mask],
-            attributes={key: self.attribute(key)[mask] for key in self.attribute_names()},
-            times=_masked_times(self.times(), mask),
-            digest=self.digest,
-        )
-
-    def __repr__(self) -> str:
-        return f"KeyedExamples({self.name!r}, n={len(self):,})"
 
 
 def entity_examples(store: Any) -> TableExamples:

@@ -5,15 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dsio.eval import (
-    CVReport,
-    EvalError,
-    Fold,
-    FoldMetrics,
+from dsio.eval.contract import CVReport, EvalError, Fold, FoldMetrics, fold_fingerprint
+from dsio.eval.verdict import (
     Outcome,
     compare,
     compare_all,
-    fold_fingerprint,
     minimum_detectable_rows,
     noise_floor,
     paired_noise_floor,
