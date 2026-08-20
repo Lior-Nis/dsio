@@ -446,7 +446,7 @@ above. Mark them; do not delete them — the reasoning is the record of why the 
 
 The migration is complete when, from a fresh clone:
 
-1. `uv sync && uv run pytest && uv run ruff check . && uv run mypy && uv run lint-imports`
+1. `uv sync --extra cpu && uv run pytest && uv run ruff check . && uv run mypy && uv run lint-imports`
    passes — including the new no-cycle check between `data` and `splits`.
 2. `docker compose up -d` brings up Postgres and MLflow; `dsio run <preset>` records a run,
    and killing MLflow makes the next run fail immediately rather than after training.

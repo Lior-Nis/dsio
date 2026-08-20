@@ -71,19 +71,19 @@ def test_duplicate_registration_fails_loudly() -> None:
 
 
 def test_override_rejects_paths_that_do_not_exist(config: RunConfig) -> None:
-    with pytest.raises(OverrideError, match=r"no such config path 'task\.estimatr'"):
-        apply_override(config.to_dict(), "task.estimatr", "logreg")
+    with pytest.raises(OverrideError, match=r"no such config path 'task\.labelz'"):
+        apply_override(config.to_dict(), "task.labelz", "tone")
 
 
 def test_override_error_names_the_valid_siblings(config: RunConfig) -> None:
-    with pytest.raises(OverrideError, match="estimator"):
-        apply_override(config.to_dict(), "task.estimatr", "logreg")
+    with pytest.raises(OverrideError, match="labels"):
+        apply_override(config.to_dict(), "task.labelz", "tone")
 
 
 def test_override_does_not_mutate_the_input(config: RunConfig) -> None:
     original = config.to_dict()
-    apply_override(original, "task.estimator", "random_forest")
-    assert original["task"]["estimator"] == "logreg"
+    apply_override(original, "task.labels", "other")
+    assert original["task"]["labels"] == "tone"
 
 
 @pytest.mark.parametrize(
