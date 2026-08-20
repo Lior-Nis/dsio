@@ -64,7 +64,7 @@ def project_preset(store: str = "tone", split: str = "k1", lr: float = 3e-3) -> 
             lr=lr,
             metrics=("accuracy", "roc_auc"),
             trainer=TrainerConfig(
-                max_epochs=30, accelerator="cpu", devices=1, checkpoint=False,
+                max_epochs=60, accelerator="cpu", devices=1, checkpoint=False,
                 enable_progress_bar=False,
             ),
         ),
@@ -178,10 +178,13 @@ def test_run_happy_path(workdir: Path, preset_env: dict[str, str]) -> None:
     code, run_payload = dsio("run", "project_preset", "--summary", cwd=workdir, env_extra=env)
     assert code == 0, run_payload
     assert run_payload["run_id"]
-    # roc_auc, not accuracy: the fixture's tone-vs-noise signal is separable enough that
-    # a wired-correctly run should score near-perfect on it (mirrors
-    # tests/train/test_torch_runner.py::test_the_runner_learns_a_separable_signal).
+    # roc_auc is rank-order-only: it is computed purely from the score's ordering, so it
+    # structurally cannot see a hard-decision bug (mixed-up tensors, an un-sigmoided
+    # logit, a wrong threshold would all still read 1.0 here). accuracy is the only
+    # assertion in this test that exercises the y_pred derivation path at all, so it stays
+    # alongside roc_auc rather than being replaced by it — do not swap one for the other.
     assert run_payload["metrics"]["roc_auc"] > 0.9
+    assert run_payload["metrics"]["accuracy"] == 1.0
 
 
 def test_summary_projection_omits_the_config(

@@ -92,12 +92,13 @@ class Registry[T]:
         known = self.names()
         message = f"unknown {self.namespace} {name!r}"
         close = difflib.get_close_matches(name, known, n=3, cutoff=0.6)
+        plural = self.namespace if self.namespace.endswith("s") else f"{self.namespace}s"
         if close:
             message += f"; did you mean {', '.join(repr(item) for item in close)}?"
         elif known:
-            message += f"; known {self.namespace}s: {', '.join(known)}"
+            message += f"; known {plural}: {', '.join(known)}"
         else:
-            message += f"; no {self.namespace}s are registered"
+            message += f"; no {plural} are registered"
         return message
 
 

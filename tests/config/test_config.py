@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -107,8 +106,15 @@ def test_scalar_parsing(text: str, expected: object) -> None:
     assert parse_scalar(text) == expected
 
 
-def test_preset_argument_beats_config_path() -> None:
+def test_preset_argument_beats_config_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A dotless token matching a preset parameter sets the argument, not the config."""
+    # spine_baseline's defaults trigger its own synthetic-corpus staging (see
+    # src/dsio/presets.py::_stage_starter_corpus), which writes a real split file at a
+    # path relative to cwd — chdir to a scratch dir so that lands in tmp_path, not the
+    # real repo tree.
+    monkeypatch.chdir(tmp_path)
     load_runners()
     load_preset_modules()
     config = resolve("spine_baseline", ["lr=0.01"])
@@ -116,7 +122,10 @@ def test_preset_argument_beats_config_path() -> None:
     assert config.name.endswith("lr0.01")
 
 
-def test_dotted_token_reaches_the_config() -> None:
+def test_dotted_token_reaches_the_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # see test_preset_argument_beats_config_path
     load_runners()
     load_preset_modules()
     config = resolve("spine_baseline", ["task.batch_size=64"])
@@ -128,32 +137,14 @@ def test_every_preset_composes_validates_and_preflights(
 ) -> None:
     """The cheapest guard against config rot: every registered preset must still build.
 
-    `spine_baseline`'s defaults name a label and a split its own docstring says a user
-    must stage first (`LABELS` ships with no built-in entries by design — see
-    `tests/nn/test_registry_bootstrap.py`). So this guard stages exactly that — a
-    registered label and a committed split file — under a scratch `cwd`, the same
-    prerequisite any project preset's preflight assumes, rather than weakening the
-    check to skip preflighting altogether.
+    `spine_baseline` now stages its own tiny synthetic corpus and label on resolution
+    (see `_stage_starter_corpus`), so no manual data staging belongs here any more —
+    chdir to a scratch dir only so that staging lands in `tmp_path`, not the real repo
+    tree, the same reason the override tests above chdir.
     """
-    from dsio.nn.registry import LABELS, labels
-    from dsio.splits.models import SplitFile
-
     monkeypatch.chdir(tmp_path)
     load_runners()
     load_preset_modules()
-
-    if "spine_starter" not in LABELS:
-
-        @labels("spine_starter")
-        def _spine_starter_labels(store: Any) -> Any:  # pragma: no cover - never called
-            raise NotImplementedError
-
-    SplitFile(
-        store="spine_starter",
-        name="spine_starter",
-        fold=0,
-        parts={"train": ["g0", "g1"], "val": ["g2"], "test": ["g3"]},
-    ).save(tmp_path / "splits" / "spine_starter" / "fold0.yaml")
 
     assert PRESETS.names(), "no presets registered; discovery is broken"
     for name in PRESETS.names():

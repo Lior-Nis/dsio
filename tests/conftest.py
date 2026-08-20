@@ -1,7 +1,9 @@
 """Shared fixtures.
 
-Every test that touches the ledger or registry is pointed at a tmp_path root. A test that
-writes into the real `runs/` would pollute the very record the system exists to protect.
+Every test that touches the ledger, registry or data store is pointed at a tmp_path
+root. A test that writes into the real `runs/` (or `stores/`) would pollute the very
+record the system exists to protect — `spine_baseline` (`dsio.presets`) now stages a
+synthetic corpus on resolution, so this isolation is no longer just about the ledger.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import pytest
 
 from dsio.artifacts.store import REGISTRY_ROOT_ENV
 from dsio.config import RunConfig
+from dsio.data.store import DATA_ROOT_ENV
 from dsio.runs.record import RUNS_ROOT_ENV, RunLedger
 
 
@@ -22,6 +25,7 @@ from dsio.runs.record import RUNS_ROOT_ENV, RunLedger
 def _isolated_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(RUNS_ROOT_ENV, str(tmp_path / "runs"))
     monkeypatch.setenv(REGISTRY_ROOT_ENV, str(tmp_path / "models"))
+    monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "stores"))
 
 
 @pytest.fixture
