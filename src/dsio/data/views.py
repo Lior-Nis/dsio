@@ -362,39 +362,6 @@ def _derive_labels(labels: np.ndarray, starts: np.ndarray, spec: WindowSpec) -> 
     return out
 
 
-class WindowView:
-    """Reads windows on demand: a numpy-level, framework-free view over a store and index.
-
-    Nothing here is torch-aware — no ``Dataset`` base class, no tensor conversion. The
-    torch-facing equivalent, wrapped by ``make_loader``, is
-    :class:`dsio.dataset.dataset.WindowDataset`.
-    """
-
-    def __init__(self, store: SignalStore, index: WindowIndex) -> None:
-        if index.store_name != store.path.name:
-            raise ValueError(
-                f"index was built for store {index.store_name!r}, "
-                f"not {store.path.name!r}"
-            )
-        self.store = store
-        self.index = index
-
-    def __len__(self) -> int:
-        return len(self.index)
-
-    def __getitem__(self, i: int) -> np.ndarray:
-        return self.store.read(int(self.index.starts[i]), self.index.spec.length)
-
-    def label(self, i: int) -> float | None:
-        return None if self.index.labels is None else float(self.index.labels[i])
-
-    def group(self, i: int) -> str:
-        return self.index.entity_groups[int(self.index.entity_codes[i])]
-
-    def __repr__(self) -> str:
-        return f"WindowView({self.store.path.name!r}, n={len(self):,})"
-
-
 def index_path(store: SignalStore, spec: WindowSpec, root: Path | None = None) -> Path:
     """Content-addressed location for a built index."""
     base = root or store.path.parent.parent / VIEWS_DIRNAME
