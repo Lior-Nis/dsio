@@ -17,7 +17,12 @@ from dsio.data.format import (
     IndexHeader,
 )
 from dsio.data.store import Entity, SignalStore, StoreError
-from dsio.data.views import WindowSpec, build_index, load_or_build
+from dsio.data.views import (
+    WindowSpec,
+    assert_index_matches_store,
+    build_index,
+    load_or_build,
+)
 
 
 @pytest.fixture
@@ -235,11 +240,23 @@ def test_label_policies_differ(store: SignalStore) -> None:
 
 # WindowView (a numpy-only, framework-free window reader over store + index) was merged
 # into dsio.dataset.dataset.WindowDataset — the torch Dataset already took the same
-# constructor arguments, carried the identical store-name guard and message, and was the
-# only consumer of what WindowView read. Its two invariants live on there now, over the
-# same guard and the same read-matches-the-store property:
-# tests/dataset/test_dataset.py::test_a_foreign_index_is_rejected and
+# constructor arguments and was the only consumer of what WindowView read. Its
+# read-matches-the-store property lives on there now:
 # tests/dataset/test_dataset.py::test_the_window_matches_a_direct_store_read.
+#
+# The store-name guard is a data-layer invariant, not a torch one, so it did not move with
+# WindowView: it is dsio.data.views.assert_index_matches_store, called by
+# WindowDataset.__init__ (and tested again there, torch-facing, as
+# test_a_foreign_index_is_rejected) but proven torch-free right here.
+def test_index_built_for_a_different_store_is_rejected(
+    store: SignalStore, tmp_path: Path
+) -> None:
+    other = tmp_path / "other"
+    with SignalStore.builder(other, channels=3) as builder:
+        builder.add("x", np.zeros((900, 3), "float32"), group="g")
+    index = build_index(SignalStore(other), WindowSpec(length=500, stride=200))
+    with pytest.raises(ValueError, match="was built for store"):
+        assert_index_matches_store(store, index)
 
 
 def test_subset_keeps_arrays_aligned(store: SignalStore) -> None:

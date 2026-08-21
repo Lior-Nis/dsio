@@ -208,6 +208,21 @@ class WindowIndex:
         )
 
 
+def assert_index_matches_store(store: SignalStore, index: WindowIndex) -> None:
+    """Raise if ``index`` was built against a different store than ``store``.
+
+    A window's offset is only meaningful relative to the store it was cut from; an index
+    built against one store and read from another would silently return the wrong bytes at
+    every position rather than fail. This is a data-layer invariant, checked without torch,
+    so anything that turns an index and a store into windows -- torch-facing or not -- can
+    call it instead of repeating the comparison.
+    """
+    if index.store_name != store.path.name:
+        raise ValueError(
+            f"index was built for store {index.store_name!r}, not {store.path.name!r}"
+        )
+
+
 def window_times(
     store: SignalStore, index: WindowIndex, *, unit: TimeUnit = "row"
 ) -> tuple[np.ndarray, np.ndarray]:

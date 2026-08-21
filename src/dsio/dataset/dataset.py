@@ -45,7 +45,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from dsio.data.store import SignalStore
-from dsio.data.views import WindowIndex
+from dsio.data.views import WindowIndex, assert_index_matches_store
 from dsio.model.masking import apply_mask
 from dsio.runs.seeding import dataloader_kwargs
 
@@ -109,10 +109,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
         normalize_target: bool = True,
         mask_seed: int | None = None,
     ) -> None:
-        if index.store_name != store.path.name:
-            raise ValueError(
-                f"index was built for store {index.store_name!r}, not {store.path.name!r}"
-            )
+        assert_index_matches_store(store, index)
         self.store = store
         self.index = index
         self.positions = (
