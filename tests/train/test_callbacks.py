@@ -2,7 +2,7 @@
 
 Moved from ``tests/ssl/test_probe.py`` when Task 6b dissolved ``dsio.ssl``; the tests
 themselves are unchanged, because ``OnlineProbe`` and ``RankMeMonitor`` never depended on
-anything SSL-specific — they measure any :class:`~dsio.nn.module.DsioModule` that can
+anything SSL-specific — they measure any :class:`~dsio.model.module.DsioModule` that can
 ``encode``, pretrained or supervised alike.
 """
 
@@ -18,8 +18,8 @@ pytest.importorskip("sklearn")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader, Dataset  # noqa: E402
 
-from dsio.nn.components import Conv1dEncoder, CrossEntropy  # noqa: E402
-from dsio.nn.module import DsioModule  # noqa: E402
+from dsio.model.components import Conv1dEncoder, CrossEntropy  # noqa: E402
+from dsio.model.module import DsioModule  # noqa: E402
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
 
 

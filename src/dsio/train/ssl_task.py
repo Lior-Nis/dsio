@@ -14,7 +14,7 @@ neither is expressible when the reference is a name, a version and a digest.
 **There is no pretext-objective registry any more.** Task 6b deleted ``dsio.ssl.methods``
 and its ``METHODS``/``PretextObjective`` machinery along with ``SslModule`` and
 ``ContrastiveModule``: a pretraining run is built from the same pieces a supervised one is
-(:class:`~dsio.nn.module.DsioModule`, a registered ``backbone``/``head``/``loss``), plus
+(:class:`~dsio.model.module.DsioModule`, a registered ``backbone``/``head``/``loss``), plus
 exactly one of ``mask`` or ``augmentor`` telling this module which of the two
 training-dataset contracts to build — masked-reconstruction (MAE's shape) or two-view
 contrastive collation (SimCLR/VICReg's shape). Which one is set is what used to be implied
@@ -38,11 +38,11 @@ from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowIndex, WindowSpec, load_or_build
+from dsio.dataset.dataset import TwoViewCollate, make_loader, train_dataset, val_dataset
 from dsio.eval.contract import Fold
-from dsio.nn.data import TwoViewCollate, make_loader, train_dataset, val_dataset
-from dsio.nn.masking import MASKS
-from dsio.nn.module import DsioModule, export_encoder
-from dsio.nn.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
+from dsio.model.masking import MASKS
+from dsio.model.module import DsioModule, export_encoder
+from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
 from dsio.splits.folds import fold_paths, load_folds
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner

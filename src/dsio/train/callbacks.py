@@ -3,7 +3,7 @@
 Moved here from ``dsio.ssl.probe`` when Task 6b dissolved the ``ssl/`` directory: a linear
 model fit on frozen features, and the effective rank of an embedding matrix, are general
 representation-quality tools, not SSL-specific ones. Both work on any
-:class:`~dsio.nn.module.DsioModule` that can produce features via ``encode`` — a supervised
+:class:`~dsio.model.module.DsioModule` that can produce features via ``encode`` — a supervised
 classifier's backbone is exactly as measurable this way as a pretrained one's, which is why
 this lives under ``dsio.train`` next to every other callback rather than under a directory
 named for one training paradigm.

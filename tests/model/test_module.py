@@ -9,7 +9,7 @@ pytest.importorskip("lightning")
 
 from torch import nn  # noqa: E402
 
-from dsio.nn.components import (  # noqa: E402
+from dsio.model.components import (  # noqa: E402
     Conv1dEncoder,
     CrossEntropy,
     InstanceStandardize,
@@ -20,8 +20,8 @@ from dsio.nn.components import (  # noqa: E402
     simclr_projector_head,
     vicreg_projector_head,
 )
-from dsio.nn.module import ComponentError, DsioModule, export_encoder  # noqa: E402
-from dsio.nn.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
+from dsio.model.module import ComponentError, DsioModule, export_encoder  # noqa: E402
+from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
 
 
 def tiny_module(**overrides) -> DsioModule:  # type: ignore[no-untyped-def]
@@ -78,7 +78,7 @@ def test_encode_survives_without_a_head(batch: torch.Tensor) -> None:
 # stochastic component in the chain for ``self.training`` to gate. The property they
 # guarded — a validation batch is never augmented — now holds structurally instead: a
 # pretext transform like masking lives on the dataset
-# (tests/nn/test_data.py::test_validation_dataset_is_unmasked_by_construction), which has
+# (tests/dataset/test_dataset.py::test_validation_dataset_is_unmasked_by_construction), which has
 # no notion of "training" for a runtime flag to get wrong.
 
 

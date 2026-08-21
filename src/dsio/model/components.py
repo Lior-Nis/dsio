@@ -14,7 +14,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from dsio.nn.registry import augmentor, backbone, head, loss, preprocessor, transform
+from dsio.model.registry import augmentor, backbone, head, loss, preprocessor, transform
 
 
 def _check_3d(x: torch.Tensor, who: str) -> None:
@@ -120,8 +120,8 @@ def mae_decoder_head(in_dim: int, channels: int, length: int, hidden_mult: int =
     ``_accepted`` exactly the way ``torch_task.py`` builds a classification head, which is
     what let the pretext objective stop being a separate kind of thing that builds its own
     head. Its output only makes sense paired with :class:`MaskedMSE` and a masked
-    :class:`~dsio.nn.data.WindowDataset` target, which is why
-    :func:`~dsio.nn.module.export_encoder` never ships it with the encoder.
+    :class:`~dsio.dataset.dataset.WindowDataset` target, which is why
+    :func:`~dsio.model.module.export_encoder` never ships it with the encoder.
     """
     return nn.Sequential(
         nn.Linear(in_dim, in_dim * hidden_mult),
@@ -209,7 +209,7 @@ def mse_loss() -> nn.Module:
 class MaskedMSE(nn.Module):
     """Reconstruction loss for a target that carries NaN outside masked positions.
 
-    NaN is the continuous analogue of MLM's ``-100``: :class:`~dsio.nn.data.WindowDataset`
+    NaN is the continuous analogue of MLM's ``-100``: :class:`~dsio.dataset.dataset.WindowDataset`
     writes the original value at every position its mask hid and NaN everywhere the model
     was allowed to see the input, so this is the whole mechanism that keeps a masked
     autoencoder from winning by copying — a reconstruction that only matches the visible
@@ -241,7 +241,7 @@ class MaskedMSE(nn.Module):
         one still holds the original signal. If ``visible_mse`` collapses while
         ``masked_mse`` does not, the model is copying rather than reconstructing.
 
-        Called from :meth:`~dsio.nn.module.DsioModule._common_step`, on the same
+        Called from :meth:`~dsio.model.module.DsioModule._common_step`, on the same
         ``prediction`` that step already computed — no extra forward pass, unlike the
         first attempt at restoring this diagnostic via a training-batch-end hook.
         """
@@ -264,7 +264,7 @@ def _pair_halves(
     at those positions gives the other, which recovers the two view-halves a loss like
     :class:`VICReg` needs without assuming how the batch is laid out (a contiguous "first
     half / second half", interleaved, or anything else) — only the index relationship
-    :class:`~dsio.nn.data.TwoViewCollate` promises.
+    :class:`~dsio.dataset.dataset.TwoViewCollate` promises.
     """
     order = torch.arange(target.shape[0], device=target.device)
     first = (order < target).nonzero(as_tuple=True)[0]
@@ -273,7 +273,7 @@ def _pair_halves(
 
 @loss("nt_xent")
 class NTXent(nn.Module):
-    """SimCLR's contrastive loss, over a batch :class:`~dsio.nn.data.TwoViewCollate` built.
+    """SimCLR's contrastive loss, over a batch :class:`~dsio.dataset.dataset.TwoViewCollate` built.
 
     ``prediction`` is the whole batch's projected embeddings — ``2 * batch`` rows, two per
     window — and ``target`` is each row's pair index, exactly the ``(arange(2 * batch) +

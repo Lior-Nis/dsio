@@ -1,7 +1,7 @@
 """Registered components: backbones, heads, losses, transforms, augmentors.
 
 The mask-aware loss gets the most scrutiny here, because it is the whole point of Task
-6a: a NaN sentinel in the target (see ``WindowDataset`` in ``dsio.nn.data``) is only
+6a: a NaN sentinel in the target (see ``WindowDataset`` in ``dsio.dataset.dataset``) is only
 useful if a loss that reads it naively actually breaks, and a loss that selects on it
 before computing error actually rewards reconstruction over copying.
 
@@ -19,7 +19,8 @@ torch = pytest.importorskip("torch")
 
 from torch import nn  # noqa: E402
 
-from dsio.nn.components import (  # noqa: E402
+from dsio.dataset.dataset import TwoViewCollate  # noqa: E402
+from dsio.model.components import (  # noqa: E402
     Conv1dEncoder,
     Jitter,
     MaskedMSE,
@@ -29,9 +30,8 @@ from dsio.nn.components import (  # noqa: E402
     simclr_projector_head,
     vicreg_projector_head,
 )
-from dsio.nn.data import TwoViewCollate  # noqa: E402
-from dsio.nn.module import DsioModule  # noqa: E402
-from dsio.nn.registry import AUGMENTORS, HEADS, LOSSES  # noqa: E402
+from dsio.model.module import DsioModule  # noqa: E402
+from dsio.model.registry import AUGMENTORS, HEADS, LOSSES  # noqa: E402
 
 CHANNELS, LENGTH, DIM = 2, 128, 16
 
@@ -160,7 +160,7 @@ def test_mae_trains_the_backbone_through_the_generic_step() -> None:
 #
 # Moved from the deleted tests/ssl/test_methods.py: SimCLR and VICReg were objects with
 # their own step(module, x); they are now an ordinary registered (prediction, target) loss
-# each, over a batch dsio.nn.data.TwoViewCollate builds. These tests exercise the losses
+# each, over a batch dsio.dataset.dataset.TwoViewCollate builds. These tests exercise the losses
 # directly, the same way test_masked_mse_* above does, rather than through a full module.
 
 

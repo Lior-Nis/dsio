@@ -27,7 +27,7 @@ platform's default wheel is already CUDA-enabled (`torch 2.13.0+cu130`, `cuda.is
 == True` on an RTX 5070 Ti, next to `2.13.0+cpu` from `cpu`); if that ever stops being true,
 `gpu` needs an explicit CUDA index again.
 
-Add your components under `src/dsio/` — a backbone in `nn/`, a preset in `presets.py`.
+Add your components under `src/dsio/` — a backbone in `model/`, a preset in `presets.py`.
 Later, pull spine improvements without losing your work:
 
 ```bash

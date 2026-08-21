@@ -20,7 +20,7 @@ from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import read_report  # noqa: E402
-from dsio.nn.registry import LABELS, labels  # noqa: E402
+from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import RunLedger  # noqa: E402
 from dsio.splits.models import SplitFile  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402

@@ -23,15 +23,15 @@ copying the visible input, which is indistinguishable from having learned someth
 the continuous analogue of MLM's ``-100``: a masked item's target holds the true value at
 every position the mask hid, and NaN everywhere it did not, so a mask-aware loss reads
 ``(prediction, target)`` and nothing else to know which positions to score — no batch dict,
-no subclass. See :class:`~dsio.nn.components.MaskedMSE`.
+no subclass. See :class:`~dsio.model.components.MaskedMSE`.
 
 **A contrastive target only exists once a whole batch does.** SimCLR's negatives are "every
 other window in the batch" and VICReg's invariance term needs to know which two rows are one
 window's pair — neither is a fact about one item, so neither can live on the dataset the way
 MAE's sentinel does. :class:`TwoViewCollate` builds both at collate time instead: it
 augments each raw window twice and stacks the ``2 * batch`` views, with the target carrying
-each row's pair index. See :class:`~dsio.nn.components.NTXent` and
-:class:`~dsio.nn.components.VICReg`, which read that index and nothing else.
+each row's pair index. See :class:`~dsio.model.components.NTXent` and
+:class:`~dsio.model.components.VICReg`, which read that index and nothing else.
 """
 
 from __future__ import annotations
@@ -46,10 +46,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex
-from dsio.nn.masking import apply_mask
+from dsio.model.masking import apply_mask
 from dsio.runs.seeding import dataloader_kwargs
 
-#: What a masking strategy from :mod:`dsio.nn.masking` looks like from here: called with
+#: What a masking strategy from :mod:`dsio.model.masking` looks like from here: called with
 #: one window at a time (a fake batch of one) plus an optional generator, returning a
 #: boolean hide-mask of the same shape's time axis. Every strategy in that module already
 #: accepts ``generator`` — this widened signature just states what was already true, and
@@ -266,17 +266,24 @@ class TwoViewCollate:
     ordinary ``(prediction, target)`` loss — no batch dict, no subclass — because a
     ``(prediction, target)`` loss already receives the whole batch's predictions, and the
     negatives are just "every row that is not my partner". See
-    :class:`~dsio.nn.components.NTXent` and :class:`~dsio.nn.components.VICReg`.
+    :class:`~dsio.model.components.NTXent` and :class:`~dsio.model.components.VICReg`.
 
-    ``seed``, when given, makes the two views a function of the batch's own rows rather
-    than of call order: ``augment`` is called inside ``torch.random.fork_rng``, reseeded
-    with ``seed`` XORed with the sum of the batch's row positions, so the same batch of
-    rows always draws the same two views and the outer (global) RNG stream is left exactly
-    as it was found. The augmentors here (``Jitter``, ``RandomScale``, ...) take no
-    generator of their own — unlike a masking strategy — so this is the collate-level
-    equivalent of ``WindowDataset``'s ``mask_seed``: unset for training (fresh augmentation
-    every epoch), set only for the loader Lightning's validation loop consumes. It relies
-    on that loader never shuffling, so the same rows land in the same batch, in the same
+    ``seed``, when given, makes the two views a function of the batch's own row
+    composition rather than of call order: ``augment`` is called inside
+    ``torch.random.fork_rng``, reseeded with ``seed`` XORed with the *sum* of the
+    batch's row positions, so the same set of rows, batched together, always draws the
+    same two views regardless of the order they arrive in, and the outer (global) RNG
+    stream is left exactly as it was found. That sum is a property of the whole batch,
+    not of any one row, so the guarantee is coarser than ``WindowDataset``'s
+    ``mask_seed``: ``mask_seed`` is derived per item and so is unaffected by anything
+    about the rest of the batch, whereas changing which rows share a batch — a
+    different ``batch_size``, a different fold split — changes the derived seed and so
+    every row's view in that batch, not just the rows whose grouping changed. The
+    augmentors here (``Jitter``, ``RandomScale``, ...) take no generator of their own —
+    unlike a masking strategy — so ``seed`` is left unset for training (fresh
+    augmentation every epoch) and set only for the loader Lightning's validation loop
+    consumes, where batch composition is fixed by construction. It relies on that
+    loader never shuffling, so the same rows land in the same batch, in the same
     order, on every call — true of every validation loader :func:`~dsio.train.ssl_task.
     build_loaders` builds.
     """
@@ -336,7 +343,7 @@ def make_loader(
     exist: both draw from a generator built fresh from an explicit seed rather than from
     torch's global state, which is what actually makes them independent of worker count
     (and of call order, and of epoch) — verified in
-    ``tests/nn/test_data.py::test_loader_result_does_not_depend_on_worker_count``.
+    ``tests/dataset/test_dataset.py::test_loader_result_does_not_depend_on_worker_count``.
     """
     kwargs: dict[str, Any] = dict(dataloader_kwargs(seed))
     if num_workers > 0:

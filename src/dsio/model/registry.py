@@ -34,8 +34,8 @@ TRANSFORMS: Registry[ComponentFactory] = Registry("transform")
 
 #: Stochastic view-builders for two-view contrastive collation (SimCLR, VICReg): given a
 #: raw batch, produce one independently-augmented view of it. Wired into
-#: :class:`~dsio.nn.data.TwoViewCollate`, which calls one of these twice per batch to build
-#: the pair a contrastive loss compares — not into :class:`~dsio.nn.module.DsioModule`'s
+#: :class:`~dsio.dataset.dataset.TwoViewCollate`, which calls one of these twice per batch to build
+#: the pair a contrastive loss compares — not into :class:`~dsio.model.module.DsioModule`'s
 #: chain, which still has no stochastic slot, so nothing here can leak into what the model
 #: itself does to a validation batch. A pretext objective that instead needs one masked view
 #: (MAE) gets it from the dataset, not from here.
@@ -48,7 +48,7 @@ PREPROCESSORS: Registry[ComponentFactory] = Registry("preprocessor")
 #: Unlike the registries above, this one intentionally ships with no built-in entries —
 #: projects supply their own labels, and ``check_torch`` fails loudly via ``LABELS.get``
 #: when one is missing, so an empty ``LABELS`` is not the same defect as an empty
-#: ``BACKBONES``/``HEADS``/``LOSSES`` (see ``tests/nn/test_registry_bootstrap.py``).
+#: ``BACKBONES``/``HEADS``/``LOSSES`` (see ``tests/model/test_registry_bootstrap.py``).
 LABELS: Registry[Callable[..., Any]] = Registry("labels")
 
 

@@ -90,8 +90,8 @@ def _stage_starter_corpus() -> None:
     import numpy as np
 
     from dsio.data.store import SignalStore, data_root
-    from dsio.nn.registry import LABELS
-    from dsio.nn.registry import labels as register_labels
+    from dsio.model.registry import LABELS
+    from dsio.model.registry import labels as register_labels
     from dsio.splits.models import SplitFile
     from dsio.train.torch_task import SPLITS_ROOT
 

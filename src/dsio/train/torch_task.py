@@ -37,12 +37,12 @@ from dsio.contracts import DsioModel
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
+from dsio.dataset.dataset import WindowDataset, make_loader
 from dsio.eval.contract import Fold, FoldPrediction, write_report
 from dsio.eval.loop import cross_validate
 from dsio.eval.metrics import METRICS
-from dsio.nn.data import WindowDataset, make_loader
-from dsio.nn.module import DsioModule
-from dsio.nn.registry import (
+from dsio.model.module import DsioModule
+from dsio.model.registry import (
     BACKBONES,
     HEADS,
     LABELS,

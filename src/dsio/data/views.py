@@ -366,7 +366,8 @@ class WindowView:
     """Reads windows on demand: a numpy-level, framework-free view over a store and index.
 
     Nothing here is torch-aware — no ``Dataset`` base class, no tensor conversion. The
-    torch-facing equivalent, wrapped by ``make_loader``, is :class:`dsio.nn.data.WindowDataset`.
+    torch-facing equivalent, wrapped by ``make_loader``, is
+    :class:`dsio.dataset.dataset.WindowDataset`.
     """
 
     def __init__(self, store: SignalStore, index: WindowIndex) -> None:

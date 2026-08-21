@@ -34,7 +34,7 @@ def dsio(*args: str, cwd: Path, env_extra: dict[str, str] | None = None) -> tupl
 _FIXTURE_PRESET = '''
 from dsio.config import RunConfig, preset
 from dsio.data.views import WindowSpec
-from dsio.nn.registry import labels
+from dsio.model.registry import labels
 from dsio.train.torch_task import Component, TorchTask, TrainerConfig
 
 

@@ -13,7 +13,7 @@ Three changes from the original, each fixing something that cost real time there
 carry two train-only slots, skipped unless ``self.training`` — a runtime flag a validation
 loop could get wrong without anything in a config file revealing it. That property now holds
 structurally instead: a pretext transform like masking lives on the *dataset*
-(:class:`~dsio.nn.data.WindowDataset`), so a training dataset built with ``mask=`` and a
+(:class:`~dsio.dataset.dataset.WindowDataset`), so a training dataset built with ``mask=`` and a
 validation dataset built without one is the whole mechanism. There is no flag here to check
 and nothing to get wrong on the model side — ``encode`` runs the same chain regardless of
 ``self.training``.
@@ -47,9 +47,9 @@ constructor argument below — because neither needed a subclass, only a differe
 "what do I do with the chain's output". Contrastive objectives (SimCLR, VICReg) used to need
 a second subclass, ``ContrastiveModule``, because their loss read the raw batch of windows
 and built its own two views inside ``step()``. Task 6b moved that view-building to
-:class:`~dsio.nn.data.TwoViewCollate`, at collate time, so their loss is an ordinary
-``(prediction, target)`` loss too (:class:`~dsio.nn.components.NTXent`,
-:class:`~dsio.nn.components.VICReg`) and needs no override of its own.
+:class:`~dsio.dataset.dataset.TwoViewCollate`, at collate time, so their loss is an ordinary
+``(prediction, target)`` loss too (:class:`~dsio.model.components.NTXent`,
+:class:`~dsio.model.components.VICReg`) and needs no override of its own.
 """
 
 from __future__ import annotations
