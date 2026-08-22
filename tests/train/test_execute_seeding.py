@@ -19,6 +19,8 @@ import pytest
 pytest.importorskip("torch")
 pytest.importorskip("lightning")
 
+import torch  # noqa: E402
+
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
@@ -88,6 +90,23 @@ def _run_once(config: RunConfig, runs_root: Path) -> dict[str, float]:
         return execute(config, run)
 
 
+@pytest.fixture(autouse=True)
+def _dirty_ambient_rng() -> None:
+    """Every test process starts from the same fixed, default RNG state. Two direct calls
+    to ``execute()`` can then look reproducible purely because both happened to start from
+    that identical default state -- not because ``execute()`` actually reseeds anything.
+    That is exactly the gap that let this test pass with ``execute()``'s own
+    ``seed_everything`` call deleted, as long as it ran alone: nothing had touched the
+    global RNGs yet, so both calls started level regardless. Perturbing every global RNG to
+    a fixed, non-default value before the test removes that accident -- the assertion below
+    can only hold if ``execute()`` resets the state itself, in isolation or not."""
+    import random
+
+    random.seed(20260821)
+    np.random.seed(20260821)
+    torch.manual_seed(20260821)
+
+
 def test_execute_is_deterministic_for_the_same_config_and_seed(corpus: Path) -> None:
     """The headline promise — same config, same seed, identical metrics — for a caller
     that never goes through `dsio run`. A freshly constructed backbone is the thing that
@@ -108,7 +127,11 @@ def test_execute_is_deterministic_for_the_same_config_and_seed(corpus: Path) -> 
             loss=Component(name="cross_entropy", params={"threshold": 0.5}),
             transform=Component(name="instance_standardize"),
             batch_size=4,
-            metrics=("accuracy",),
+            # ``log_loss`` (continuous) is the sensitive half of this assertion --
+            # ``accuracy`` alone saturates to 1.0 on this trivially separable toy corpus
+            # regardless of the backbone's random initialisation, so a match on accuracy
+            # proves nothing about whether the weights themselves reproduced.
+            metrics=("accuracy", "log_loss"),
             trainer=TrainerConfig(
                 max_epochs=2, accelerator="cpu", devices=1, checkpoint=False,
                 enable_progress_bar=False,
@@ -116,5 +139,11 @@ def test_execute_is_deterministic_for_the_same_config_and_seed(corpus: Path) -> 
         ),
     )
     first = _run_once(config, corpus / "runs_a")
+    # Advance the global RNGs by an arbitrary amount that the first call would not itself
+    # have consumed, so the two calls provably start from *different* ambient states. A
+    # match below can then only be an effect of `execute()` resetting that state itself --
+    # not an accident of both calls happening to start from wherever the first one left off.
+    torch.rand(97)
+    np.random.random(97)
     second = _run_once(config, corpus / "runs_b")
     assert first == second

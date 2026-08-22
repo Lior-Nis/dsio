@@ -7,6 +7,7 @@ tests that.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -163,11 +164,18 @@ def test_a_failing_callback_is_never_swallowed(
 
 
 def test_checkpoint_filenames_contain_no_path_separator(corpus: Path) -> None:
+    """Lightning substitutes ``{metric_name:.4f}`` groups with a formatted number before the
+    filename is used as a path, so a slash inside braces is harmless. A slash in the literal
+    text around those groups is not: it becomes a directory separator, silently creating
+    nested checkpoint directories that look like a corrupted run. ``sanitise_metric`` exists
+    to keep the monitor name out of that literal text, so the assertion has to inspect the
+    literal text specifically, not just whatever precedes the first ``{``.
+    """
     task = make_task(corpus, trainer=TrainerConfig(checkpoint=True, monitor="val/loss"))
     callbacks = build_callbacks(task, corpus / "ckpt")
     checkpoint = next(cb for cb in callbacks if hasattr(cb, "filename"))
-    prefix = checkpoint.filename.split("{")[0]
-    assert "/" not in prefix
+    literal_text = re.sub(r"\{[^}]*\}", "", checkpoint.filename)
+    assert "/" not in literal_text
 
 
 def test_each_fold_gets_a_fresh_module(corpus: Path) -> None:
