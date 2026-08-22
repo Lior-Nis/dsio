@@ -23,8 +23,11 @@ One file holds a whole split **family**: every fold, in one committed, diffable 
 ``SplitFold.index`` — not the fold's position in the list — is what a fold *means*; running
 folds 1 and 3 alone must not renumber them 0 and 1, because an artifact directory and a
 comparison both key off that number. Holding every fold together also means the one
-property that spans folds — no group tested twice across the family — can be checked by
-reading the YAML, before any store is opened or anything is resolved to row positions.
+property that spans folds — no group tested twice across the family — is checked on
+construction, before any store is opened or anything is resolved to row positions.
+``SplitFile.load`` reports every structural problem, this one included, as ``SplitError``;
+building a ``SplitFile`` directly reports the same problems as pydantic's own
+``ValidationError``, like every other model in this project.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from dsio.contracts import DsioModel
 from dsio.splits.temporal import TemporalBounds
@@ -145,6 +148,19 @@ class SplitFile(DsioModel):
 
     @model_validator(mode="after")
     def _validate_folds(self) -> SplitFile:
+        """Reject a malformed split family on every construction path, not just `load`.
+
+        Three checks, in order: a family must have at least one fold; declared indices
+        must be unique (or `fold(index)` lookup is ambiguous); and no group may be
+        assigned to the test part of two folds (see
+        :func:`_assert_test_parts_disjoint_across_folds`). All three raise a plain
+        `ValueError`, the same as every other pydantic validator in this module — pydantic
+        wraps it into `ValidationError` regardless of the type raised, so there is no
+        benefit to raising `SplitError` here. `SplitFile.load` re-raises whatever
+        `ValidationError` construction produces as `SplitError`, so the disk-loading path
+        always reports `SplitError` while direct construction reports `ValidationError`,
+        like every other pydantic model in the codebase.
+        """
         if not self.folds:
             raise ValueError("a split must declare at least one fold")
 
@@ -153,6 +169,8 @@ class SplitFile(DsioModel):
         )
         if duplicate_indices:
             raise ValueError(f"fold indices must be unique; repeated: {duplicate_indices}")
+
+        _assert_test_parts_disjoint_across_folds(self.name, self.folds)
         return self
 
     def fold(self, index: int) -> SplitFold:
@@ -211,14 +229,24 @@ class SplitFile(DsioModel):
 
     @classmethod
     def load(cls, path: Path) -> SplitFile:
+        """Parse and validate a committed split file.
+
+        Every structural problem — including the ones a caller triggers via direct
+        construction, like a bad fold count or a duplicate index — surfaces here as
+        `SplitError`, not the raw `pydantic.ValidationError` construction raises. A split
+        loaded off disk is data a project is trusting, not a config object under active
+        development, so it gets this module's own exception type rather than pydantic's.
+        """
         data: dict[str, Any] = yaml.safe_load(Path(path).read_text())
         if data.get("schema_version") != SCHEMA:
             raise SplitError(
                 f"{path} declares schema {data.get('schema_version')!r}, expected {SCHEMA!r}"
             )
-        split = cls.model_validate(data)
-        _assert_test_parts_disjoint_across_folds(split.name, split.folds)
-        return split
+        try:
+            return cls.model_validate(data)
+        except ValidationError as exc:
+            messages = [str(error["msg"]).removeprefix("Value error, ") for error in exc.errors()]
+            raise SplitError("; ".join(messages)) from exc
 
 
 def _assert_test_parts_disjoint_across_folds(name: str, folds: Sequence[SplitFold]) -> None:
@@ -227,15 +255,16 @@ def _assert_test_parts_disjoint_across_folds(name: str, folds: Sequence[SplitFol
     Within a fold, disjointness across parts is `SplitFold`'s own concern. Across folds it
     is a different property, and the one a pooled out-of-fold metric depends on: a group
     tested by two folds is scored twice, silently reweighting the pooled number toward
-    whichever groups were duplicated. This runs at :meth:`SplitFile.load`, so a malformed
-    split family is rejected by reading the YAML — before a store is opened, before
-    anything is resolved to row positions, strictly earlier than a check that needs
-    `Examples` can fire.
+    whichever groups were duplicated.
 
-    Raises `SplitError` (not the bare `ValueError` the model's own validators raise)
-    because this is not something pydantic's construction machinery calls: it runs after
-    `model_validate` succeeds, so its exception type is not rewrapped into a
-    `pydantic.ValidationError` on the way out.
+    Called from `SplitFile._validate_folds`, so this fires on every construction path —
+    not only `SplitFile.load` — the same as the model's other structural checks. Raises a
+    plain `ValueError`, matching `_validate_parts` and the duplicate-index check above it:
+    pydantic rewraps any `ValueError` subclass raised inside a validator into
+    `pydantic.ValidationError` regardless of the type raised, so raising `SplitError` here
+    specifically would buy nothing on the construction path, while `SplitFile.load`
+    re-raises whatever `ValidationError` this produces as `SplitError`, carrying this
+    exact message (fold indices and shared group names) along with it.
     """
     owners: dict[str, list[int]] = {}
     for f in folds:
@@ -250,7 +279,7 @@ def _assert_test_parts_disjoint_across_folds(name: str, folds: Sequence[SplitFol
     detail = "; ".join(
         f"{group!r} in folds {idxs}" for group, idxs in sorted(collisions.items())[:5]
     )
-    raise SplitError(
+    raise ValueError(
         f"split {name!r} test parts are not disjoint across folds {offending}: {detail}"
         + (f" (+{len(collisions) - 5} more group(s))" if len(collisions) > 5 else "")
     )

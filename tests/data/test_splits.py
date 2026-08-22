@@ -256,6 +256,66 @@ folds:
     assert [f.index for f in restored.folds] == [0, 1]
 
 
+# --- the same checks, on every construction path -- not only `SplitFile.load` --------
+#
+# The four-cell matrix this section proves:
+#
+#                          duplicate index      cross-fold test overlap
+#   SplitFile.load()          SplitError           SplitError
+#   direct construction       ValueError            ValueError
+#
+# (`SplitError` is itself a `ValueError`, so a `SplitError` also satisfies
+# `pytest.raises(ValueError, ...)` -- the two rows are distinguished by asserting the
+# concrete exception type where it matters, not merely that *something* was raised.)
+
+
+def test_overlapping_test_parts_are_rejected_on_direct_construction_too() -> None:
+    """This guard used to run only inside `SplitFile.load`; direct construction let a
+    cross-fold group collision through with no error at all -- one of the two things
+    Fix round 1 closed. It must now reject on `SplitFile(...)` exactly like
+    `_validate_parts` and the duplicate-index check already do, and it must NOT be a
+    `SplitError` here (that type is reserved for the `SplitFile.load` path)."""
+    with pytest.raises(ValueError, match=r"folds \[0, 1\].*'g1'") as excinfo:
+        SplitFile(
+            store="s",
+            name="fam",
+            folds=[
+                SplitFold(index=0, parts={"train": ["g0"], "test": ["g1"]}),
+                SplitFold(index=1, parts={"train": ["g2"], "test": ["g1"]}),
+            ],
+        )
+    assert not isinstance(excinfo.value, SplitError)
+
+
+def test_load_reports_a_duplicate_fold_index_as_split_error(tmp_path: Path) -> None:
+    """Before Fix round 1, `SplitFile.load` called `model_validate` directly, so a
+    duplicate fold index leaked a raw `pydantic.ValidationError` out of `load()` instead
+    of `SplitError` -- the second thing that fix closed. Hand-written YAML: a
+    `SplitFile(...)` built directly with a duplicate index can no longer even be
+    constructed (see `test_duplicate_fold_indices_are_rejected`), so there is no object to
+    `.save()`.
+    """
+    path = tmp_path / "dup.yaml"
+    path.write_text(
+        f"""\
+schema_version: {SCHEMA}
+store: cohort
+name: k5
+folds:
+  - index: 0
+    parts:
+      train: [p0]
+      test: [p1]
+  - index: 0
+    parts:
+      train: [p2]
+      test: [p3]
+"""
+    )
+    with pytest.raises(SplitError, match="unique"):
+        SplitFile.load(path)
+
+
 # --- resolution ---------------------------------------------------------------------
 
 
