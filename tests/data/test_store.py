@@ -228,8 +228,23 @@ def test_dense_stride_oversamples_only_marked_regions(store: SignalStore) -> Non
 
 
 def test_label_policies_differ(store: SignalStore) -> None:
+    """``any_idx.labels.sum() >= maj_idx.labels.sum()`` alone holds for *any*
+    implementation of ``majority`` -- including one that is always negative, or one that
+    silently reimplements ``any`` -- because ``any`` can only report more positives than a
+    correct majority threshold ever would, and a broken majority policy still cannot
+    exceed it. It cannot tell "the threshold is 0.5" from "majority is broken".
+
+    The first entity (``p0_s0``, rows 0..1200) gives windows at ``build_index``'s first
+    two positions (length=500, stride=500: starts 0 and 500). Setting exactly 40% of the
+    first window positive and exactly 60% of the second is the one case that actually
+    distinguishes the two policies at a specific window: both windows have *some*
+    positive rows, so ``any`` must label both 1 -- but only the 60% window clears the
+    default 0.5 majority threshold, so ``majority`` must label the 40% window 0 and the
+    60% window 1.
+    """
     labels = np.zeros(store.n_rows, dtype=np.int8)
-    labels[: store.n_rows // 4] = 1
+    labels[:200] = 1  # window 0 (rows 0:500): ratio 0.4 -- below the majority threshold
+    labels[500:800] = 1  # window 1 (rows 500:1000): ratio 0.6 -- above it
 
     spec_any = WindowSpec(length=500, stride=500, label_policy="any")
     spec_maj = WindowSpec(length=500, stride=500, label_policy="majority")
@@ -237,6 +252,20 @@ def test_label_policies_differ(store: SignalStore) -> None:
     maj_idx = build_index(store, spec_maj, labels=labels)
 
     assert any_idx.labels is not None and maj_idx.labels is not None
+    assert any_idx.starts[0] == 0 and any_idx.starts[1] == 500, (
+        "the fixture's window layout changed; the hand-picked row ranges above no longer "
+        "land on the windows this test means to check"
+    )
+    assert any_idx.labels[0] == 1 and any_idx.labels[1] == 1, (
+        "'any' must report a positive window whenever it has any positive row at all"
+    )
+    assert maj_idx.labels[0] == 0, (
+        "'majority' must not report a positive window below its own threshold, even "
+        "though 'any' correctly does"
+    )
+    assert maj_idx.labels[1] == 1, (
+        "'majority' must report a positive window once it clears its threshold"
+    )
     assert any_idx.labels.sum() >= maj_idx.labels.sum()
 
 

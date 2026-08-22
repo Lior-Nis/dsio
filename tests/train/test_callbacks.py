@@ -138,6 +138,30 @@ def test_embed_leaves_no_gradients(module: DsioModule, loader: DataLoader) -> No
     assert all(p.grad is None for p in module.parameters())
 
 
+def test_embed_runs_the_encoder_with_grad_disabled(module: DsioModule, loader: DataLoader) -> None:
+    """``@torch.no_grad()`` on ``embed`` (train/callbacks.py) is what keeps this from
+    building an autograd graph over the whole corpus every time a probe runs.
+
+    ``test_embed_leaves_no_gradients`` above checks ``p.grad is None`` -- true for any
+    freshly zeroed module that never had ``.backward()`` called on it, no ``no_grad``
+    context required, so it still passes with the decorator deleted. Spying on
+    ``torch.is_grad_enabled()`` from inside ``encode`` checks the actual property
+    directly: grad tracking must be off for every batch ``embed`` processes.
+    """
+    seen_grad_enabled = []
+    real_encode = module.encode
+
+    def spy(x: torch.Tensor) -> torch.Tensor:
+        seen_grad_enabled.append(torch.is_grad_enabled())
+        return real_encode(x)
+
+    module.encode = spy  # type: ignore[method-assign]
+    embed(module, loader)
+
+    assert seen_grad_enabled, "encode was never called; the test proves nothing"
+    assert not any(seen_grad_enabled), "embed must run its encoder with grad tracking off"
+
+
 # --- the probe ---------------------------------------------------------------------------
 
 
