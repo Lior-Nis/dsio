@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import random
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pytest
+import torch
 
 from dsio.config import RunConfig
 from dsio.contracts import NonCanonicalValueError, sha256_of
@@ -128,23 +131,90 @@ def test_env_capture_records_the_lockfile() -> None:
     assert env.lock_sha256 is not None, "uv.lock should be hashed for reproducibility"
 
 
+@pytest.fixture(autouse=True)
+def _dirty_ambient_rng() -> None:
+    """Every test process starts from the same fixed, default RNG state. A direct call to
+    ``execute()`` can then look reproducible, or look seed-sensitive, purely by accident of
+    that shared starting point -- not because ``execute()`` actually reseeds anything from
+    ``config.seed``. Perturbing every global RNG to a fixed, non-default value before each
+    test removes that accident; the two tests below build on it further."""
+    random.seed(20260821)
+    np.random.seed(20260821)
+    torch.manual_seed(20260821)
+
+
+def _reseed_ambient(value: int = 20260821) -> None:
+    """Reset every global RNG to an identical, fixed state.
+
+    Called immediately before each of two ``execute()`` calls in
+    ``test_different_seed_gives_different_metrics`` so the usual source of difference
+    between two training runs -- whatever the first run happened to leave in the global
+    RNG -- is cancelled out. With ambient state pinned identical for both, any difference
+    in outcomes can only come from ``execute()`` using each variant's distinct
+    ``config.seed``, which is exactly what that test exists to prove.
+    """
+    random.seed(value)
+    np.random.seed(value)
+    torch.manual_seed(value)
+
+
+def _with_seed_sensitive_metrics(config: RunConfig) -> RunConfig:
+    """``accuracy`` saturates to 1.0 on this trivially separable toy corpus regardless of
+    the backbone's random initialisation, so a match (or mismatch) on accuracy alone would
+    prove nothing about whether the seed reached the weights. ``log_loss`` is continuous
+    and is what actually makes these tests sensitive to initialisation."""
+    return config.model_copy(
+        update={"task": config.task.model_copy(update={"metrics": ("accuracy", "log_loss")})}
+    )
+
+
 def test_same_seed_gives_identical_metrics(ledger: RunLedger, config: RunConfig) -> None:
+    """Same config, same seed, twice -- through ``execute()`` alone, with no external
+    ``seed_everything`` call to lean on. A freshly constructed backbone draws its initial
+    weights from torch's global RNG, so a match here can only come from ``execute()``
+    resetting that RNG itself from ``config.seed``, not from an accident of ambient state:
+    the loop advances the RNGs between the two calls so they provably start from different
+    places."""
     load_runners()
+    seed_config = _with_seed_sensitive_metrics(config)
     results = []
-    for _ in range(2):
-        seed_everything(config.seed)
-        with _start(ledger, config) as run:
-            results.append(execute(config, run))
+    for i in range(2):
+        if i == 1:
+            torch.rand(97)
+            np.random.random(97)
+        with _start(ledger, seed_config) as run:
+            results.append(execute(seed_config, run))
     assert results[0] == results[1]
 
 
-def test_different_seed_gives_different_metrics(ledger: RunLedger, config: RunConfig) -> None:
-    """Guards against a seed that is recorded but never actually wired through."""
+def test_different_seed_gives_different_metrics(
+    ledger: RunLedger, config: RunConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guards against a seed that is recorded but never actually wired through.
+
+    No external ``seed_everything`` call backs this up either: the ambient RNGs are reset
+    to an *identical* fixed state right before each run (see ``_reseed_ambient``). That
+    alone is not enough here, though: each dataloader's shuffle order is *also* seeded
+    directly from ``config.seed`` (``dsio.dataset.dataset.make_loader`` ->
+    ``dataloader_kwargs``), completely independently of ``execute()``'s own seeding -- so
+    the two variants would still shuffle their batches differently, and their metrics
+    would still differ, even if ``execute()`` reseeded nothing at all. Pinning the
+    dataloader seed identical for both runs removes that confound, so a surviving
+    difference in outcomes can only come from ``execute()`` itself carrying
+    ``config.seed`` into the backbone's initial weights.
+    """
+    import dsio.dataset.dataset as dataset_module
+
+    real_dataloader_kwargs = dataset_module.dataloader_kwargs
+    monkeypatch.setattr(
+        dataset_module, "dataloader_kwargs", lambda seed: real_dataloader_kwargs(0)
+    )
+
     load_runners()
     outcomes = []
     for seed in (1, 999):
-        variant = config.model_copy(update={"seed": seed})
-        seed_everything(seed)
+        variant = _with_seed_sensitive_metrics(config.model_copy(update={"seed": seed}))
+        _reseed_ambient()
         with _start(ledger, variant) as run:
             outcomes.append(execute(variant, run))
     assert outcomes[0] != outcomes[1]

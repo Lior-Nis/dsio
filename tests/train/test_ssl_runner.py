@@ -1,4 +1,11 @@
-"""Pretraining and the encoder handoff, with the hardcoded-path bug made unrepresentable."""
+"""Pretraining and the encoder handoff, with the hardcoded-path bug made unrepresentable.
+
+Task 6b deleted the pretext-objective registry (``dsio.ssl.methods``): a pretraining task
+now names its ``backbone``/``head``/``loss`` directly, exactly like a supervised
+``TorchTask``, plus exactly one of ``mask`` or ``augmentor``. ``pretrain_task()`` below
+picks the right head/loss/mask/augmentor for a given ``method`` name purely as test
+scaffolding — ``SslPretrainTask`` itself has no ``method`` field any more.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +25,7 @@ from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import read_report  # noqa: E402
-from dsio.nn.registry import LABELS, labels  # noqa: E402
+from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import RunLedger  # noqa: E402
 from dsio.splits.models import SplitFile  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
@@ -81,25 +88,41 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 WINDOW = WindowSpec(length=128, stride=64, label_policy="majority")
 
 
+#: Which head/loss/mask/augmentor a given pretext shape needs. Test scaffolding only:
+#: SslPretrainTask itself has no notion of a "method" name, just backbone/head/loss plus
+#: exactly one of mask/augmentor.
+_METHOD_COMPONENTS: dict[str, dict[str, object]] = {
+    "mae": {
+        "head": Component(name="mae_decoder"),
+        "loss": Component(name="masked_mse"),
+        "mask": Component(name="span", params={"ratio": 0.5, "span": 16}),
+    },
+    "simclr": {
+        "head": Component(name="simclr_projector"),
+        "loss": Component(name="nt_xent"),
+        "augmentor": Component(name="jitter", params={"sigma": 0.2}),
+    },
+    "vicreg": {
+        "head": Component(name="vicreg_projector"),
+        "loss": Component(name="vicreg"),
+        "augmentor": Component(name="jitter", params={"sigma": 0.2}),
+    },
+}
+
+
 def pretrain_task(root: Path, method: str = "mae", **overrides) -> SslPretrainTask:  # type: ignore[no-untyped-def]
-    extra: dict[str, object] = {}
-    if method == "mae":
-        extra["mask"] = Component(name="span", params={"ratio": 0.5, "span": 16})
-    else:
-        extra["augmentor"] = Component(name="jitter", params={"sigma": 0.2})
     defaults = dict(
         store="tone",
         window=WINDOW,
         split="k3",
         splits_root=root / "splits",
-        method=Component(name=method),
         backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 16, "depth": 1}),
         transform=Component(name="instance_standardize"),
         register_as=f"enc_{method}",
         labels="tone",
         batch_size=16,
         trainer=TrainerConfig(max_epochs=2, accelerator="cpu", devices=1, checkpoint=False),
-        **extra,
+        **_METHOD_COMPONENTS[method],
     )
     return SslPretrainTask(**{**defaults, **overrides})
 
@@ -120,16 +143,22 @@ def run(config: RunConfig, root: Path):  # type: ignore[no-untyped-def]
 # --- config -------------------------------------------------------------------------
 
 
-def test_mae_without_a_mask_is_rejected(corpus: Path) -> None:
-    with pytest.raises(ValueError, match="needs a mask"):
+def test_neither_mask_nor_augmentor_is_rejected(corpus: Path) -> None:
+    """Without one of the two, nothing tells this task which training-dataset contract
+    to build."""
+    with pytest.raises(ValueError, match="exactly one of"):
         pretrain_task(corpus, "mae", mask=None)
 
 
-def test_a_view_method_without_an_augmentor_is_rejected(corpus: Path) -> None:
+def test_both_mask_and_augmentor_is_rejected(corpus: Path) -> None:
     """Both views would be identical and the objective degenerate — a loss that goes
-    straight to zero and an encoder that has learned nothing."""
-    with pytest.raises(ValueError, match="two views"):
-        pretrain_task(corpus, "simclr", augmentor=None)
+    straight to zero and an encoder that has learned nothing — if augmentor were even
+    consulted; setting both at once is ambiguous about which contract to build, so it is
+    rejected rather than silently preferring one."""
+    with pytest.raises(ValueError, match="exactly one of"):
+        pretrain_task(
+            corpus, "simclr", mask=Component(name="span", params={"ratio": 0.5, "span": 16})
+        )
 
 
 def test_preflight_resolves_probe_only_names(corpus: Path) -> None:
@@ -152,6 +181,66 @@ def test_every_method_pretrains_and_registers_an_encoder(method: str, corpus: Pa
     version = ModelRegistry().versions(f"enc_{method}")[-1]
     assert version.run_id == active.run_id
     assert version.size_bytes > 0
+
+
+@pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
+def test_every_method_produces_a_real_validation_loss(method: str, corpus: Path) -> None:
+    """There is no ``SslModule.validation_step`` any more to special-case this away: the
+    held-out fold goes through the same masked-dataset or two-view-collated contract as
+    training, so DsioModule's one generic step produces a genuine val/loss for every
+    method, not just the contrastive ones ``ContrastiveModule`` used to keep it for."""
+    config = RunConfig(name=f"pre_{method}", seed=0, task=pretrain_task(corpus, method))
+    _, metrics = run(config, corpus)
+    assert "val_loss" in metrics
+    assert np.isfinite(metrics["val_loss"])
+
+
+@pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
+def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
+    method: str, corpus: Path
+) -> None:
+    """A fix-round-1 regression test: measured before the fix, five identical validation
+    passes over a **frozen** MAE module (never trained, weights never change) reported
+    val/loss in [0.97697, 1.01588, 1.00346, 0.99336, 0.99949] -- a 3.90% spread, with even
+    the hidden fraction moving between passes (0.3789 vs 0.4038). The validation mask (and,
+    for the contrastive methods, the two collated views) were being redrawn from torch's
+    global RNG on every call -- exactly the failure the deleted ``self.training`` guard
+    existed to prevent, reintroduced one layer down in the dataset. ``WindowDataset.
+    mask_seed`` and ``TwoViewCollate.seed``, wired in ``build_loaders`` for the validation
+    loader only, fix it: this asserts the spread is now exactly zero, not merely small.
+    """
+    from lightning import Trainer
+
+    from dsio.data.adapters import SignalExamples
+    from dsio.data.store import data_root
+    from dsio.data.views import load_or_build
+    from dsio.splits.folds import fold_paths, load_folds
+    from dsio.train.ssl_task import build_loaders, build_module
+
+    task = pretrain_task(corpus, method)
+    store = SignalStore(data_root() / task.store)
+    index = load_or_build(store, task.window)
+    examples = SignalExamples(store, index)
+    folds = load_folds(examples, fold_paths(task.splits_root, task.split))
+    fold = next(f for f in folds if f.index == task.fold)
+
+    module, _ = build_module(task, channels=store.channels, length=task.window.length)
+    module.eval()
+    _, val_loader = build_loaders(task, store, index, fold, seed=0)
+    assert val_loader is not None
+
+    trainer = Trainer(
+        accelerator="cpu",
+        devices=1,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    losses = [
+        trainer.validate(module, val_loader, verbose=False)[0]["val/loss"] for _ in range(5)
+    ]
+    assert losses == [losses[0]] * 5, f"{method}: val/loss moved across repeated passes: {losses}"
 
 
 def test_pretraining_writes_no_evaluation_report(corpus: Path) -> None:
@@ -230,7 +319,7 @@ def test_a_pinned_encoder_loads_into_a_downstream_run(corpus: Path, pretrained: 
 def test_a_tampered_digest_fails_closed(corpus: Path, pretrained: EncoderRef) -> None:
     """There is no path to hardcode and no way to say 'latest', so the remaining risk is a
     swapped artifact — which the registry re-hashes and refuses."""
-    from dsio.nn.registry import BACKBONES
+    from dsio.model.registry import BACKBONES
 
     backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     wrong = pretrained.model_copy(update={"digest": "0" * 64})
@@ -250,7 +339,7 @@ def test_freezing_actually_freezes(corpus: Path, pretrained: EncoderRef) -> None
     """Both halves. A frozen BatchNorm whose running statistics keep updating is not
     frozen, and the difference shows up as a probe that mysteriously outperforms its own
     linear separability."""
-    from dsio.nn.registry import BACKBONES
+    from dsio.model.registry import BACKBONES
 
     backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     report = load_encoder(pretrained, backbone=backbone)
@@ -263,7 +352,7 @@ def test_freezing_actually_freezes(corpus: Path, pretrained: EncoderRef) -> None
 def test_finetuning_leaves_the_encoder_trainable(corpus: Path, pretrained: EncoderRef) -> None:
     """A probe measures what the representation already contains; a finetune measures what
     it is a good starting point for. Reporting one as the other overstates the result."""
-    from dsio.nn.registry import BACKBONES
+    from dsio.model.registry import BACKBONES
 
     backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     load_encoder(pretrained.model_copy(update={"freeze": False}), backbone=backbone)
@@ -275,7 +364,7 @@ def test_loading_into_a_different_architecture_is_refused(
 ) -> None:
     """Silently loading a subset of weights produces a model that is part pretrained and
     part random, and reports as though it were fully pretrained."""
-    from dsio.nn.registry import BACKBONES
+    from dsio.model.registry import BACKBONES
 
     mismatched = BACKBONES.get("conv1d")(channels=2, hidden=64, out_dim=16, depth=3)
     with pytest.raises(Exception):
@@ -289,7 +378,7 @@ def test_the_loaded_weights_actually_differ_from_a_fresh_init(
     initialised — every other test here would still pass."""
     import torch
 
-    from dsio.nn.registry import BACKBONES
+    from dsio.model.registry import BACKBONES
 
     fresh = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
     before = [p.detach().clone() for p in fresh.parameters()]

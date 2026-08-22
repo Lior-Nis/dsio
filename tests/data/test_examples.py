@@ -102,8 +102,17 @@ def test_subset_keeps_every_parallel_array_aligned(table: TableExamples) -> None
 
 
 def test_subset_preserves_identity(table: TableExamples) -> None:
-    """A subset is still the same dataset, so a split file still binds to it."""
-    part = table.subset(np.ones(12, dtype=bool))
+    """A subset is still the same dataset, so a split file still binds to it.
+
+    An all-True mask keeps every row, so a subset built from it has byte-identical
+    groups and attributes to its parent -- ``TableExamples._derive_digest()`` would
+    recompute the exact same digest even without the ``digest=self._digest`` guard in
+    ``subset()`` (adapters.py:98), making that mask unable to catch the guard's removal.
+    A mask that actually drops rows makes the two digests diverge if the guard is gone,
+    since the recomputed hash would then be over fewer rows/values than the parent's.
+    """
+    part = table.subset(np.array([i < 6 for i in range(12)]))
+    assert len(part) == 6, "the mask must actually drop rows for this test to mean anything"
     assert part.name == table.name and part.digest == table.digest
 
 
@@ -162,10 +171,17 @@ def test_folds_build_from_a_plain_table(table: TableExamples) -> None:
 
 def test_a_table_cannot_prove_row_overlap_and_says_why(table: TableExamples) -> None:
     """The signal-specific check is not part of the protocol, and asking for it on a
-    dataset with nothing underneath to overlap must explain rather than crash."""
+    dataset with nothing underneath to overlap must explain rather than crash.
+
+    ``match="covered_rows"`` alone would also accept the raw ``AttributeError`` the
+    ``hasattr`` guard exists to prevent -- that message names the missing attribute too.
+    Pinning the exception type to ``SplitError`` (an ``AttributeError`` is not one) and
+    matching the guard's own explanatory phrase closes that gap.
+    """
+    from dsio.splits.models import SplitError
     from dsio.splits.resolve import assert_no_row_overlap
 
     splits = _table_kfold(table)
     parts = resolve(table, splits[0])
-    with pytest.raises(Exception, match="no\n *covered_rows|covered_rows"):
+    with pytest.raises(SplitError, match="cannot prove row-level disjointness"):
         assert_no_row_overlap(parts)

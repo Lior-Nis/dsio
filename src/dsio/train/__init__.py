@@ -1,7 +1,6 @@
 """Task runners. One entrypoint; the task kind selects the runner."""
 
 _BUILTIN_RUNNER_MODULES = (
-    "dsio.train.tabular",
     "dsio.train.torch_task",
     "dsio.train.ssl_task",
 )
@@ -11,7 +10,7 @@ def load_runners() -> list[str]:
     """Import built-in runner modules so their registrations happen.
 
     Runners whose optional dependencies are absent are skipped: a clone without
-    scikit-learn should still be able to list presets and inspect runs.
+    torch and lightning should still be able to list presets and inspect runs.
     """
     import importlib
 

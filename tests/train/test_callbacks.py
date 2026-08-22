@@ -1,4 +1,10 @@
-"""The online probe and RankMe: measuring pretraining without a bash polling daemon."""
+"""The online probe and RankMe: general representation-quality tools, as callbacks.
+
+Moved from ``tests/ssl/test_probe.py`` when Task 6b dissolved ``dsio.ssl``; the tests
+themselves are unchanged, because ``OnlineProbe`` and ``RankMeMonitor`` never depended on
+anything SSL-specific — they measure any :class:`~dsio.model.module.DsioModule` that can
+``encode``, pretrained or supervised alike.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +18,9 @@ pytest.importorskip("sklearn")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader, Dataset  # noqa: E402
 
-from dsio.nn.components import Conv1dEncoder, CrossEntropy, Jitter  # noqa: E402
-from dsio.nn.module import DsioModule  # noqa: E402
-from dsio.ssl import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
+from dsio.model.components import Conv1dEncoder, CrossEntropy  # noqa: E402
+from dsio.model.module import DsioModule  # noqa: E402
+from dsio.train.callbacks import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
 
 
 class Toy(Dataset):
@@ -36,11 +42,17 @@ class Toy(Dataset):
 
 @pytest.fixture
 def module() -> DsioModule:
+    # Dropout stands in for what used to be the augmentor slot: a stochastic component
+    # whose behaviour differs between train() and eval(), which is what the tests below
+    # need to tell "embed() forced eval mode" apart from "embed() did nothing at all".
+    # DsioModule no longer has an augmentor slot of its own — see nn/module.py — so any
+    # source of train/eval-dependent randomness has to live inside a component instead.
     return DsioModule(
-        backbone=Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1),
+        backbone=nn.Sequential(
+            Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1), nn.Dropout(0.5)
+        ),
         head=nn.Linear(8, 2),
         loss=CrossEntropy(threshold=0.5),
-        augmentor=Jitter(0.5),
     )
 
 
@@ -105,7 +117,7 @@ def test_embed_restores_the_training_flag(module: DsioModule, loader: DataLoader
 
 
 def test_embed_runs_the_encoder_in_eval_mode(module: DsioModule, loader: DataLoader) -> None:
-    """Otherwise the augmentor fires and the measurement is of augmented features."""
+    """Otherwise a stochastic component fires and the measurement is not reproducible."""
     module.train()
     first, _ = embed(module, loader)
     second, _ = embed(module, loader)
@@ -124,6 +136,30 @@ def test_embed_leaves_no_gradients(module: DsioModule, loader: DataLoader) -> No
     module.zero_grad()
     embed(module, loader)
     assert all(p.grad is None for p in module.parameters())
+
+
+def test_embed_runs_the_encoder_with_grad_disabled(module: DsioModule, loader: DataLoader) -> None:
+    """``@torch.no_grad()`` on ``embed`` (train/callbacks.py) is what keeps this from
+    building an autograd graph over the whole corpus every time a probe runs.
+
+    ``test_embed_leaves_no_gradients`` above checks ``p.grad is None`` -- true for any
+    freshly zeroed module that never had ``.backward()`` called on it, no ``no_grad``
+    context required, so it still passes with the decorator deleted. Spying on
+    ``torch.is_grad_enabled()`` from inside ``encode`` checks the actual property
+    directly: grad tracking must be off for every batch ``embed`` processes.
+    """
+    seen_grad_enabled = []
+    real_encode = module.encode
+
+    def spy(x: torch.Tensor) -> torch.Tensor:
+        seen_grad_enabled.append(torch.is_grad_enabled())
+        return real_encode(x)
+
+    module.encode = spy  # type: ignore[method-assign]
+    embed(module, loader)
+
+    assert seen_grad_enabled, "encode was never called; the test proves nothing"
+    assert not any(seen_grad_enabled), "embed must run its encoder with grad tracking off"
 
 
 # --- the probe ---------------------------------------------------------------------------

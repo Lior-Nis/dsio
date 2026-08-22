@@ -3,18 +3,18 @@ is not.
 
 ``dsio.train.load_runners`` imports each module in ``_BUILTIN_RUNNER_MODULES``, and
 each of those modules registers a task kind into ``dsio.config.schema.TASKS`` as an
-import-time side effect (``@TASKS.register("tabular")`` on ``TabularTask``, and
-similarly for the torch and ssl runners). If ``_BUILTIN_RUNNER_MODULES`` were ever
-emptied, ``load_runners()`` would still return an empty list without raising, ``dsio
-run`` would still print the presets envelope, and ``dsio run <preset> --dry-run``
-would still resolve a config — but reading that same config back with
-``RunConfig.model_validate`` would die with ``UnknownComponentError: unknown task
-'tabular'; no tasks are registered``, because nothing ever imported the module that
-registers it. That is the reproduce path, and it would be dead.
+import-time side effect (``@TASKS.register("torch")`` on ``TorchTask``, and similarly
+for the ssl runner). If ``_BUILTIN_RUNNER_MODULES`` were ever emptied, ``load_runners()``
+would still return an empty list without raising, ``dsio run`` would still print the
+presets envelope, and ``dsio run <preset> --dry-run`` would still resolve a config — but
+reading that same config back with ``RunConfig.model_validate`` would die with
+``UnknownComponentError: unknown task 'torch'; no tasks are registered``, because
+nothing ever imported the module that registers it. That is the reproduce path, and it
+would be dead.
 
-This can't be checked in-process: sibling test modules (``tests/train/test_tabular.py``
-and friends) import ``dsio.train.tabular`` at collection time, which registers
-``TabularTask`` before any test body runs — regardless of whether ``load_runners``
+This can't be checked in-process: sibling test modules (``tests/train/test_torch_runner.py``
+and friends) import ``dsio.train.torch_task`` at collection time, which registers
+``TorchTask`` before any test body runs — regardless of whether ``load_runners``
 still does its job. A subprocess that calls *only* ``load_runners()`` is the only way
 to see what a virgin process actually gets.
 """
@@ -31,15 +31,24 @@ load_runners()
 
 from dsio.config.schema import RunConfig
 
-# The shape of a recorded config.resolved.yaml for a tabular run: enough for
+# The shape of a recorded config.resolved.yaml for a torch run: enough for
 # RunConfig.model_validate to resolve TaskConfig's "kind" through the task registry.
+# None of these names need to resolve through a component registry — that happens at
+# preflight/execute time, not at model_validate time.
 recorded = {
     "name": "reproduce-check",
     "seed": 42,
-    "task": {"kind": "tabular", "dataset": "does-not-need-to-exist-for-validation"},
+    "task": {
+        "kind": "torch",
+        "store": "does-not-need-to-exist-for-validation",
+        "window": {"length": 8, "stride": 8, "label_policy": "majority"},
+        "labels": "does-not-need-to-exist-for-validation",
+        "split": "does-not-need-to-exist-for-validation",
+        "backbone": {"name": "does-not-need-to-exist-for-validation"},
+    },
 }
 cfg = RunConfig.model_validate(recorded)
-assert cfg.task.kind == "tabular"
+assert cfg.task.kind == "torch"
 """
 
 

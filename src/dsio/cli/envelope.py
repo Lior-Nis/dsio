@@ -40,11 +40,43 @@ class ErrorCode(StrEnum):
     INTEGRITY = "integrity"
     LEAKAGE = "leakage"
     BLOCKED = "blocked"
+    MISSING_DEPENDENCY = "missing_dependency"
     INTERNAL = "internal"
 
 
 class BlockedError(RuntimeError):
     """Raised when an action is refused by a gate, such as promotion of a dirty run."""
+
+
+# Which optional-dependency extra (see pyproject.toml) provides each import a bare
+# `uv sync` leaves missing. Keyed on the top-level module name a ModuleNotFoundError
+# names, not the distribution name -- ``import sklearn`` fails on ``sklearn``, not
+# ``scikit-learn``.
+_EXTRA_FOR_MODULE: dict[str, str] = {
+    "torch": "cpu",
+    "lightning": "cpu",
+    "torchmetrics": "cpu",
+    "sklearn": "tabular",
+    "pyarrow": "data",
+}
+
+
+def _missing_dependency_message(exc: ModuleNotFoundError) -> str:
+    """A missing optional import is an actionable setup gap, not a dsio bug.
+
+    ``uv sync`` with no extra selected installs no torch at all, on purpose (README) --
+    so the first thing a fresh checkout does without one is fail somewhere deep inside a
+    runner with a bare ``ModuleNotFoundError``. Naming the extra that fixes it is the
+    difference between "dsio is broken" and "you forgot a setup step".
+    """
+    module = (exc.name or "").split(".")[0]
+    extra = _EXTRA_FOR_MODULE.get(module)
+    hint = (
+        f"install it with `uv sync --extra {extra}`"
+        if extra is not None
+        else "install the optional-dependency extra that provides it (see pyproject.toml)"
+    )
+    return f"{exc}; {hint}"
 
 
 # Order matters: the first match wins, so specific types precede the ValueError and
@@ -66,6 +98,10 @@ _CODES: list[tuple[type[BaseException], ErrorCode, bool]] = [
     (EvalError, ErrorCode.LEAKAGE, False),
     (BlockedError, ErrorCode.BLOCKED, False),
     (FileNotFoundError, ErrorCode.NOT_FOUND, False),
+    # An optional extra not being installed (torch, sklearn, ...) is a setup gap the
+    # caller can fix, not a dsio bug -- must precede ValueError/OSError below since
+    # ModuleNotFoundError is neither.
+    (ModuleNotFoundError, ErrorCode.MISSING_DEPENDENCY, False),
     (ValueError, ErrorCode.INVALID_CONFIG, False),
     (OSError, ErrorCode.INTERNAL, True),
 ]
@@ -91,9 +127,13 @@ def ok(**data: Any) -> dict[str, Any]:
 
 def failure(exc: BaseException) -> dict[str, Any]:
     code, retryable = classify(exc)
+    if isinstance(exc, ModuleNotFoundError):
+        message = _missing_dependency_message(exc)
+    else:
+        message = str(exc) or type(exc).__name__
     return {
         "ok": False,
-        "error": str(exc) or type(exc).__name__,
+        "error": message,
         "code": str(code),
         "retryable": retryable,
     }

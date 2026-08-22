@@ -208,6 +208,21 @@ class WindowIndex:
         )
 
 
+def assert_index_matches_store(store: SignalStore, index: WindowIndex) -> None:
+    """Raise if ``index`` was built against a different store than ``store``.
+
+    A window's offset is only meaningful relative to the store it was cut from; an index
+    built against one store and read from another would silently return the wrong bytes at
+    every position rather than fail. This is a data-layer invariant, checked without torch,
+    so anything that turns an index and a store into windows -- torch-facing or not -- can
+    call it instead of repeating the comparison.
+    """
+    if index.store_name != store.path.name:
+        raise ValueError(
+            f"index was built for store {index.store_name!r}, not {store.path.name!r}"
+        )
+
+
 def window_times(
     store: SignalStore, index: WindowIndex, *, unit: TimeUnit = "row"
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -360,38 +375,6 @@ def _derive_labels(labels: np.ndarray, starts: np.ndarray, spec: WindowSpec) -> 
         else:
             out[i] = ratio
     return out
-
-
-class WindowView:
-    """Reads windows on demand: a numpy-level, framework-free view over a store and index.
-
-    Nothing here is torch-aware — no ``Dataset`` base class, no tensor conversion. The
-    torch-facing equivalent, wrapped by ``make_loader``, is :class:`dsio.nn.data.WindowDataset`.
-    """
-
-    def __init__(self, store: SignalStore, index: WindowIndex) -> None:
-        if index.store_name != store.path.name:
-            raise ValueError(
-                f"index was built for store {index.store_name!r}, "
-                f"not {store.path.name!r}"
-            )
-        self.store = store
-        self.index = index
-
-    def __len__(self) -> int:
-        return len(self.index)
-
-    def __getitem__(self, i: int) -> np.ndarray:
-        return self.store.read(int(self.index.starts[i]), self.index.spec.length)
-
-    def label(self, i: int) -> float | None:
-        return None if self.index.labels is None else float(self.index.labels[i])
-
-    def group(self, i: int) -> str:
-        return self.index.entity_groups[int(self.index.entity_codes[i])]
-
-    def __repr__(self) -> str:
-        return f"WindowView({self.store.path.name!r}, n={len(self):,})"
 
 
 def index_path(store: SignalStore, spec: WindowSpec, root: Path | None = None) -> Path:

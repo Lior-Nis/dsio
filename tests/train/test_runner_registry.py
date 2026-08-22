@@ -10,7 +10,7 @@ loudly. This test asserts every entry names a module that is actually importable
 An empty tuple would make ``test_every_builtin_runner_module_is_importable`` pass
 vacuously (zero iterations) while leaving no task registered at all: ``dsio run``
 still works, but reading back any recorded config dies with ``UnknownComponentError:
-unknown task 'tabular'``. ``test_builtin_runner_modules_is_not_empty`` below, and its
+unknown task 'torch'``. ``test_builtin_runner_modules_is_not_empty`` below, and its
 twin in ``tests/config/test_preset_discovery.py``, exist so that failure mode cannot
 hide behind a vacuously-true loop.
 """

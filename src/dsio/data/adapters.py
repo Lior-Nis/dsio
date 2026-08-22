@@ -16,7 +16,7 @@ import numpy as np
 
 from dsio.contracts import sha256_of_bytes
 from dsio.data.examples import ExamplesError
-from dsio.data.views import window_times
+from dsio.data.views import assert_index_matches_store, window_times
 
 
 class TableExamples:
@@ -112,10 +112,10 @@ class SignalExamples:
     """
 
     def __init__(self, store: Any, index: Any, *, time_unit: str = "row") -> None:
-        if index.store_name != store.path.name:
-            raise ExamplesError(
-                f"index was built for store {index.store_name!r}, not {store.path.name!r}"
-            )
+        try:
+            assert_index_matches_store(store, index)
+        except ValueError as exc:
+            raise ExamplesError(str(exc)) from exc
         self.store = store
         self.index = index
         self.time_unit = time_unit

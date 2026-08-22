@@ -4,10 +4,11 @@ A reproducible ML/DL experimentation spine.
 
 `dsio` owns the parts every project rebuilds badly: typed configuration, staged data with
 content-addressed caching, leakage-safe splits, a run ledger that makes results
-reconstructible, and evaluation with honest verdicts. It does not own your models — those
-stay idiomatic. A tabular task uses a real scikit-learn `Pipeline`, a deep task a real
-`LightningModule`, forecasting real Nixtla objects. There is no universal `Model` wrapper to
-fight.
+reconstructible, and evaluation with honest verdicts. Torch and Lightning are the one
+first-class training path (see `docs/adr/0015-lightning-is-the-only-training-path.md`):
+a model is a `LightningModule` assembled from registered backbone/head/loss/transform
+components, not a per-modality wrapper. There is no universal `Model` abstraction fighting
+the framework — Lightning already is one.
 
 ## Start a project
 
@@ -27,7 +28,7 @@ platform's default wheel is already CUDA-enabled (`torch 2.13.0+cu130`, `cuda.is
 == True` on an RTX 5070 Ti, next to `2.13.0+cpu` from `cpu`); if that ever stops being true,
 `gpu` needs an explicit CUDA index again.
 
-Add your components under `src/dsio/` — a backbone in `nn/`, a preset in `presets.py`.
+Add your components under `src/dsio/` — a backbone in `model/`, a preset in `presets.py`.
 Later, pull spine improvements without losing your work:
 
 ```bash
@@ -45,7 +46,7 @@ A single `uv` project rooted at one package:
 
 ```
 pyproject.toml    the project
-src/dsio/         the package: config, data, splits, train, eval, runs, cli, presets
+src/dsio/         the package: config, data, dataset, model, splits, train, eval, runs, cli, presets
 tests/            its test suite
 runs/             the run ledger (gitignored; the records are the source of truth)
 stores/ views/    canonical data and derived indices (manifests committed)

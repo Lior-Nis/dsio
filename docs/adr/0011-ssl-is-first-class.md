@@ -1,6 +1,8 @@
 # 11. SSL is first-class: pretraining is not a fold loop, and the probe is not a subprocess
 
-Status: accepted (2026-08-18)
+Status: accepted (2026-08-18); amended by Task 6b (2026-08-21) — see "Superseded by Task
+6b" below, which replaces this ADR's `SslMethod`/`step()` design while keeping its
+first-class-SSL decision.
 Implements: the plan's Phase 5.
 
 ## Context
@@ -126,3 +128,53 @@ prediction, no multi-crop. Each is a new `SslMethod` and none is needed to prove
 Embedding caching is also not wired to `dsio.data.staging` yet — `SslModule.predict_step`
 returns embeddings and `encode` is the stable seam, so the pieces exist, but the cached
 artifact does not.
+
+## Superseded by Task 6b (2026-08-21)
+
+This ADR's decisions above are the historical record of what shipped and why; they are not
+rewritten here. What follows is what changed once the "one objective per family" decision
+was pushed one step further and tested directly: does a *pretext method* need to be a kind
+of object at all, or was `SslMethod`/`step(module, x)` still one abstraction more than the
+seam required?
+
+**`dsio.ssl` is gone.** Every file dissolved into the package it actually belonged to by
+technical kind, not by paradigm — the general principle this ADR's own "one objective per
+family" decision was a step toward, taken to its conclusion. `methods.py`'s `build_head`
+calls became registered heads (`mae_decoder`, `simclr_projector`, `vicreg_projector`) and
+its `step()` calls became two ordinary `(prediction, target)` losses (`nt_xent`, `vicreg`)
+in `dsio.model.components`, next to every other registered component. `masking.py` moved to
+`dsio.model.masking` unchanged. `probe.py` moved to `dsio.train.callbacks`, reframed as a
+general representation-quality tool rather than an SSL-specific one — nothing in it ever
+depended on `SslModule`, only on `encode`. (Both paths above are Task 7's names: that later
+task renamed `dsio.nn` to `dsio.model` and split a `dsio.dataset` package out of it, which
+is also where `TwoViewCollate` below now lives.)
+
+**There is one `LightningModule`, not three.** `SslModule` and `ContrastiveModule` are both
+deleted; `dsio.model.module.DsioModule` — the same class a supervised `TorchTask` builds — is
+what a pretraining run builds too, for MAE, SimCLR and VICReg alike, with no `step()`
+override anywhere. This was the open question this ADR left standing (`SslMethod.step`
+existed specifically because SimCLR and VICReg needed the raw batch to build their own two
+views): Task 6b moved that view-building to a collate function
+(`dsio.dataset.dataset.TwoViewCollate`), stacking two augmented views into the batch dimension with
+the target carrying each row's pair index — the same pair-index computation `SimCLR.step`
+used to do inline, just relocated to where a batch first exists. SimCLR's negatives turn
+out to be exactly "the rest of the batch `prediction` already carries," and VICReg's
+variance/covariance terms are per-view marginal statistics of `prediction` alone, with its
+invariance term an indexed MSE via the same index. Neither needed the batch dict this ADR's
+"one objective per family" design had reached for.
+
+**Label budgets left the spine.** `budget.py` is cut, not moved. This ADR argued for it at
+length and the argument was not wrong — a label-budget curve stratified over the positive
+rate, with nested draws and matched groups per arm, is real value for exactly the question
+FORGE was asking. What changed is the boundary being drawn around this repository, not an
+assessment that the feature was badly built: dsio's stated scope (see `pyproject.toml`) is
+config, data staging, splits, runs and evaluation — the machinery every project training
+something needs — and a label-budget sweep is a *specific experiment protocol* over that
+machinery, not the machinery itself. It names its own axis (groups, stratified by rate),
+its own arms (probe / random-init / scratch), and its own notion of what "fair" means
+between them; a different project's budget question looks different in ways `budget.py`'s
+shape does not anticipate. Keeping it in the spine every project imports means the spine
+carries one project's opinion about how to slice an experiment. Nothing about the SSL
+pretraining path depends on it — `ssl_task.py` never imported `dsio.ssl.budget` — so cutting
+it costs the *feature*, which a project that wants it can still build on top of
+`dsio.splits`/`dsio.eval` in its own repository, not the seam.

@@ -21,8 +21,16 @@ from dsio.config.registry import Registry
 from dsio.config.schema import RunConfig
 
 PresetFn = Callable[..., RunConfig]
+StageHookFn = Callable[[RunConfig], None]
 
 PRESETS: Registry[PresetFn] = Registry("preset")
+
+#: Preset-name-keyed hooks that prepare a preset's prerequisites (staging a demo
+#: corpus, warming a cache) immediately before it executes. Deliberately separate from
+#: PRESETS: a preset function only *composes* a RunConfig — resolving one, including
+#: under `--dry-run`, must never write a file or mutate a registry. A hook runs once,
+#: only on the path that is actually about to execute the run (see `dsio.cli.run_cmd`).
+STAGE_HOOKS: Registry[StageHookFn] = Registry("stage_hook")
 
 PRESET_MODULES_ENV = "DSIO_PRESET_MODULES"
 """Comma-separated module paths to import before resolving a preset."""
@@ -41,6 +49,11 @@ def preset(fn: PresetFn) -> PresetFn:
     """Register ``fn`` as a preset under its own name."""
     PRESETS.add(fn.__name__, fn)
     return fn
+
+
+def stage_hook(preset_name: str) -> Callable[[StageHookFn], StageHookFn]:
+    """Register a hook that prepares ``preset_name``'s prerequisites before it runs."""
+    return STAGE_HOOKS.register(preset_name)
 
 
 def load_preset_modules() -> list[str]:

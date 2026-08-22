@@ -37,13 +37,12 @@ from dsio.contracts import DsioModel
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
+from dsio.dataset.dataset import WindowDataset, make_loader
 from dsio.eval.contract import Fold, FoldPrediction, write_report
 from dsio.eval.loop import cross_validate
 from dsio.eval.metrics import METRICS
-from dsio.nn.data import WindowDataset, make_loader
-from dsio.nn.module import DsioModule
-from dsio.nn.registry import (
-    AUGMENTORS,
+from dsio.model.module import DsioModule
+from dsio.model.registry import (
     BACKBONES,
     HEADS,
     LABELS,
@@ -139,8 +138,6 @@ class TorchTask(TaskConfig):
     loss: Component = Component(name="cross_entropy")
     transform: Component | None = None
     preprocessor: Component | None = None
-    augmentor: Component | None = None
-    spectral_augmentor: Component | None = None
 
     encoder: EncoderRef | None = Field(
         default=None,
@@ -156,6 +153,17 @@ class TorchTask(TaskConfig):
     metrics: tuple[str, ...] = ("accuracy", "f1_macro")
     keep_checkpoints: bool = True
 
+    predict: Literal["prediction", "embedding"] = Field(
+        default="prediction",
+        description=(
+            "What the module's predict_step returns when this task's fit_predict calls "
+            "trainer.predict: the head's own output ('prediction', the only value "
+            "_assemble below can score) or raw backbone features ('embedding'). This is "
+            "the field SslPretrainTask used to carry, on the task whose runner never "
+            "calls trainer.predict at all -- this runner does, at fit_predict below."
+        ),
+    )
+
     @model_validator(mode="after")
     def _check(self) -> TorchTask:
         if not self.metrics:
@@ -167,6 +175,14 @@ class TorchTask(TaskConfig):
             raise ValueError(
                 "a supervised torch run needs window labels, but the window spec's "
                 "label_policy is 'none'; set 'any', 'majority' or 'ratio'"
+            )
+        if self.predict != "prediction":
+            raise ValueError(
+                f"predict={self.predict!r} is not supported here: this task's fit_predict "
+                "always scores metrics from cross_validate, which needs the head's own "
+                "(prediction, score) output, not raw embeddings. An embedding-producing "
+                "encoder is what SslPretrainTask registers via register_as; a TorchTask "
+                "built with `encoder=` loads one, it does not export one."
             )
         return self
 
@@ -192,8 +208,6 @@ def check_torch(config: RunConfig) -> None:
     for optional, registry in (
         (task.transform, TRANSFORMS),
         (task.preprocessor, PREPROCESSORS),
-        (task.augmentor, AUGMENTORS),
-        (task.spectral_augmentor, AUGMENTORS),
     ):
         if optional is not None:
             registry.get(optional.name)
@@ -233,10 +247,9 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
         loss=LOSSES.get(task.loss.name)(**task.loss.params),
         transform=transform,
         preprocessor=_optional(task.preprocessor, PREPROCESSORS),
-        augmentor=_optional(task.augmentor, AUGMENTORS),
-        spectral_augmentor=_optional(task.spectral_augmentor, AUGMENTORS),
         lr=task.lr,
         weight_decay=task.weight_decay,
+        predict=task.predict,
     )
 
 

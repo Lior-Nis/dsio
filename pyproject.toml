@@ -16,11 +16,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tabular = ["scikit-learn>=1.9", "xgboost>=3.4", "polars>=1.30", "pyarrow>=18"]
-forecast = ["statsforecast>=2.1", "mlforecast>=1.1"]
+# Not tabular training any more (that runner is deleted; ADR 0015) — scikit-learn is
+# the linear probe's dependency now (`dsio.train.callbacks`), and `tests/eval/
+# test_metrics.py` pins the hand-rolled metrics against it. xgboost and polars had no
+# importer left in `src/` and are gone.
+tabular = ["scikit-learn>=1.9"]
+# dsio itself never imports pyarrow — artifacts are npz, deliberately, so the single most
+# important artifact in the system stays readable in a bare install (see
+# `eval/contract.py`'s "Why npz and not parquet"). Kept as its own extra for a project
+# that wants to convert `oof.npz` to parquet itself, not because dsio needs it.
 data = ["pyarrow>=18"]
-# zarr only for reading legacy stores; it is not the canonical format (ADR 0005).
-legacy = ["zarr>=3.0"]
 # torch ships one wheel per accelerator, and they cannot coexist in a resolution.
 # CI has no GPU and wants the small CPU wheel; a local Blackwell card (sm_120) needs
 # a CUDA build or it fails at model-build time with "no kernel image is available
@@ -30,8 +35,8 @@ legacy = ["zarr>=3.0"]
 # nor the dev group, leaves a torch-needing import unresolved: a bare `uv run` with
 # no extra selected must fail loudly on a missing import, not silently fall back to
 # downloading a multi-gigabyte default wheel.
-cpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
-gpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
+cpu = ["torch>=2.7", "lightning>=2.5"]
+gpu = ["torch>=2.7", "lightning>=2.5"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
@@ -129,16 +134,22 @@ type = "independence"
 modules = ["dsio.config", "dsio.runs", "dsio.artifacts"]
 
 [[tool.importlinter.contracts]]
-# The fold loop and the artifact contract must stay framework- and modality-agnostic.
-# The moment `dsio.eval` can see a WindowIndex or a Run, someone will type one of them
-# into a signature, and the loop stops being usable for tabular, forecast and torch alike.
+# The fold loop and the artifact contract must stay framework-agnostic -- not because
+# several frameworks are first-class any more (ADR 0015 narrowed that to Lightning) but
+# because `cross_validate`'s `FitPredict` contract is also what the plain, deliberately
+# un-abstracted tabular baseline script ADR 0015 keeps reachable would drive, and because
+# a fold loop that cannot be constructed or tested without a WindowIndex or a Run is no
+# longer simple to test in isolation. The moment `dsio.eval` can see either, someone will
+# type one into a signature.
 # Dependency points the other way: splits builds folds, runners call the loop.
 name = "Evaluation depends on no pipeline layer"
 type = "forbidden"
 source_modules = ["dsio.eval"]
 forbidden_modules = [
     "dsio.data",
+    "dsio.dataset",
     "dsio.splits",
+    "dsio.model",
     "dsio.train",
     "dsio.runs",
     "dsio.artifacts",
@@ -151,5 +162,5 @@ forbidden_modules = [
 # cycle, and the next person to add one will not know it was deliberate.
 name = "The data layer never imports splits"
 type = "forbidden"
-source_modules = ["dsio.data"]
+source_modules = ["dsio.data", "dsio.dataset"]
 forbidden_modules = ["dsio.splits"]
