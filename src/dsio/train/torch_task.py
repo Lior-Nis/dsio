@@ -1,10 +1,11 @@
-"""The torch runner: Lightning's loop lives inside one fold, not around it.
+"""The torch runner: one process, one fold (decision 6).
 
-This is the question the fold loop was built to answer. Lightning owns a training loop, and
-so does cross-validation — but they are not the same loop and they do not compete. A
-``Fold`` is one call to ``fit_predict``; a ``Trainer`` is created, fitted and discarded
-inside that call. The outer loop never learns what a Trainer is, and the runner never
-learns how out-of-fold predictions are accumulated or scored.
+``dsio run`` trains one config against one fold and is linear top to bottom: build config
+-> build data -> build module -> ``Trainer.fit`` -> predict -> write artifacts -> stamp
+provenance. Cross-validation is running this entry point N times, from a shell loop or an
+agent, not a loop inside this file. A ``Trainer`` is created, fitted and discarded within
+one call to ``run_torch``; this file never learns how out-of-fold predictions across folds
+are accumulated or pooled -- that is a separate reader, over separate runs' artifacts.
 
 The consequence is that this file is short, and almost all of it is configuration. The
 parts that are not configuration guard three failures that cost real time:
@@ -38,9 +39,8 @@ from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
 from dsio.dataset.dataset import WindowDataset, make_loader
-from dsio.eval.contract import Fold, FoldPrediction, write_report
-from dsio.eval.loop import cross_validate
-from dsio.eval.metrics import METRICS
+from dsio.eval.contract import EvalError, Fold, FoldPrediction
+from dsio.eval.metrics import METRICS, MetricError, compute
 from dsio.model.module import DsioModule
 from dsio.model.registry import (
     BACKBONES,
@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from dsio.runs.record import Run
 
 SPLITS_ROOT = Path("splits")
+PREDICTIONS_FILE = "predictions.npz"
 
 
 class Component(DsioModel):
@@ -119,7 +120,7 @@ class TrainerConfig(DsioModel):
 
 @TASKS.register("torch")
 class TorchTask(TaskConfig):
-    """Cross-validate a torch model over a canonical store, fold by fold."""
+    """Train and evaluate a torch model on one fold of a canonical store."""
 
     kind: Literal["torch"] = "torch"
 
@@ -130,19 +131,13 @@ class TorchTask(TaskConfig):
     splits_root: Path = SPLITS_ROOT
     fold: int = Field(
         description=(
-            "Which fold this run's provenance names. Required, unlike SslPretrainTask's "
+            "Which fold this run trains and predicts. Required, unlike SslPretrainTask's "
             "`fold: int = 0`: pretraining has no 'all folds' alternative reading, so 0 is "
-            "a real default there, but here `folds` (below) already lets a caller ask for "
-            "every fold, so a default here would silently pick fold 0 whenever a caller "
-            "meant that -- exactly the mistake fold-as-process (decision 6) exists to rule "
-            "out once `dsio run` trains a single fold per invocation (Task 3). Until then "
-            "this field is validated and stamped into the run record but does not yet "
-            "select which fold(s) `folds` below runs."
+            "a real default there, but a default here would silently pick fold 0 whenever "
+            "a caller meant every fold -- exactly the mistake fold-as-process (decision 6) "
+            "rules out. `dsio run` trains one fold per invocation; cross-validation is N "
+            "invocations from a shell loop or an agent, not a field on this task."
         ),
-    )
-    folds: tuple[int, ...] = Field(
-        default=(),
-        description="Which folds to run. Empty means all of them.",
     )
 
     backbone: Component
@@ -168,11 +163,11 @@ class TorchTask(TaskConfig):
     predict: Literal["prediction", "embedding"] = Field(
         default="prediction",
         description=(
-            "What the module's predict_step returns when this task's fit_predict calls "
-            "trainer.predict: the head's own output ('prediction', the only value "
-            "_assemble below can score) or raw backbone features ('embedding'). This is "
-            "the field SslPretrainTask used to carry, on the task whose runner never "
-            "calls trainer.predict at all -- this runner does, at fit_predict below."
+            "What the module's predict_step returns when run_torch calls trainer.predict: "
+            "the head's own output ('prediction', the only value _assemble below can "
+            "score) or raw backbone features ('embedding'). This is the field "
+            "SslPretrainTask used to carry, on the task whose runner never calls "
+            "trainer.predict at all -- this runner does, below."
         ),
     )
 
@@ -190,9 +185,9 @@ class TorchTask(TaskConfig):
             )
         if self.predict != "prediction":
             raise ValueError(
-                f"predict={self.predict!r} is not supported here: this task's fit_predict "
-                "always scores metrics from cross_validate, which needs the head's own "
-                "(prediction, score) output, not raw embeddings. An embedding-producing "
+                f"predict={self.predict!r} is not supported here: run_torch always scores "
+                "metrics from the head's own (prediction, score) output, not raw "
+                "embeddings. An embedding-producing "
                 "encoder is what SslPretrainTask registers via register_as; a TorchTask "
                 "built with `encoder=` loads one, it does not export one."
             )
@@ -393,7 +388,12 @@ def build_callbacks(task: TorchTask, directory: Path) -> list[Any]:
 
 @runner("torch")
 def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
-    """Cross-validate a torch model, writing the same artifact contract as every runner."""
+    """Train and predict one fold, writing the per-run artifact contract every runner writes.
+
+    Linear top to bottom, per decision 6: build config -> build data -> build module ->
+    fit -> predict -> write artifacts -> stamp provenance. Cross-validation is this
+    function called N times, from a shell loop or an agent -- not a loop in here.
+    """
     from lightning import Trainer
 
     task = config.task
@@ -415,100 +415,154 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
     index = load_or_build(store, task.window, labels=row_labels)
     examples = SignalExamples(store, index)
     folds = load_folds(examples, fold_paths(task.splits_root, task.split))
-    if task.folds:
-        wanted = set(task.folds)
-        folds = [fold for fold in folds if fold.index in wanted]
-        if not folds:
-            raise ValueError(
-                f"folds {sorted(wanted)} match none of the split family {task.split!r}"
-            )
+    # `require_fold` above already guarantees `task.fold` is declared, so this lookup
+    # cannot fail on a live split file; kept as an assertion rather than silently trusting
+    # it, so a TOCTOU (the file changing between the two reads) still fails loudly. Same
+    # pattern as `run_ssl` in `ssl_task.py`.
+    fold = next((candidate for candidate in folds if candidate.index == task.fold), None)
+    assert fold is not None, f"require_fold guaranteed fold {task.fold} exists in {task.split!r}"
 
     window_labels = index.labels
     if window_labels is None:
         raise ValueError("the window index carries no labels; check the label policy")
 
-    def fit_predict(fold: Fold) -> FoldPrediction:
-        module = build_module(task, channels=store.channels, length=task.window.length)
-        directory = run.artifacts_dir / f"fold{fold.index}"
-        directory.mkdir(parents=True, exist_ok=True)
+    module = build_module(task, channels=store.channels, length=task.window.length)
+    directory = run.artifacts_dir
 
-        train_loader = make_loader(
-            WindowDataset(store, index, fold.train),
-            batch_size=task.batch_size,
-            shuffle=True,
-            num_workers=task.num_workers,
-            seed=config.seed + fold.index,
-        )
-        validation = fold.val if fold.val is not None and fold.val.size else None
-        val_loader = (
-            None
-            if validation is None
-            else make_loader(
-                WindowDataset(store, index, validation),
-                batch_size=task.batch_size,
-                num_workers=task.num_workers,
-                seed=config.seed,
-            )
-        )
-
-        trainer = Trainer(
-            max_epochs=task.trainer.max_epochs,
-            accelerator=task.trainer.accelerator,
-            devices=task.trainer.devices,
-            precision=task.trainer.precision,  # type: ignore[arg-type]
-            gradient_clip_val=task.trainer.gradient_clip_val,
-            accumulate_grad_batches=task.trainer.accumulate_grad_batches,
-            log_every_n_steps=task.trainer.log_every_n_steps,
-            enable_progress_bar=task.trainer.enable_progress_bar,
-            enable_model_summary=False,
-            # "warn" rather than True: several ATen kernels have no deterministic variant,
-            # and a hard failure would make whole model families unrunnable. The warning is
-            # the signal that this run's numbers will not reproduce bit-for-bit.
-            deterministic="warn" if task.trainer.deterministic else False,
-            default_root_dir=directory,
-            logger=False,
-            callbacks=build_callbacks(task, directory) if validation is not None else [],
-        )
-        trainer.fit(module, train_loader, val_loader)
-
-        predict_loader = make_loader(
-            WindowDataset(store, index, fold.test),
+    train_loader = make_loader(
+        WindowDataset(store, index, fold.train),
+        batch_size=task.batch_size,
+        shuffle=True,
+        num_workers=task.num_workers,
+        seed=config.seed + fold.index,
+    )
+    validation = fold.val if fold.val is not None and fold.val.size else None
+    val_loader = (
+        None
+        if validation is None
+        else make_loader(
+            WindowDataset(store, index, validation),
             batch_size=task.batch_size,
             num_workers=task.num_workers,
             seed=config.seed,
         )
-        batches = trainer.predict(module, predict_loader)
-        return _assemble(batches, fold, window_labels)
-
-    report, oof = cross_validate(
-        folds,
-        fit_predict,
-        metrics=task.metrics,
-        n_rows=len(index),
-        on_fold=lambda fold: run.log_metrics(
-            {f"fold/{name}": value for name, value in fold.metrics.items()}, step=fold.fold
-        ),
     )
-    write_report(run.artifacts_dir, report, oof)
+
+    trainer = Trainer(
+        max_epochs=task.trainer.max_epochs,
+        accelerator=task.trainer.accelerator,
+        devices=task.trainer.devices,
+        precision=task.trainer.precision,  # type: ignore[arg-type]
+        gradient_clip_val=task.trainer.gradient_clip_val,
+        accumulate_grad_batches=task.trainer.accumulate_grad_batches,
+        log_every_n_steps=task.trainer.log_every_n_steps,
+        enable_progress_bar=task.trainer.enable_progress_bar,
+        enable_model_summary=False,
+        # "warn" rather than True: several ATen kernels have no deterministic variant,
+        # and a hard failure would make whole model families unrunnable. The warning is
+        # the signal that this run's numbers will not reproduce bit-for-bit.
+        deterministic="warn" if task.trainer.deterministic else False,
+        default_root_dir=directory,
+        logger=False,
+        callbacks=build_callbacks(task, directory) if validation is not None else [],
+    )
+    trainer.fit(module, train_loader, val_loader)
+
+    predict_loader = make_loader(
+        WindowDataset(store, index, fold.test),
+        batch_size=task.batch_size,
+        num_workers=task.num_workers,
+        seed=config.seed,
+    )
+    batches = trainer.predict(module, predict_loader)
+    result = _assemble(batches, fold, window_labels)
+
+    # Guard 1, carried over from the old `cross_validate`: predictions that do not line
+    # up with the fold they came from. `_assemble` above already checks the stronger
+    # property -- that the predicted rows are *exactly* the fold's test positions -- but
+    # this is the guard the fold loop's docstring named, and its message is worth keeping
+    # verbatim: a silent off-by-one in a runner would otherwise score row i's prediction
+    # against row j's label and produce a number that looks merely disappointing rather
+    # than wrong.
+    if len(result.y_true) != fold.test.size:
+        raise EvalError(
+            f"{fold.name}: fit_predict returned {len(result.y_true)} predictions for "
+            f"{fold.test.size} test rows; the runner and the fold disagree about what "
+            "was held out"
+        )
+
+    # Guard 4, also carried over from `cross_validate`: a fold that cannot be scored is a
+    # split problem before it is a metric problem, and the message says so rather than
+    # surfacing whatever bare exception the metric implementation happened to raise.
+    try:
+        values = compute(task.metrics, result.y_true, result.y_pred, result.y_score)
+    except MetricError as error:
+        raise EvalError(
+            f"{fold.name}: {error}. A fold that cannot be scored is a split problem "
+            "before it is a metric problem — check stratification."
+        ) from error
+
+    store_digest = store.manifest().signal_sha256
+    _write_predictions(
+        run.artifacts_dir,
+        fold=fold,
+        result=result,
+        split=task.split,
+        split_digest=store_digest,
+    )
     (run.artifacts_dir / "windows.json").write_text(
         json.dumps(
             {
                 "store": store.path.name,
-                "store_sha256": store.manifest().signal_sha256,
+                "store_sha256": store_digest,
                 "window_digest": task.window.digest,
                 "windows": len(index),
                 "split": task.split,
+                "fold": task.fold,
             },
             indent=2,
             sort_keys=True,
         )
     )
 
-    metrics = dict(report.metrics)
-    metrics["coverage"] = report.coverage
-    metrics.update({f"{name}_fold_sd": value for name, value in report.per_fold_std.items()})
-    run.log_metrics(metrics)
-    return metrics
+    run.log_metrics(values)
+    return dict(values)
+
+
+def _write_predictions(
+    directory: Path,
+    *,
+    fold: Fold,
+    result: FoldPrediction,
+    split: str,
+    split_digest: str,
+) -> None:
+    """Write this run's held-out predictions: the per-run artifact a pooling reader pools N of.
+
+    Under fold-as-process (decision 6) one run trains one fold, so what used to be one
+    fold's slice appended into a shared ``OutOfFold`` across an in-process loop is now the
+    whole file. ``split`` and ``split_digest`` -- the split family's name and the store
+    digest it is bound to, the same digest ``windows.json`` records -- let a pooling
+    reader (a later task) refuse to combine runs from different split families or
+    different store snapshots, the same binding ``SplitFile.store_manifest_sha256``
+    already checks at load time, carried forward here because pooling happens in a
+    different process than the one that validated it. ``y_score`` is omitted from the
+    file entirely when the fold produced none, rather than written as zeros, so a pooling
+    reader can tell "this fold scored nothing" from "this fold's scores happened to be
+    zero".
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    arrays: dict[str, Any] = {
+        "row_id": fold.test,
+        "fold": np.asarray(fold.index, dtype=np.int64),
+        "y_true": np.asarray(result.y_true),
+        "y_pred": np.asarray(result.y_pred),
+        "split": np.asarray(split),
+        "split_digest": np.asarray(split_digest),
+    }
+    if result.y_score is not None:
+        arrays["y_score"] = np.asarray(result.y_score)
+    np.savez_compressed(directory / PREDICTIONS_FILE, **arrays)
 
 
 def _assemble(

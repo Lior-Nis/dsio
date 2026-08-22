@@ -340,8 +340,8 @@ def test_a_pinned_encoder_loads_into_a_downstream_run(corpus: Path, pretrained: 
     check(config)
     active, metrics = run(config, corpus)
     assert "accuracy" in metrics
-    report, _ = read_report(active.artifacts_dir)
-    assert report.n_folds == 3
+    with np.load(active.artifacts_dir / "predictions.npz", allow_pickle=False) as data:
+        assert int(data["fold"]) == 0
 
 
 def test_a_tampered_digest_fails_closed(corpus: Path, pretrained: EncoderRef) -> None:
