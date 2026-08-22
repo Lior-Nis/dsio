@@ -25,8 +25,8 @@ This document specifies the lean skeleton: one framework, one package, cloned an
 
 ## Goal
 
-A skeleton of roughly 5,400 lines that a new project clones, adds components to, and pulls
-improvements into with `git merge upstream/main`. It owns the parts every project rebuilds
+A skeleton of roughly 5,400 lines of **executable code** that a new project clones, adds
+components to, and pulls improvements into with `git merge upstream/main`. It owns the parts every project rebuilds
 badly — typed configuration, a memory-mapped store with lazy windowed views, leakage-safe
 splits, provenance, and honest comparison — and nothing that Lightning, torchmetrics or
 MLflow already provide.
@@ -34,6 +34,36 @@ MLflow already provide.
 The criterion applied throughout, in preference to any line count:
 
 > **Does a second, unrelated project need this on day one?**
+
+### How the line target is measured
+
+**The target counts executable code only** — total lines minus docstrings, comments and blanks.
+This repository writes its reasoning into docstrings by house style, so a total-line count
+measures how much was explained as much as how much was built, and moves in the wrong
+direction every time a decision is recorded properly.
+
+Measured by AST (a line is prose if it falls inside a bare string-expression statement or
+starts with `#`):
+
+| | Code | Doc | Blank | Total |
+|---|---|---|---|---|
+| Before Plan 2b (`b05579c`) | 4,781 | 1,491 | 1,475 | 7,747 |
+| After Plan 2b (`73e8da2`) | **4,640** | 1,692 | 1,405 | 7,737 |
+
+Plan 2b cut 141 lines of code and added 201 of prose, so the total barely moved while the
+code genuinely shrank. Plan 3's deletions are almost entirely code, putting the endpoint near
+**3,950 code lines** — inside the target. The total will land near 7,000, and that is fine:
+the ~5,400 figure was only ever a proxy for "nothing here reimplements Lightning, torchmetrics
+or MLflow", and that criterion is the one above, not an arithmetic one.
+
+*Historical note.* An earlier revision of this document stated ~5,400 as a **total**-line
+target and projected ~6,200 after Plan 2b. That projection was not reachable: it counted all
+814 lines of `ssl/` as deleted when 623 of them were relocated into `model/`, `dataset/` and
+`train/callbacks.py`, and only 247 were genuinely cut. The per-package totals in *Layout*
+below carry the same error — several are smaller than the sum of the files this document says
+it *keeps* (`eval/` ~550 against kept parts totalling 821; `runs/` ~215 against 241 before
+`record.py` contributes a line; `train/` ~495 against two task files totalling 903). They are
+retained as the original design sketch. **The code-only figures above are the binding target.**
 
 Where the answer is no, the code is cut and its shape recorded, so re-entry is a known
 extension rather than a redesign.
@@ -316,8 +346,10 @@ src/dsio/
   cli/            ~204   dsio run, JSON envelope
 ```
 
-**≈5,400 lines** (estimates; the real number lands when the code moves), 10 packages and one
-flat module, down from 13,345 across 14 packages.
+10 packages and one flat module, down from 13,345 across 14 packages. The figures above are
+**total** lines from the original design sketch and are superseded as a target by the
+code-only measurement in *Goal* — see the historical note there for where they are internally
+inconsistent.
 
 ### Dependency layers
 
@@ -354,7 +386,7 @@ preserves the forbidden-import contract and is the right seam regardless.
 |---|---|---|
 | `agents/` | 1,042 | Out of scope under Lightning-only; an eval harness, not a training path |
 | `train/tabular.py` | 270 | Lightning-only |
-| `ssl/` as a directory | 814 | Paradigm folder; 371 lines survive as components, 194 as a callback |
+| `ssl/` as a directory | 247 | Paradigm folder. Of its 870 lines, **623 relocated** (methods → `model/components.py`, masking → `model/masking.py`, probe → `train/callbacks.py`, module → `DsioModule`) and 247 were cut (`budget.py` 191, façade 56). Dissolution is not deletion |
 | `data/cache.py` | 478 | Eight strategy classes and two Protocols for "hash the config, write an npz, skip if present" |
 | `data/remote.py` | 289 | Justified only by cloud training, now deferred |
 | `eval/multiplicity.py` + `select.py` | 615 | DSR/PBO need hundreds of trials; DL runs give tens. ~80 lines of ESS kept (overlapping windows genuinely inflate N) |
