@@ -69,10 +69,20 @@ class WindowDataset(Dataset[dict[str, Any]]):
     *visible* position replaced by NaN — the sentinel a mask-aware loss selects on before
     it computes anything, so it never sees a position the model was allowed to look at.
     ``labels`` is ignored (a pretext window has no label to speak of; the target *is* the
-    signal). Without ``mask`` an item is ``(x, label)`` exactly as before. Building a
-    training dataset with a mask and a validation dataset without one is what makes "never
-    mask a validation batch" a fact about which object was constructed, rather than a flag
-    checked at call time.
+    signal). Without ``mask`` an item is ``(x, label)`` exactly as before.
+
+    "Never mask a validation batch" is not something this class enforces on its own —
+    ``mask`` is a plain constructor keyword, available on every instance regardless of
+    what it is used for. It holds two different ways depending on the caller:
+    :mod:`dsio.train.torch_task`'s supervised loaders construct this class directly and
+    simply never pass ``mask=``, by convention; a masked-reconstruction (SSL) validation
+    loader, by contrast, is deliberately built *with* a mask —
+    :func:`~dsio.train.ssl_task.build_loaders` calls :func:`train_dataset` for it, the
+    same builder training uses, with ``mask_seed`` pinned (see below) so the reconstruction
+    target it measures does not move between calls. What "never masked" *does* hold for
+    unconditionally is :func:`val_dataset`, whose signature has no ``mask`` parameter to
+    pass in the first place — but that function is not what every validation loader in
+    this codebase reaches for.
 
     ``normalize_target`` (only meaningful alongside ``mask``) standardises the *target*
     per window, per channel — ``(x - mean) / (std + eps)`` computed over the whole
@@ -196,11 +206,18 @@ def train_dataset(
     normalize_target: bool = True,
     mask_seed: int | None = None,
 ) -> WindowDataset:
-    """Build the dataset a training loader gets. The only builder that can mask.
+    """Build a dataset with masking available. The only builder that can mask — but not
+    only for a training loader, despite the name.
 
-    Paired with :func:`val_dataset`, whose signature has no ``mask`` parameter at all —
-    "never mask a validation batch" is then a fact about which function a caller reached
-    for, not a convention a caller has to remember to uphold by leaving an argument unset.
+    A supervised loader (:mod:`dsio.train.torch_task`) never wants a mask, so it reaches
+    for :func:`val_dataset` for its validation set instead, by convention: a mistake would
+    be leaving ``mask=`` set on a call it should not be, not a possibility this function's
+    own signature rules out. A masked-reconstruction (SSL) validation loader, by contrast,
+    deliberately calls *this* function, with ``mask`` set and ``mask_seed`` pinned (below)
+    — see :func:`~dsio.train.ssl_task.build_loaders`. "Never mask a validation batch" is
+    therefore not a guarantee this function enforces on every caller; it is what
+    :func:`val_dataset` alone guarantees, structurally, by never accepting a mask to begin
+    with.
 
     ``mask_seed`` is left unset by a training caller (fresh randomness every epoch) and set
     by a caller building the loader Lightning's validation loop consumes over a masked
@@ -228,10 +245,17 @@ def val_dataset(
     channels_first: bool = True,
     target_key: str = "y",
 ) -> WindowDataset:
-    """Build the dataset a validation (or other never-masked) loader gets.
+    """Build a dataset that can never be masked, because there is no ``mask=`` keyword to
+    pass here at all — the mistake this closes is not "someone remembered not to", it is
+    "there was nothing to remember".
 
-    There is no ``mask=`` keyword to pass here — the mistake this closes is not "someone
-    remembered not to", it is "there was nothing to remember".
+    This is the unmasked builder :mod:`dsio.train.torch_task`'s supervised loaders use,
+    train and validation alike (it also constructs :class:`WindowDataset` directly for the
+    same shape, which never passes ``mask=`` either). It is not, though, what every
+    validation loader in this codebase reaches for: an SSL run's masked-reconstruction
+    validation loader wants the opposite guarantee — the *same* mask every time it is
+    computed, not no mask at all — so it deliberately calls :func:`train_dataset` instead,
+    with ``mask`` set and ``mask_seed`` pinned. See that function's docstring.
     """
     return WindowDataset(
         store,
