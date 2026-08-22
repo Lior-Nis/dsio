@@ -153,6 +153,17 @@ class TorchTask(TaskConfig):
     metrics: tuple[str, ...] = ("accuracy", "f1_macro")
     keep_checkpoints: bool = True
 
+    predict: Literal["prediction", "embedding"] = Field(
+        default="prediction",
+        description=(
+            "What the module's predict_step returns when this task's fit_predict calls "
+            "trainer.predict: the head's own output ('prediction', the only value "
+            "_assemble below can score) or raw backbone features ('embedding'). This is "
+            "the field SslPretrainTask used to carry, on the task whose runner never "
+            "calls trainer.predict at all -- this runner does, at fit_predict below."
+        ),
+    )
+
     @model_validator(mode="after")
     def _check(self) -> TorchTask:
         if not self.metrics:
@@ -164,6 +175,14 @@ class TorchTask(TaskConfig):
             raise ValueError(
                 "a supervised torch run needs window labels, but the window spec's "
                 "label_policy is 'none'; set 'any', 'majority' or 'ratio'"
+            )
+        if self.predict != "prediction":
+            raise ValueError(
+                f"predict={self.predict!r} is not supported here: this task's fit_predict "
+                "always scores metrics from cross_validate, which needs the head's own "
+                "(prediction, score) output, not raw embeddings. An embedding-producing "
+                "encoder is what SslPretrainTask registers via register_as; a TorchTask "
+                "built with `encoder=` loads one, it does not export one."
             )
         return self
 
@@ -230,6 +249,7 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
         preprocessor=_optional(task.preprocessor, PREPROCESSORS),
         lr=task.lr,
         weight_decay=task.weight_decay,
+        predict=task.predict,
     )
 
 

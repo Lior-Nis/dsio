@@ -89,14 +89,6 @@ class SslPretrainTask(TaskConfig):
             "meaningful alongside `mask`."
         ),
     )
-    predict: Literal["prediction", "embedding"] = Field(
-        default="embedding",
-        description=(
-            "What the module's predict_step returns: raw backbone features "
-            "('embedding', the usual choice for a pretrained encoder someone else will "
-            "load) or the objective head's own output ('prediction')."
-        ),
-    )
 
     register_as: str = Field(description="Name to register the encoder under.")
 
@@ -169,7 +161,12 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
         transform=_optional(task.transform, TRANSFORMS),
         lr=task.lr,
         weight_decay=task.weight_decay,
-        predict=task.predict,
+        # No `predict=` here: run_ssl_pretrain (below) only ever calls trainer.fit on
+        # this module, never trainer.predict, so predict_step -- and therefore this
+        # constructor argument -- never executes. That is what made SslPretrainTask's
+        # own `predict` field a knob with no wire behind it; it moved to TorchTask
+        # (torch_task.py), whose fit_predict is the one place trainer.predict actually
+        # runs.
     )
     return module, feature_dim
 

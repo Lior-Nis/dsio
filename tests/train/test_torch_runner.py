@@ -125,6 +125,19 @@ def test_a_label_policy_of_none_is_rejected_at_config_time(corpus: Path) -> None
         make_task(corpus, window=WindowSpec(length=128, stride=64))
 
 
+def test_predict_embedding_is_rejected_at_config_time(corpus: Path) -> None:
+    """``predict`` used to exist only on ``SslPretrainTask``, whose runner never calls
+    ``trainer.predict`` -- a knob with no wire behind it. It moved here, to the task whose
+    ``fit_predict`` actually calls ``trainer.predict`` (below), which is what makes it
+    reachable: constructing this task with ``predict="embedding"`` now fails at config
+    time with an explanation, rather than silently building a module whose predict_step
+    would (if ever exercised through this runner) return ``{"embedding": ...}`` and blow
+    up ``_assemble``'s ``batch["prediction"]`` lookup with an opaque KeyError instead.
+    """
+    with pytest.raises(ValueError, match="predict='embedding' is not supported"):
+        make_task(corpus, predict="embedding")
+
+
 def test_an_unknown_metric_is_caught_before_training(corpus: Path) -> None:
     config = RunConfig(name="bad", task=make_task(corpus, metrics=("accuarcy",)))
     with pytest.raises(KeyError, match="unknown metric"):
@@ -187,6 +200,30 @@ def test_each_fold_gets_a_fresh_module(corpus: Path) -> None:
     second = build_module(task, channels=2, length=128)
     assert first is not second
     assert first.backbone is not second.backbone
+
+
+def test_build_module_wires_predict_into_the_module(corpus: Path) -> None:
+    """``build_module`` -- the function ``fit_predict`` (below) actually calls, not a
+    hand-built ``DsioModule`` -- must carry ``task.predict`` onto the module it returns.
+    Before this, ``DsioModule``'s own default ('prediction') was reached by omission
+    here, never by this task naming it; a caller had no way to see or change what a
+    torch run's ``trainer.predict`` step reports.
+
+    ``predict="embedding"`` is rejected at config time (see the test above), so the only
+    way to check ``build_module`` actually threads whatever value ``task.predict`` holds
+    -- rather than only ever happening to match ``DsioModule``'s own default -- is to
+    reach a non-default value without going through that validator.
+    ``model_copy(update=...)`` does exactly that: it does not re-run validators, unlike
+    the constructor.
+    """
+    task = make_task(corpus)
+    assert task.predict == "prediction"
+    module = build_module(task, channels=2, length=128)
+    assert module.predict == "prediction"
+
+    embedding_task = task.model_copy(update={"predict": "embedding"})
+    embedding_module = build_module(embedding_task, channels=2, length=128)
+    assert embedding_module.predict == "embedding"
 
 
 # --- end to end ------------------------------------------------------------------------
