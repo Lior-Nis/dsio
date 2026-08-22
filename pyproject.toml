@@ -139,7 +139,9 @@ type = "forbidden"
 source_modules = ["dsio.eval"]
 forbidden_modules = [
     "dsio.data",
+    "dsio.dataset",
     "dsio.splits",
+    "dsio.model",
     "dsio.train",
     "dsio.runs",
     "dsio.artifacts",
@@ -152,5 +154,5 @@ forbidden_modules = [
 # cycle, and the next person to add one will not know it was deliberate.
 name = "The data layer never imports splits"
 type = "forbidden"
-source_modules = ["dsio.data"]
+source_modules = ["dsio.data", "dsio.dataset"]
 forbidden_modules = ["dsio.splits"]
