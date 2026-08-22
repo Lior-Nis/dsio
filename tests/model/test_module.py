@@ -14,6 +14,7 @@ from dsio.model.components import (  # noqa: E402
     CrossEntropy,
     InstanceStandardize,
     Jitter,
+    MaskedMSE,
     MLP1d,
     RandomScale,
     mae_decoder_head,
@@ -114,6 +115,33 @@ def test_every_stage_shares_one_step_implementation(batch: torch.Tensor) -> None
     for method in (module.training_step, module.validation_step, module.test_step):
         value = method(payload, 0)
         assert value.ndim == 0 and torch.isfinite(value)
+
+
+def test_common_step_logs_a_losss_diagnostics(batch: torch.Tensor) -> None:
+    """A loss that implements ``diagnostics(prediction, target, x)`` gets it called from
+    inside ``_common_step`` and each entry logged under ``{stage}/{name}`` -- the hook
+    ADR 0011's copy detector (``MaskedMSE.diagnostics``) depends on to ever reach a
+    dashboard. Watch this fail: replace the ``diagnostics is not None`` block in
+    ``DsioModule._common_step`` with nothing (or hardcode ``diagnostics = None``) and
+    ``train/masked_mse``/``train/visible_mse`` never get logged even though the loss
+    object still has the method."""
+    channels, length = batch.shape[1], batch.shape[2]
+    hidden = torch.zeros(batch.shape[0], length, dtype=torch.bool)
+    hidden[:, : length // 2] = True
+    x = batch.masked_fill(hidden.unsqueeze(1), 0.0)
+    target = batch.masked_fill(~hidden.unsqueeze(1), float("nan"))
+
+    module = tiny_module(
+        head=mae_decoder_head(8, channels, length),
+        loss=MaskedMSE(),
+    )
+    logged: dict[str, torch.Tensor] = {}
+    module.log = lambda name, value, **kwargs: logged.__setitem__(name, value)  # type: ignore[method-assign]
+
+    module._common_step({"x": x, "y": target, "row": torch.arange(batch.shape[0])}, "train")
+
+    assert "train/masked_mse" in logged
+    assert "train/visible_mse" in logged
 
 
 def test_predict_step_reports_the_rows_it_predicted(batch: torch.Tensor) -> None:

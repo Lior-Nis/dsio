@@ -123,6 +123,30 @@ def test_masked_mse_ignores_nan_positions_via_autograd() -> None:
     assert torch.equal(prediction.grad[:, :, 4:], torch.zeros(2, 1, 4))
 
 
+def test_masked_mse_diagnostics_flags_a_copying_model() -> None:
+    """ADR 0011's detector, exercised directly: a model that merely copies its own
+    (masked, zeroed) input reproduces ``x`` exactly at every visible position -- so
+    ``visible_mse`` collapses to zero -- while at the hidden positions it has nothing but
+    the zero ``apply_mask`` left behind, not the true value the sentinel target carries,
+    so ``masked_mse`` stays high. ``masked_mse`` must clearly exceed ``visible_mse`` for
+    this copying prediction, which is the one property that makes the diagnostic useful
+    as a copy detector. Watch this fail: make ``MaskedMSE.diagnostics`` return
+    ``{"masked_mse": torch.zeros(()), "visible_mse": torch.zeros(())}`` and the two
+    numbers become indistinguishable, exactly the blind spot this closes."""
+    original, hidden, masked_input, _reconstruction = _signal()
+    sentinel_target = original.masked_fill(~hidden.unsqueeze(1), float("nan"))
+
+    diagnostics = MaskedMSE().diagnostics(masked_input, sentinel_target, masked_input)
+
+    assert diagnostics["visible_mse"] == pytest.approx(0.0, abs=1e-6), (
+        "a copying model reproduces x exactly at every visible position"
+    )
+    assert diagnostics["masked_mse"] > diagnostics["visible_mse"] + 0.1, (
+        "a copying model must score far worse on the masked positions than the visible "
+        "ones it merely echoed"
+    )
+
+
 def test_masked_mse_rejects_a_target_with_nothing_to_reconstruct() -> None:
     prediction = torch.zeros(2, 1, 4)
     target = torch.full((2, 1, 4), float("nan"))
