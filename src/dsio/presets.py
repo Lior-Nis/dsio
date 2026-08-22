@@ -92,7 +92,7 @@ def _stage_starter_corpus() -> None:
     from dsio.data.store import SignalStore, data_root
     from dsio.model.registry import LABELS
     from dsio.model.registry import labels as register_labels
-    from dsio.splits.models import SplitFile
+    from dsio.splits.models import SplitFile, SplitFold
     from dsio.train.torch_task import SPLITS_ROOT
 
     if _STARTER not in LABELS:
@@ -123,6 +123,10 @@ def _stage_starter_corpus() -> None:
         SplitFile(
             store=_STARTER,
             name=_STARTER,
-            fold=0,
-            parts={"test": ["p0", "p1"], "val": ["p2"], "train": ["p3", "p4", "p5"]},
+            folds=[
+                SplitFold(
+                    index=0,
+                    parts={"test": ["p0", "p1"], "val": ["p2"], "train": ["p3", "p4", "p5"]},
+                )
+            ],
         ).save(split_path)

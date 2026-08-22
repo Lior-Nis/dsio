@@ -35,37 +35,41 @@ def folds_from_splits(
     val_part: str | None = VAL_PART,
     require_total: bool = True,
 ) -> list[Fold]:
-    """Build one :class:`~dsio.eval.contract.Fold` per split file.
+    """Build one :class:`~dsio.eval.contract.Fold` per fold across the given split files.
 
-    Order is the order given. Fold *index* comes from each file's own ``fold`` field where
-    it has one, so a fold number in an artifact always means the same thing as the fold
-    number in the committed YAML — renumbering them by list position would silently
-    scramble that correspondence when folds are run as a subset.
+    One split file now holds a whole family's worth of folds (``SplitFile.folds``), so
+    this flattens every fold from every file given, in order. A family committed the old
+    way — one file per fold — flattens identically, since each such file just has one
+    entry. Fold *index* always comes from the fold's own declared ``index``, never from
+    its position in a file's list or in ``splits``: renumbering by position would silently
+    scramble the correspondence a run's artifacts and a comparison key off, which matters
+    more once running a subset of folds is the normal case, not the exception.
     """
     if not splits:
         raise SplitError("no split files were given; there are no folds to build")
 
     folds: list[Fold] = []
-    for position, split in enumerate(splits):
-        masks = resolve_masks(examples, split, require_total=require_total)
-        for required in (train_part, test_part):
-            if required not in masks:
-                raise SplitError(
-                    f"split {split.name!r} has no {required!r} part; it defines "
-                    f"{', '.join(sorted(masks)) or 'nothing'}"
+    for split in splits:
+        for split_fold in split.folds:
+            masks = resolve_masks(examples, split, split_fold, require_total=require_total)
+            for required in (train_part, test_part):
+                if required not in masks:
+                    raise SplitError(
+                        f"split {split.name!r} fold {split_fold.index} has no {required!r} "
+                        f"part; it defines {', '.join(sorted(masks)) or 'nothing'}"
+                    )
+            val = None
+            if val_part is not None and val_part in masks:
+                val = np.flatnonzero(masks[val_part])
+            folds.append(
+                Fold(
+                    index=split_fold.index,
+                    train=np.flatnonzero(masks[train_part]),
+                    test=np.flatnonzero(masks[test_part]),
+                    val=val,
+                    name=f"{split.name}[{split_fold.index}]",
                 )
-        val = None
-        if val_part is not None and val_part in masks:
-            val = np.flatnonzero(masks[val_part])
-        folds.append(
-            Fold(
-                index=split.fold if split.fold is not None else position,
-                train=np.flatnonzero(masks[train_part]),
-                test=np.flatnonzero(masks[test_part]),
-                val=val,
-                name=split.name if split.fold is None else f"{split.name}[{split.fold}]",
             )
-        )
     _assert_test_parts_are_disjoint(folds)
     return folds
 

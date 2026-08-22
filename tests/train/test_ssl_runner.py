@@ -27,7 +27,7 @@ from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import read_report  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import RunLedger  # noqa: E402
-from dsio.splits.models import SplitFile  # noqa: E402
+from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
@@ -78,9 +78,13 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             store=store.path.name,
             store_manifest_sha256=digest,
             name="k3",
-            fold=fold,
-            counts={part: len(members) for part, members in parts.items()},
-            parts=parts,
+            folds=[
+                SplitFold(
+                    index=fold,
+                    counts={part: len(members) for part, members in parts.items()},
+                    parts=parts,
+                )
+            ],
         ).save(tmp_path / "splits" / "k3" / f"fold{fold}.yaml")
     return tmp_path
 

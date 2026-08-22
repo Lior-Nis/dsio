@@ -24,7 +24,7 @@ from dsio.splits.folds import (
     folds_from_splits,
     load_folds,
 )
-from dsio.splits.models import SplitError, SplitFile
+from dsio.splits.models import SplitError, SplitFile, SplitFold
 from dsio.splits.temporal import TemporalSpec, describe, walk_forward
 
 
@@ -68,9 +68,13 @@ def _kfold3(store: SignalStore) -> list[SplitFile]:
             store=store.path.name,
             store_manifest_sha256=digest,
             name="k3",
-            fold=i,
-            counts={part: len(members) for part, members in parts.items()},
-            parts=parts,
+            folds=[
+                SplitFold(
+                    index=i,
+                    counts={part: len(members) for part, members in parts.items()},
+                    parts=parts,
+                )
+            ],
         )
         for i, parts in enumerate(folds)
     ]
@@ -85,9 +89,13 @@ def _logo(store: SignalStore, *, name: str) -> list[SplitFile]:
             store=store.path.name,
             store_manifest_sha256=digest,
             name=name,
-            fold=i,
-            counts={"train": len(groups) - 1, "test": 1},
-            parts={"train": [g for g in groups if g != held], "test": [held]},
+            folds=[
+                SplitFold(
+                    index=i,
+                    counts={"train": len(groups) - 1, "test": 1},
+                    parts={"train": [g for g in groups if g != held], "test": [held]},
+                )
+            ],
         )
         for i, held in enumerate(groups)
     ]
@@ -104,9 +112,9 @@ def _temporal_folds(
             store=examples.name,
             store_manifest_sha256=examples.digest,
             name=name,
-            fold=fold,
-            counts=describe(bounds, t_start, t_end),
-            temporal=bounds,
+            folds=[
+                SplitFold(index=fold, counts=describe(bounds, t_start, t_end), temporal=bounds)
+            ],
         )
         for fold, bounds in enumerate(walk_forward(t_start, t_end, spec))
     ]
@@ -119,6 +127,54 @@ def test_a_split_per_fold_becomes_a_fold_per_split(store: SignalStore, index) ->
     folds = folds_from_splits(SignalExamples(store, index), _kfold3(store))
     assert len(folds) == 3
     assert [fold.index for fold in folds] == [0, 1, 2]
+
+
+def _kfold3_as_one_file(store: SignalStore) -> SplitFile:
+    """The same three folds as `_kfold3`, held in **one** file — the shape this task adds:
+    a whole split family, one committed YAML, folds ordered inside it."""
+    digest = entity_examples(store).digest
+    folds = [
+        {"test": ["p0", "p1", "p2"], "val": ["p8"], "train": ["p3", "p4", "p5", "p6", "p7"]},
+        {"test": ["p3", "p4", "p5"], "train": ["p0", "p1", "p2", "p6", "p7", "p8"]},
+        {"test": ["p6", "p7", "p8"], "train": ["p0", "p1", "p2", "p3", "p4", "p5"]},
+    ]
+    return SplitFile(
+        store=store.path.name,
+        store_manifest_sha256=digest,
+        name="k3one",
+        folds=[
+            SplitFold(
+                index=i,
+                counts={part: len(members) for part, members in parts.items()},
+                parts=parts,
+            )
+            for i, parts in enumerate(folds)
+        ],
+    )
+
+
+def test_one_file_holding_every_fold_builds_the_same_folds_as_one_file_per_fold(
+    store: SignalStore, index
+) -> None:
+    """A split family expressed as one file with an ordered `folds` list drives
+    `folds_from_splits` identically to the old one-file-per-fold shape."""
+    single_file = folds_from_splits(SignalExamples(store, index), [_kfold3_as_one_file(store)])
+    many_files = folds_from_splits(SignalExamples(store, index), _kfold3(store))
+    assert [f.index for f in single_file] == [f.index for f in many_files] == [0, 1, 2]
+    for a, b in zip(single_file, many_files, strict=True):
+        assert np.array_equal(a.train, b.train)
+        assert np.array_equal(a.test, b.test)
+
+
+def test_one_file_round_trips_through_load_and_still_drives_the_loop(
+    store: SignalStore, index, tmp_path: Path
+) -> None:
+    path = tmp_path / "splits" / "k3one" / "split.yaml"
+    _kfold3_as_one_file(store).save(path)
+    restored = SplitFile.load(path)
+    folds = folds_from_splits(SignalExamples(store, index), [restored])
+    assert [f.index for f in folds] == [0, 1, 2]
+    assert sum(fold.test.size for fold in folds) == len(index)
 
 
 def test_folds_cover_the_index_without_copying_it(store: SignalStore, index) -> None:
@@ -187,18 +243,29 @@ def test_a_validation_part_is_carried_through(store: SignalStore, index) -> None
 
 
 def test_overlapping_test_parts_across_folds_are_rejected(store: SignalStore, index) -> None:
-    """Each file is individually valid; only comparing them reveals the double-count."""
+    """Each file is individually valid; only comparing them reveals the double-count.
+
+    This exercises `folds_from_splits`'s own resolved-position guard, not the new
+    load-time one in `SplitFile.load`: these two `SplitFile` objects are constructed
+    directly (never loaded from YAML), and the load-time check only ever sees the folds
+    declared *inside one file* — it cannot see an overlap that only exists across two
+    separately built `SplitFile` objects. That is the concrete case the resolved-position
+    guard still catches on its own.
+    """
     splits = _kfold3(store)
-    duplicated = [splits[0], splits[0].model_copy(update={"fold": 1})]
+    relabeled = splits[0].model_copy(
+        update={"folds": [splits[0].folds[0].model_copy(update={"index": 1})]}
+    )
+    duplicated = [splits[0], relabeled]
     with pytest.raises(SplitError, match=r"k3\[0\].*k3\[1\]"):
         folds_from_splits(SignalExamples(store, index), duplicated)
 
 
 def test_a_split_without_a_test_part_is_rejected(store: SignalStore, index) -> None:
     splits = _kfold3(store)
-    partial = splits[0].model_copy(
-        update={"parts": {"train": sorted(splits[0].all_groups)}}
-    )
+    fold0 = splits[0].folds[0]
+    partial_fold = fold0.model_copy(update={"parts": {"train": sorted(fold0.all_groups)}})
+    partial = splits[0].model_copy(update={"folds": [partial_fold]})
     with pytest.raises(SplitError, match="no 'test' part"):
         folds_from_splits(SignalExamples(store, index), [partial])
 
@@ -214,7 +281,7 @@ def test_no_splits_is_rejected(store: SignalStore, index) -> None:
 def test_folds_load_from_committed_files(store: SignalStore, index, tmp_path: Path) -> None:
     root = tmp_path / "splits"
     for split in _kfold3(store):
-        split.save(root / "k3" / f"fold{split.fold}.yaml")
+        split.save(root / "k3" / f"fold{split.folds[0].index}.yaml")
     folds = load_folds(SignalExamples(store, index), fold_paths(root, "k3"))
     assert len(folds) == 3
     assert sum(fold.test.size for fold in folds) == len(index)
@@ -225,7 +292,7 @@ def test_fold_paths_order_numerically_not_lexically(store: SignalStore, tmp_path
     nothing downstream can detect the permutation."""
     root = tmp_path / "splits"
     for split in _logo(store, name="k9"):
-        split.save(root / "k9" / f"fold{split.fold}.yaml")
+        split.save(root / "k9" / f"fold{split.folds[0].index}.yaml")
     (root / "k9" / "fold10.yaml").write_bytes((root / "k9" / "fold0.yaml").read_bytes())
     ordinals = [int(path.stem.removeprefix("fold")) for path in fold_paths(root, "k9")]
     assert ordinals == sorted(ordinals)

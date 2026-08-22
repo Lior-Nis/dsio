@@ -87,7 +87,7 @@ def workdir(tmp_path: Path) -> Path:
     under the subprocess's `cwd`, which is this directory).
     """
     from dsio.data.store import SignalStore
-    from dsio.splits.models import SplitFile
+    from dsio.splits.models import SplitFile, SplitFold
 
     (tmp_path / "presets_fixture.py").write_text(_FIXTURE_PRESET)
 
@@ -106,12 +106,16 @@ def workdir(tmp_path: Path) -> Path:
     SplitFile(
         store="tone",
         name="k1",
-        fold=0,
-        parts={
-            "test": ["p0", "p1"],
-            "val": ["p2"],
-            "train": ["p3", "p4", "p5"],
-        },
+        folds=[
+            SplitFold(
+                index=0,
+                parts={
+                    "test": ["p0", "p1"],
+                    "val": ["p2"],
+                    "train": ["p3", "p4", "p5"],
+                },
+            )
+        ],
     ).save(tmp_path / "splits" / "k1" / "fold0.yaml")
     return tmp_path
 

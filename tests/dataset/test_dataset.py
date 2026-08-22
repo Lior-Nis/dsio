@@ -25,7 +25,7 @@ from dsio.dataset.dataset import (  # noqa: E402
 from dsio.model.components import Jitter  # noqa: E402
 from dsio.model.masking import CausalMask, SpanMask  # noqa: E402
 from dsio.splits.folds import folds_from_splits  # noqa: E402
-from dsio.splits.models import SplitFile  # noqa: E402
+from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 
 
 @pytest.fixture
@@ -60,9 +60,13 @@ def _kfold3(store: SignalStore) -> list[SplitFile]:
             store=store.path.name,
             store_manifest_sha256=digest,
             name="k3",
-            fold=i,
-            counts={part: len(members) for part, members in parts.items()},
-            parts=parts,
+            folds=[
+                SplitFold(
+                    index=i,
+                    counts={part: len(members) for part, members in parts.items()},
+                    parts=parts,
+                )
+            ],
         )
         for i, parts in enumerate(folds)
     ]
