@@ -345,7 +345,6 @@ cpu = [
     { name = "lightning" },
     { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-4-dsio-cpu') or (python_full_version >= '3.15' and extra == 'extra-4-dsio-cpu' and extra == 'extra-4-dsio-gpu') or (sys_platform != 'darwin' and extra == 'extra-4-dsio-cpu' and extra == 'extra-4-dsio-gpu')" },
     { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.15' and extra == 'extra-4-dsio-cpu') or (python_full_version < '3.15' and extra == 'extra-4-dsio-cpu' and extra == 'extra-4-dsio-gpu') or (sys_platform != 'darwin' and extra == 'extra-4-dsio-cpu')" },
-    { name = "torchmetrics" },
 ]
 data = [
     { name = "pyarrow" },
@@ -353,7 +352,6 @@ data = [
 gpu = [
     { name = "lightning" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" } },
-    { name = "torchmetrics" },
 ]
 tabular = [
     { name = "scikit-learn" },
@@ -380,8 +378,6 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'tabular'", specifier = ">=1.9" },
     { name = "torch", marker = "extra == 'cpu'", specifier = ">=2.7", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "dsio", extra = "cpu" } },
     { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.7" },
-    { name = "torchmetrics", marker = "extra == 'cpu'", specifier = ">=1.6" },
-    { name = "torchmetrics", marker = "extra == 'gpu'", specifier = ">=1.6" },
     { name = "typer", specifier = ">=0.15" },
 ]
 provides-extras = ["tabular", "data", "cpu", "gpu"]

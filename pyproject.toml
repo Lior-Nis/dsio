@@ -31,8 +31,8 @@ data = ["pyarrow>=18"]
 # nor the dev group, leaves a torch-needing import unresolved: a bare `uv run` with
 # no extra selected must fail loudly on a missing import, not silently fall back to
 # downloading a multi-gigabyte default wheel.
-cpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
-gpu = ["torch>=2.7", "lightning>=2.5", "torchmetrics>=1.6"]
+cpu = ["torch>=2.7", "lightning>=2.5"]
+gpu = ["torch>=2.7", "lightning>=2.5"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
