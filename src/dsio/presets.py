@@ -22,6 +22,7 @@ def spine_baseline(
     store: str = _STARTER,
     labels: str = _STARTER,
     split: str = _STARTER,
+    fold: int = 0,
     lr: float = 3e-3,
     seed: int = 42,
 ) -> RunConfig:
@@ -33,7 +34,8 @@ def spine_baseline(
     nothing and mutate no registry, so staging happens only on the path that is
     actually about to execute. Overriding `store`, `labels` or `split` (not any
     argument — `lr` and `seed` are unrelated to the corpus) opts out of the synthetic
-    corpus, since that means the caller is bringing their own staged data.
+    corpus, since that means the caller is bringing their own staged data. `fold` defaults
+    to 0 because the starter split (`_stage_if_default`, below) only ever declares one.
     """
     # Imported here, not at module scope, so that enumerating presets does not pay for
     # importing a task. Bare `dsio run` lists presets and their parameters by
@@ -51,6 +53,7 @@ def spine_baseline(
             window=WindowSpec(length=64, stride=32, label_policy="majority"),
             labels=labels,
             split=split,
+            fold=fold,
             backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 8, "depth": 1}),
             head=Component(name="linear", params={"out_dim": 2}),
             loss=Component(name="cross_entropy", params={"threshold": 0.5}),

@@ -50,7 +50,7 @@ from dsio.model.registry import (
     PREPROCESSORS,
     TRANSFORMS,
 )
-from dsio.splits.folds import fold_paths, load_folds
+from dsio.splits.folds import fold_paths, load_folds, require_fold
 from dsio.train.runner import preflight, runner
 
 if TYPE_CHECKING:
@@ -128,6 +128,18 @@ class TorchTask(TaskConfig):
     labels: str = Field(description="Registered per-row label provider.")
     split: str = Field(description="Committed split family under splits_root.")
     splits_root: Path = SPLITS_ROOT
+    fold: int = Field(
+        description=(
+            "Which fold this run's provenance names. Required, unlike SslPretrainTask's "
+            "`fold: int = 0`: pretraining has no 'all folds' alternative reading, so 0 is "
+            "a real default there, but here `folds` (below) already lets a caller ask for "
+            "every fold, so a default here would silently pick fold 0 whenever a caller "
+            "meant that -- exactly the mistake fold-as-process (decision 6) exists to rule "
+            "out once `dsio run` trains a single fold per invocation (Task 3). Until then "
+            "this field is validated and stamped into the run record but does not yet "
+            "select which fold(s) `folds` below runs."
+        ),
+    )
     folds: tuple[int, ...] = Field(
         default=(),
         description="Which folds to run. Empty means all of them.",
@@ -214,9 +226,10 @@ def check_torch(config: RunConfig) -> None:
     for name in task.metrics:
         METRICS.get(name)
 
-    # The split files are provenance, so their absence is a real error rather than an
-    # invitation to generate something unrecorded on the fly.
-    fold_paths(task.splits_root, task.split)
+    # The split files are provenance, so their absence -- or a fold they do not declare
+    # -- is a real error rather than an invitation to generate something unrecorded on
+    # the fly. `require_fold` checks both, purely from the committed YAML.
+    require_fold(task.splits_root, task.split, task.fold)
 
 
 # --- assembly -----------------------------------------------------------------------
@@ -385,6 +398,11 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
 
     task = config.task
     assert isinstance(task, TorchTask)
+
+    # Fails before the store, module or trainer exist -- the same guarantee `check_torch`
+    # gives the CLI's pre-flight path, reasserted here for any caller (every test in this
+    # module, and any future caller) that reaches `execute()` without going through it.
+    require_fold(task.splits_root, task.split, task.fold)
 
     store = SignalStore(data_root() / task.store)
     row_labels = np.asarray(LABELS.get(task.labels)(store))

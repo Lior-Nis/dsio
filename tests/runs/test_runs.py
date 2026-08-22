@@ -37,6 +37,22 @@ def test_record_is_written_before_any_work(ledger: RunLedger, config: RunConfig)
     assert (run.dir / REPRODUCE_FILE).is_file()
 
 
+def test_fold_is_stamped_on_the_run_record(ledger: RunLedger, config: RunConfig) -> None:
+    """Under fold-as-process (decision 6), fold is part of what identifies a run, so it
+    is hoisted to a top-level record field the same way `seed` already is, rather than
+    left only inside the nested `config` dict."""
+    run = _start(ledger, config, fold=config.task.fold)  # type: ignore[attr-defined]
+    assert run.record.fold == config.task.fold  # type: ignore[union-attr,attr-defined]
+    assert ledger.load(run.run_id).record.fold == config.task.fold  # type: ignore[union-attr,attr-defined]
+
+
+def test_fold_is_none_when_the_task_kind_carries_none(ledger: RunLedger, config: RunConfig) -> None:
+    """A caller that never passes `fold` -- any task kind with no notion of one -- gets
+    `None`, not a stamped value it never claimed."""
+    run = _start(ledger, config)
+    assert run.record.fold is None  # type: ignore[union-attr]
+
+
 def test_identical_configs_get_distinct_run_ids(ledger: RunLedger, config: RunConfig) -> None:
     """Run ids carry a one-second timestamp, so a fast rerun must not collide."""
     ids = {_start(ledger, config).run_id for _ in range(3)}  # type: ignore[attr-defined]

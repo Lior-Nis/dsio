@@ -57,6 +57,7 @@ def project_preset(store: str = "tone", split: str = "k1", lr: float = 3e-3) -> 
             window=WindowSpec(length=64, stride=32, label_policy="majority"),
             labels="tone",
             split=split,
+            fold=0,
             backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 8, "depth": 1}),
             head=Component(name="linear", params={"out_dim": 2}),
             loss=Component(name="cross_entropy", params={"threshold": 0.5}),
@@ -214,6 +215,22 @@ def test_run_happy_path(workdir: Path, preset_env: dict[str, str]) -> None:
     # alongside roc_auc rather than being replaced by it — do not swap one for the other.
     assert run_payload["metrics"]["roc_auc"] > 0.9
     assert run_payload["metrics"]["accuracy"] == 1.0
+
+
+def test_the_run_record_stamps_which_fold_ran(
+    workdir: Path, preset_env: dict[str, str]
+) -> None:
+    """`dsio run` never sees `fold` by name -- `run_cmd.py` reaches for it off the
+    resolved task generically (`getattr(config.task, "fold", None)`) -- so this proves
+    the wiring end to end, not just that `RunLedger.start` can accept the field."""
+    from dsio.runs.record import RunLedger
+
+    runs_root = workdir / "runs"
+    env = {**preset_env, "DSIO_RUNS_ROOT": str(runs_root)}
+    code, payload = dsio("run", "project_preset", "--summary", cwd=workdir, env_extra=env)
+    assert code == 0, payload
+    record = RunLedger(runs_root).load(payload["run_id"]).record
+    assert record.fold == 0
 
 
 def test_summary_projection_omits_the_config(

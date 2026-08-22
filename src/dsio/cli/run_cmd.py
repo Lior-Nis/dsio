@@ -108,6 +108,9 @@ def run(
         seeds=seeds,
         tags=config.tags,
         command=tuple(sys.argv),
+        # Not every task kind carries a fold (`TaskConfig` itself does not), so this
+        # reaches for it defensively rather than assuming `config.task.fold` exists.
+        fold=getattr(config.task, "fold", None),
     ) as active:
         metrics = execute(config, active)
         active.finish(RunStatus.COMPLETED, metrics=metrics)

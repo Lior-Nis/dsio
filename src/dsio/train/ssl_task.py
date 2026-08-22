@@ -43,7 +43,7 @@ from dsio.eval.contract import Fold
 from dsio.model.masking import MASKS
 from dsio.model.module import DsioModule, export_encoder
 from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
-from dsio.splits.folds import fold_paths, load_folds
+from dsio.splits.folds import fold_paths, load_folds, require_fold
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
 from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional
@@ -133,7 +133,7 @@ def check_ssl(config: RunConfig) -> None:
         TRANSFORMS.get(task.transform.name)
     if task.labels is not None:
         LABELS.get(task.labels)
-    fold_paths(task.splits_root, task.split)
+    require_fold(task.splits_root, task.split, task.fold)
 
 
 def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[DsioModule, int]:
@@ -276,14 +276,21 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     task = config.task
     assert isinstance(task, SslPretrainTask)
 
+    # Fails before the store, module or trainer exist -- the same guarantee `check_ssl`
+    # gives the CLI's pre-flight path, reasserted here for any caller (every test in this
+    # module, and any future caller) that reaches `execute()` without going through it.
+    require_fold(task.splits_root, task.split, task.fold)
+
     store = SignalStore(data_root() / task.store)
     row_labels = None if task.labels is None else np.asarray(LABELS.get(task.labels)(store))
     index = load_or_build(store, task.window, labels=row_labels)
     examples = SignalExamples(store, index)
     folds = load_folds(examples, fold_paths(task.splits_root, task.split))
+    # `require_fold` above already guarantees `task.fold` is declared, so this lookup
+    # cannot fail on a live split file; kept as an assertion rather than silently trusting
+    # it, so a TOCTOU (the file changing between the two reads) still fails loudly.
     fold = next((f for f in folds if f.index == task.fold), None)
-    if fold is None:
-        raise ValueError(f"fold {task.fold} is not in split family {task.split!r}")
+    assert fold is not None, f"require_fold guaranteed fold {task.fold} exists in {task.split!r}"
 
     module, feature_dim = build_module(task, channels=store.channels, length=task.window.length)
     train_loader, val_loader = build_loaders(task, store, index, fold, config.seed)

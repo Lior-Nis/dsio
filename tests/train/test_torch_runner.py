@@ -93,6 +93,7 @@ def make_task(root: Path, **overrides) -> TorchTask:  # type: ignore[no-untyped-
         window=WindowSpec(length=128, stride=64, label_policy="majority"),
         labels="tone",
         split="k3",
+        fold=0,
         splits_root=root / "splits",
         backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 8, "depth": 1}),
         head=Component(name="linear", params={"out_dim": 2}),
@@ -122,6 +123,51 @@ def test_preflight_requires_the_split_files_to_exist(corpus: Path) -> None:
     config = RunConfig(name="nosplit", task=make_task(corpus, split="never_made"))
     with pytest.raises(Exception, match="commit a split file"):
         check(config)
+
+
+def test_preflight_rejects_a_fold_the_split_family_does_not_declare(corpus: Path) -> None:
+    """The message is `SplitFile.fold`'s, reused via `require_fold` rather than
+    hand-rolled a second time here -- the same message `SslPretrainTask` produces for
+    the same mistake (see `test_pretraining_on_a_missing_fold_fails_loudly`)."""
+    config = RunConfig(name="ghost-fold", task=make_task(corpus, fold=7))
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        check(config)
+
+
+def test_a_bad_fold_fails_the_same_way_even_without_preflight(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """Every caller that reaches `execute()` gets the same guard the CLI's pre-flight
+    gives it, not just the one that remembered to call `check()` first -- every test
+    below this one calls `execute()` directly, exactly like this."""
+    config = RunConfig(name="ghost-fold", task=make_task(corpus, fold=7))
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        execute(config, run)
+
+
+def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path, tmp_path: Path) -> None:
+    """Proves the guard runs before any data loading, not merely that it eventually
+    fires: a store that does not exist would raise `StoreError` first if the fold check
+    ran any later than the top of `run_torch`."""
+    config = RunConfig(
+        name="ghost-fold", task=make_task(corpus, fold=7, store="does-not-exist")
+    )
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        execute(config, run)
 
 
 def test_a_label_policy_of_none_is_rejected_at_config_time(corpus: Path) -> None:

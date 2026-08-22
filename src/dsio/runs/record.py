@@ -66,6 +66,12 @@ class RunRecord(DsioModel):
     command: tuple[str, ...] = ()
     data_snapshot_ids: tuple[str, ...] = ()
     split_manifest_sha: str | None = None
+    # Which fold this run trains, for task kinds that carry one (SslPretrainTask today,
+    # TorchTask as of Task 2 of plan 3a). Hoisted to a top-level field the same way `seed`
+    # is, rather than left only inside `config`: under fold-as-process (decision 6) the
+    # fold is part of what identifies a run, and Task 5's paired comparison matches runs
+    # on split digest plus this field. `None` for a task kind with no notion of a fold.
+    fold: int | None = None
 
     metrics: dict[str, float] = Field(default_factory=dict)
     error: str | None = None
@@ -214,6 +220,7 @@ class RunLedger:
         seeds: dict[str, int] | None = None,
         tags: tuple[str, ...] = (),
         command: tuple[str, ...] = (),
+        fold: int | None = None,
         repo_root: Path | None = None,
     ) -> Run:
         """Create a run directory and write its initial record.
@@ -235,6 +242,7 @@ class RunLedger:
             seed=seed,
             seeds=seeds or {},
             tags=tags,
+            fold=fold,
             git=git,
             env=env,
             command=command,

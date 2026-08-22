@@ -23,6 +23,7 @@ from dsio.splits.folds import (
     fold_paths,
     folds_from_splits,
     load_folds,
+    require_fold,
 )
 from dsio.splits.models import SplitError, SplitFile, SplitFold
 from dsio.splits.temporal import TemporalSpec, describe, walk_forward
@@ -302,6 +303,40 @@ def test_fold_paths_order_numerically_not_lexically(store: SignalStore, tmp_path
 def test_missing_split_files_say_how_to_make_them(tmp_path: Path) -> None:
     with pytest.raises(SplitError, match="commit a split file"):
         fold_paths(tmp_path, "nothing")
+
+
+def test_require_fold_finds_a_fold_declared_in_a_single_file_family(
+    store: SignalStore, tmp_path: Path
+) -> None:
+    """The common case going forward: one file holds the whole family."""
+    root = tmp_path / "splits"
+    _kfold3_as_one_file(store).save(root / "k3one" / "split.yaml")
+    found = require_fold(root, "k3one", 1)
+    assert found.index == 1
+
+
+def test_require_fold_pools_folds_across_a_legacy_multi_file_family(
+    store: SignalStore, tmp_path: Path
+) -> None:
+    """The still-supported one-file-per-fold layout: a fold declared in the *second* file
+    must be found too, not just the first file `fold_paths` returns."""
+    root = tmp_path / "splits"
+    for split in _kfold3(store):
+        split.save(root / "k3" / f"fold{split.folds[0].index}.yaml")
+    found = require_fold(root, "k3", 2)
+    assert found.index == 2
+
+
+def test_require_fold_names_every_fold_the_family_declares(
+    store: SignalStore, tmp_path: Path
+) -> None:
+    """The message is `SplitFile.fold`'s own, pooled across every file in the family --
+    not just the folds the first file happens to declare."""
+    root = tmp_path / "splits"
+    for split in _kfold3(store):
+        split.save(root / "k3" / f"fold{split.folds[0].index}.yaml")
+    with pytest.raises(SplitError, match=r"split 'k3' has no fold 9; it defines folds"):
+        require_fold(root, "k3", 9)
 
 
 # --- end to end through the loop ----------------------------------------------------

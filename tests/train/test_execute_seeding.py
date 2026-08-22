@@ -125,6 +125,7 @@ def test_execute_is_deterministic_for_the_same_config_and_seed(corpus: Path) -> 
             window=WindowSpec(length=64, stride=32, label_policy="majority"),
             labels="tone",
             split="k1",
+            fold=0,
             splits_root=corpus / "splits",
             backbone=Component(name="conv1d", params={"hidden": 4, "out_dim": 4, "depth": 1}),
             head=Component(name="linear", params={"out_dim": 2}),

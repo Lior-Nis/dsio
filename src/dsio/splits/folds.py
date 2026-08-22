@@ -18,7 +18,7 @@ import numpy as np
 
 from dsio.data.examples import Examples
 from dsio.eval.contract import Fold
-from dsio.splits.models import SplitError, SplitFile
+from dsio.splits.models import SplitError, SplitFile, SplitFold
 from dsio.splits.resolve import resolve_masks
 
 TRAIN_PART = "train"
@@ -108,6 +108,26 @@ def fold_paths(root: Path | str, name: str) -> list[Path]:
         return int(digits) if digits.isdigit() else -1
 
     return sorted(found, key=ordinal)
+
+
+def require_fold(root: Path | str, name: str, index: int) -> SplitFold:
+    """Fail before any data loads if ``index`` is not a fold split family ``name`` declares.
+
+    This is the check a task-level ``fold`` field needs at the point the split is
+    resolved: purely from the committed YAML, with no store, index or ``Examples`` built
+    yet. A family may live in one file holding every fold (the current layout) or the
+    still-supported legacy layout of one file per fold, so every file ``fold_paths``
+    finds is loaded and its folds pooled before the lookup, rather than checking only the
+    first file and missing folds declared in the others.
+
+    The lookup and its message are :meth:`~dsio.splits.models.SplitFile.fold`'s, not a
+    second copy of them: ``model_copy`` never re-runs validation, so pooling every file's
+    folds onto one file's identity this way is only ever used for this read, not to
+    smuggle an unvalidated family past ``SplitFile``'s own checks.
+    """
+    files = [SplitFile.load(Path(path)) for path in fold_paths(root, name)]
+    pooled = files[0].model_copy(update={"folds": [f for file in files for f in file.folds]})
+    return pooled.fold(index)
 
 
 def _assert_test_parts_are_disjoint(folds: Sequence[Fold]) -> None:

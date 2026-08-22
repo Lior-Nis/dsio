@@ -171,6 +171,15 @@ def test_preflight_resolves_probe_only_names(corpus: Path) -> None:
         check(config)
 
 
+def test_preflight_rejects_a_fold_the_split_family_does_not_declare(corpus: Path) -> None:
+    """The same guard `run_ssl_pretrain` has at the top of the runner, reached here from
+    the CLI's pre-flight step instead -- both call `require_fold`, so both name the same
+    missing fold with `SplitFile.fold`'s own message."""
+    config = RunConfig(name="p", task=pretrain_task(corpus, fold=7))
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        check(config)
+
+
 # --- pretraining --------------------------------------------------------------------
 
 
@@ -278,8 +287,22 @@ def test_the_online_probe_runs_during_pretraining(corpus: Path) -> None:
 
 
 def test_pretraining_on_a_missing_fold_fails_loudly(corpus: Path) -> None:
+    """The message is `SplitFile.fold`'s, reused via `require_fold` rather than
+    hand-rolled a second time here, so it names every fold the family actually has."""
     config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus, fold=7))
-    with pytest.raises(ValueError, match="fold 7 is not in split family"):
+    with pytest.raises(ValueError, match=r"split 'k3' has no fold 7; it defines folds"):
+        run(config, corpus)
+
+
+def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path) -> None:
+    """Proves the guard runs before any data loading, not merely that it eventually
+    fires: a store that does not exist would raise `StoreError` first if the fold check
+    ran any later than the top of `run_ssl_pretrain` -- which is where it used to run,
+    after the store, index and examples were already built."""
+    config = RunConfig(
+        name="pre", seed=0, task=pretrain_task(corpus, fold=7, store="does-not-exist")
+    )
+    with pytest.raises(ValueError, match=r"split 'k3' has no fold 7; it defines folds"):
         run(config, corpus)
 
 
@@ -292,6 +315,7 @@ def downstream_task(root: Path, encoder: EncoderRef | None) -> TorchTask:
         window=WINDOW,
         labels="tone",
         split="k3",
+        fold=0,
         splits_root=root / "splits",
         backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 16, "depth": 1}),
         head=Component(name="linear", params={"out_dim": 2}),
