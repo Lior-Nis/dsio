@@ -3,9 +3,9 @@
 Status: accepted (2026-08-20)
 Supersedes: the multi-modality scope of the 2026-08-15 design spec — its Phase 4 ("tabular,
 forecast, torch/Lightning") and the agentic modality of ADR 0013.
-Implemented: partially. Plan 1 deleted `agents/`, `matrix/`, `tracking/` and the neutrality
-abstractions listed below. `train/tabular.py`, the `forecast` extra and `ssl/` as a directory
-go in Plan 2.
+Implemented: yes. Plan 1 deleted `agents/`, `matrix/`, `tracking/` and the neutrality
+abstractions listed below. Plan 2 deleted `train/tabular.py`, the `forecast` extra, and
+dissolved `ssl/` as a directory.
 
 ## Context
 
@@ -37,11 +37,18 @@ Every abstraction that existed to be framework-neutral is deleted rather than ma
 
 | Deleted | Replaced by |
 |---|---|
-| `eval.loop.FitPredict` dispatch | `Trainer` |
+| modality dispatch inside `eval.loop.FitPredict` (choosing an sklearn, Nixtla or Lightning fit_predict by config) | nothing to dispatch any more — `cross_validate` (`eval/loop.py`) is unchanged and still called directly, always with a Lightning `fit_predict` closure (`train/torch_task.py`) |
 | `eval/metrics.py` implementations | evaluated, **rejected** — kept in numpy (see below) |
 | `tracking/` (`ExperimentTracker`, `MultiTracker`, `MlflowTracker`) | Lightning `Logger` / `MLFlowLogger` |
-| most of `runs/seeding.py` | `lightning.seed_everything(seed, workers=True)` |
 | `agents/` | out of scope |
+
+**`runs/seeding.py` was also evaluated for replacement by `lightning.seed_everything(seed,
+workers=True)` and rejected**, not partially replaced: all 86 lines are still live, and
+both entry points that seed a run (`dsio run` in `cli/run_cmd.py`, and `execute()` in
+`train/runner.py`) call dsio's own `seed_everything`, never Lightning's. Its
+`dataloader_kwargs`/`_seed_worker` pair is load-bearing — it is what makes a result
+independent of DataLoader worker count, a property `lightning.seed_everything` alone does
+not provide.
 
 **`eval/metrics.py` was tried and reverted.** Two independent reasons, either sufficient on
 its own:

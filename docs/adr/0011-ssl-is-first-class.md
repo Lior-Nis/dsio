@@ -1,6 +1,8 @@
 # 11. SSL is first-class: pretraining is not a fold loop, and the probe is not a subprocess
 
-Status: accepted (2026-08-18)
+Status: accepted (2026-08-18); amended by Task 6b (2026-08-21) — see "Superseded by Task
+6b" below, which replaces this ADR's `SslMethod`/`step()` design while keeping its
+first-class-SSL decision.
 Implements: the plan's Phase 5.
 
 ## Context
@@ -140,18 +142,20 @@ technical kind, not by paradigm — the general principle this ADR's own "one ob
 family" decision was a step toward, taken to its conclusion. `methods.py`'s `build_head`
 calls became registered heads (`mae_decoder`, `simclr_projector`, `vicreg_projector`) and
 its `step()` calls became two ordinary `(prediction, target)` losses (`nt_xent`, `vicreg`)
-in `dsio.nn.components`, next to every other registered component. `masking.py` moved to
-`dsio.nn.masking` unchanged. `probe.py` moved to `dsio.train.callbacks`, reframed as a
+in `dsio.model.components`, next to every other registered component. `masking.py` moved to
+`dsio.model.masking` unchanged. `probe.py` moved to `dsio.train.callbacks`, reframed as a
 general representation-quality tool rather than an SSL-specific one — nothing in it ever
-depended on `SslModule`, only on `encode`.
+depended on `SslModule`, only on `encode`. (Both paths above are Task 7's names: that later
+task renamed `dsio.nn` to `dsio.model` and split a `dsio.dataset` package out of it, which
+is also where `TwoViewCollate` below now lives.)
 
 **There is one `LightningModule`, not three.** `SslModule` and `ContrastiveModule` are both
-deleted; `dsio.nn.module.DsioModule` — the same class a supervised `TorchTask` builds — is
+deleted; `dsio.model.module.DsioModule` — the same class a supervised `TorchTask` builds — is
 what a pretraining run builds too, for MAE, SimCLR and VICReg alike, with no `step()`
 override anywhere. This was the open question this ADR left standing (`SslMethod.step`
 existed specifically because SimCLR and VICReg needed the raw batch to build their own two
 views): Task 6b moved that view-building to a collate function
-(`dsio.nn.data.TwoViewCollate`), stacking two augmented views into the batch dimension with
+(`dsio.dataset.dataset.TwoViewCollate`), stacking two augmented views into the batch dimension with
 the target carrying each row's pair index — the same pair-index computation `SimCLR.step`
 used to do inline, just relocated to where a batch first exists. SimCLR's negatives turn
 out to be exactly "the rest of the batch `prediction` already carries," and VICReg's
