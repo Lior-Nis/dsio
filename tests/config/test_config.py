@@ -161,3 +161,25 @@ def test_every_preset_composes_validates_and_preflights(
             STAGE_HOOKS.get(name)(config)
         check(config)
         assert preset_parameters(name) is not None
+
+
+def test_at_most_one_preset_has_a_stage_hook() -> None:
+    """Parked, not fixed: ``run_cmd.py``'s ``check_torch``/preflight step raises
+    ``UnknownComponentError`` for every registry a typo could hit, so on a hooked preset a
+    genuine ``backbone.name="nope"`` is reported as "just needs staging" (dry-run's
+    ``pending_stage`` hint) rather than as the typo it is — misleading, though a real run
+    still fails loudly on the same error, so nothing is silently wrong, only misdirected.
+
+    Exposure today is exactly one preset (``spine_baseline``), which is why this was
+    parked rather than fixed with the ~10-15 line change of having a stage hook declare
+    what it provides. The park's own trigger is "before a second preset gains a stage
+    hook, because exposure grows with hooks, not with time" — this assertion is that
+    trigger made mechanical, so crossing it fails a test instead of depending on someone
+    re-reading a ledger entry. If this test starts failing: land the declare-what-you-
+    provide fix (or an equivalent) before adding the second hook, don't just raise this
+    bound.
+    """
+    from dsio.config.presets import STAGE_HOOKS
+
+    load_preset_modules()
+    assert len(STAGE_HOOKS) <= 1
