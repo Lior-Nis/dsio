@@ -39,7 +39,7 @@ from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
 from dsio.dataset.dataset import WindowDataset, make_loader
-from dsio.eval.contract import EvalError, Fold, FoldPrediction
+from dsio.eval.contract import PREDICTIONS_FILE, EvalError, Fold, FoldPrediction
 from dsio.eval.metrics import METRICS, MetricError, compute
 from dsio.model.module import DsioModule
 from dsio.model.registry import (
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from dsio.runs.record import Run
 
 SPLITS_ROOT = Path("splits")
-PREDICTIONS_FILE = "predictions.npz"
 
 
 class Component(DsioModel):

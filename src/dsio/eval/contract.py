@@ -41,6 +41,12 @@ OOF_FILE = "oof.npz"
 FOLDS_FILE = "folds.json"
 METRICS_FILE = "metrics.json"
 
+# Decision 6 (fold-as-process): the artifact one run writes for its one fold. `dsio.train`
+# imports this name rather than defining its own copy, so a pooling reader (`dsio.eval.pool`)
+# and the writer (`dsio.train.torch_task._write_predictions`) can never drift apart on the
+# filename they agree on.
+PREDICTIONS_FILE = "predictions.npz"
+
 
 class EvalError(ValueError):
     """Raised when predictions contradict the fold structure that produced them."""
