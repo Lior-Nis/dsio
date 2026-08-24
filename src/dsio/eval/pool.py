@@ -21,6 +21,16 @@ Each file also carries the split family and store digest it came from, so runs f
 different families or different store snapshots are refused rather than silently mixed.
 That binding is checked at `SplitFile` load time too, but pooling happens in a different
 process than the one that validated it, so it is re-checked against what the runs recorded.
+
+**A fifth invariant, easy to miss because `cross_validate` never had to state it.** One
+closure and one `Examples` meant every fold's `y_true`/`y_pred`/`row_id` structurally came
+from one model configuration and one coordinate system -- guaranteed by construction, never
+checked, and so never catalogued among the four guards ADR 0017 named. Fold-as-process turns
+N single-fold processes loose to disagree on both: a `WindowSpec` digest, so `row_id` means
+the same row in every file, and a config identity (everything but `fold`), so every file
+came from the same backbone and hyperparameters. Both are recorded per fold in
+`predictions.npz` and checked here, alongside split family and store digest, before any
+metric is computed over the pooled rows.
 """
 
 from __future__ import annotations
@@ -65,7 +75,12 @@ def _read(path: Path) -> dict[str, np.ndarray]:
         return {key: data[key] for key in data.files}
 
 
-def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled:
+def pool_folds(
+    paths: Sequence[Path | str],
+    *,
+    metrics: Sequence[str],
+    expected_folds: Sequence[int] | None = None,
+) -> Pooled:
     """Pool one ``predictions.npz`` per fold and score the result.
 
     ``paths`` may be run-artifact directories or the files themselves. Order does not
@@ -78,6 +93,14 @@ def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled
     hazard too, one committed file per fold sorted by a number parsed from its filename;
     it is why that layout is gone rather than kept, and why this reader does not repeat
     the mistake by trusting a filename instead of the data.
+
+    ``expected_folds``, when given, refuses to pool unless every one of those fold indices
+    is present. This is opt-in because ``pool_folds`` never opens a split file itself -- it
+    only ever sees the paths it was handed -- so it has no way to know how many folds an
+    experiment *should* have unless a caller supplies that. A caller that has already
+    loaded the ``SplitFile`` can pass ``[f.index for f in split_file.folds]`` and turn a
+    shell loop that silently skipped a fold into a refusal instead of a pooled metric over
+    fewer folds than it claims.
     """
     if not paths:
         raise EvalError("pool_folds needs at least one fold's predictions")
@@ -85,8 +108,20 @@ def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled
     files = [_read(Path(p)) for p in paths]
     files.sort(key=lambda d: int(d["fold"]))
 
+    if expected_folds is not None:
+        present = {int(d["fold"]) for d in files}
+        missing = sorted(set(expected_folds) - present)
+        if missing:
+            raise EvalError(
+                f"pooled {len(present)} of {len(set(expected_folds))} folds the caller "
+                f"expected; fold(s) {missing} never ran. A pooled metric over incomplete "
+                "folds is silently biased toward whichever folds happened to run"
+            )
+
     split = str(files[0]["split"])
     digest = str(files[0]["split_digest"])
+    window_digest = str(files[0]["window_digest"])
+    config_identity = str(files[0]["config_identity"])
     for data in files[1:]:
         if str(data["split"]) != split or str(data["split_digest"]) != digest:
             raise EvalError(
@@ -94,6 +129,22 @@ def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled
                 f"{str(data['split'])!r} (store {str(data['split_digest'])[:12]}) with "
                 f"fold {int(files[0]['fold'])} of {split!r} (store {digest[:12]}). Pooling "
                 "across split families or store snapshots measures the data, not the model"
+            )
+        if str(data["window_digest"]) != window_digest:
+            raise EvalError(
+                f"refusing to pool fold {int(data['fold'])} (window "
+                f"{str(data['window_digest'])[:12]}) with fold {int(files[0]['fold'])} "
+                f"(window {window_digest[:12]}). Different WindowSpecs give row_id a "
+                "different meaning in each file -- the same row_id in two folds would not "
+                "even name the same window, let alone the same row"
+            )
+        if str(data["config_identity"]) != config_identity:
+            raise EvalError(
+                f"refusing to pool fold {int(data['fold'])} with fold "
+                f"{int(files[0]['fold'])}: their configs differ outside of `fold` "
+                "(backbone, hyperparameters, or a component). Folds of one experiment must "
+                "agree on everything except which fold they are -- these are predictions "
+                "from two different models that happen to share a split family"
             )
 
     scored = [int(d["fold"]) for d in files if "y_score" in d]
@@ -113,8 +164,10 @@ def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled
                 raise EvalError(
                     f"row {row} was predicted by fold {seen[row]} and again by fold "
                     f"{index}; folds must be disjoint or the pooled metric double-counts "
-                    "them. The split assigns each group to one test fold, so this is a "
-                    "runner reporting the wrong positions rather than a bad split"
+                    "them. The split assigns each group to one test fold, and every file "
+                    "here already agreed on the same window spec and config, so this is a "
+                    "runner reporting the wrong positions rather than a bad split or a "
+                    "mismatched WindowSpec"
                 )
             seen[row] = index
 

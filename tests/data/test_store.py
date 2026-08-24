@@ -23,6 +23,7 @@ from dsio.data.views import (
     WindowSpec,
     assert_index_matches_store,
     build_index,
+    index_path,
     load_or_build,
 )
 
@@ -207,6 +208,26 @@ def test_index_is_cached_by_spec(store: SignalStore, tmp_path: Path) -> None:
     first = load_or_build(store, spec, root=tmp_path)
     second = load_or_build(store, spec, root=tmp_path)
     assert np.array_equal(first.starts, second.starts)
+
+
+def test_index_cache_key_includes_the_labels_array(store: SignalStore, tmp_path: Path) -> None:
+    """Critical 2: `load_or_build` bakes `labels=` into the cached index, but the cache key
+    used to be the `WindowSpec` digest alone. Two calls against the same store and spec that
+    differ only in which label provider they passed must not collide on one cache file --
+    the second caller would otherwise silently score against the first caller's labels."""
+    spec = WindowSpec(length=500, stride=250, label_policy="majority")
+    labels_a = np.zeros(store.n_rows, dtype=np.float32)
+    labels_b = np.ones(store.n_rows, dtype=np.float32)
+
+    built_a = load_or_build(store, spec, labels=labels_a, root=tmp_path)
+    built_b = load_or_build(store, spec, labels=labels_b, root=tmp_path)
+
+    assert index_path(store, spec, tmp_path, labels=labels_a) != index_path(
+        store, spec, tmp_path, labels=labels_b
+    )
+    assert built_a.labels is not None and built_b.labels is not None
+    assert np.all(built_a.labels == 0)
+    assert np.all(built_b.labels == 1)
 
 
 def test_dense_stride_oversamples_only_marked_regions(store: SignalStore) -> None:

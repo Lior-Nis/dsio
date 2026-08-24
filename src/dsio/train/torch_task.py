@@ -34,7 +34,7 @@ from pydantic import Field, model_validator
 
 from dsio.artifacts.store import ModelRef, ModelRegistry
 from dsio.config.schema import TASKS, TaskConfig
-from dsio.contracts import DsioModel
+from dsio.contracts import DsioModel, sha256_of
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
@@ -58,6 +58,21 @@ if TYPE_CHECKING:
     from dsio.runs.record import Run
 
 SPLITS_ROOT = Path("splits")
+
+
+def _fold_invariant_config_hash(config: RunConfig) -> str:
+    """Content hash of ``config`` with the task's ``fold`` normalised out.
+
+    Folds of one experiment must agree on everything except which fold they are: same
+    backbone, same hyperparameters, same window spec, same everything but ``fold``. A
+    pooling reader (`dsio.eval.pool.pool_folds`) writes this per fold into
+    ``predictions.npz`` and refuses to pool files whose hashes differ -- the check
+    `cross_validate` never had to make, because it only ever held one closure and one
+    `Examples` in memory. Structural guarantee then, checked invariant now.
+    """
+    data = config.to_dict()
+    data["task"] = {**data["task"], "fold": None}
+    return sha256_of(data)
 
 
 class Component(DsioModel):
@@ -491,8 +506,9 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         )
 
     # Guard 4, also carried over from the deleted `cross_validate`: a fold that cannot be
-    # split problem before it is a metric problem, and the message says so rather than
-    # surfacing whatever bare exception the metric implementation happened to raise.
+    # scored is a split problem before it is a metric problem, and the message says so
+    # rather than surfacing whatever bare exception the metric implementation happened to
+    # raise.
     try:
         values = compute(task.metrics, result.y_true, result.y_pred, result.y_score)
     except MetricError as error:
@@ -508,6 +524,8 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         result=result,
         split=task.split,
         split_digest=store_digest,
+        window_digest=task.window.digest,
+        config_identity=_fold_invariant_config_hash(config),
     )
     (run.artifacts_dir / "windows.json").write_text(
         json.dumps(
@@ -535,6 +553,8 @@ def _write_predictions(
     result: FoldPrediction,
     split: str,
     split_digest: str,
+    window_digest: str,
+    config_identity: str,
 ) -> None:
     """Write this run's held-out predictions: the per-run artifact a pooling reader pools N of.
 
@@ -545,10 +565,22 @@ def _write_predictions(
     reader (`dsio.eval.pool.pool_folds`) refuse to combine runs from different families or
     different store snapshots, the same binding ``SplitFile.store_manifest_sha256``
     already checks at load time, carried forward here because pooling happens in a
-    different process than the one that validated it. ``y_score`` is omitted from the
-    file entirely when the fold produced none, rather than written as zeros, so a pooling
-    reader can tell "this fold scored nothing" from "this fold's scores happened to be
-    zero".
+    different process than the one that validated it.
+
+    ``window_digest`` and ``config_identity`` guard the invariant `cross_validate` used to
+    get for free: a single closure and a single `Examples` meant every fold's ``y_true`` /
+    ``y_pred`` / ``row_id`` structurally came from one model configuration and one
+    coordinate system. Fold-as-process broke that structural guarantee into N separate
+    processes, so it has to be checked instead -- ``window_digest`` (`task.window.digest`)
+    catches folds built from different `WindowSpec`s, where `row_id` does not mean the same
+    row from one file to the next; ``config_identity`` catches folds trained under a
+    different backbone, hyperparameter or component, even when the window spec happens to
+    match. Both are per-fold facts recorded here rather than derived at pooling time,
+    because pooling happens in a different process than the one that trained the fold.
+
+    ``y_score`` is omitted from the file entirely when the fold produced none, rather than
+    written as zeros, so a pooling reader can tell "this fold scored nothing" from "this
+    fold's scores happened to be zero".
     """
     directory.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, Any] = {
@@ -558,6 +590,8 @@ def _write_predictions(
         "y_pred": np.asarray(result.y_pred),
         "split": np.asarray(split),
         "split_digest": np.asarray(split_digest),
+        "window_digest": np.asarray(window_digest),
+        "config_identity": np.asarray(config_identity),
     }
     if result.y_score is not None:
         arrays["y_score"] = np.asarray(result.y_score)

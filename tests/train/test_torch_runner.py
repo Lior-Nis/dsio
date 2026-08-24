@@ -302,6 +302,44 @@ def test_the_runner_produces_the_same_artifact_contract(corpus: Path, tmp_path: 
         assert "y_score" in data.files
         store = SignalStore(Path(corpus) / "stores" / "tone")
         assert str(data["split_digest"]) == store.manifest().signal_sha256
+        # Critical 1: the fifth invariant `cross_validate` used to get for free from holding
+        # one closure and one `Examples` -- a pooling reader needs both recorded per fold.
+        assert str(data["window_digest"]) == config.task.window.digest  # type: ignore[attr-defined]
+        assert str(data["config_identity"])
+
+
+def test_pool_folds_refuses_folds_trained_under_different_backbones(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """Critical 1, end to end. The reviewer demonstrated the failure with real runs: three
+    folds trained with different `hidden`/`depth`/`lr` pooled without complaint into a
+    plausible-looking `{'accuracy': 0.375, 'roc_auc': 0.500}`. Two real single-fold runs
+    here, one per backbone width, must refuse to pool rather than repeat that."""
+    from dsio.eval.pool import pool_folds
+
+    run_dirs = []
+    for fold, hidden in ((0, 8), (1, 16)):
+        task = make_task(
+            corpus,
+            fold=fold,
+            backbone=Component(
+                name="conv1d", params={"hidden": hidden, "out_dim": 8, "depth": 1}
+            ),
+        )
+        config = RunConfig(name="mismatch", seed=0, task=task)
+        ledger = RunLedger(tmp_path / "runs")
+        run = ledger.start(
+            name=config.name,
+            config=config.to_dict(),
+            config_hash=config.config_hash,
+            seed=config.seed,
+        )
+        with run:
+            execute(config, run)
+        run_dirs.append(run.artifacts_dir)
+
+    with pytest.raises(Exception, match="config"):
+        pool_folds(run_dirs, metrics=("accuracy",))
 
 
 def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> None:

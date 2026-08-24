@@ -46,7 +46,7 @@ def test_an_empty_train_part_needs_saying_so_explicitly() -> None:
     fold = Fold(
         index=0, train=np.array([], dtype=int), test=np.array([1, 2]), evaluation_only=True
     )
-    assert fold.sizes["train"] == 0
+    assert fold.train.size == 0
 
 
 def test_a_fold_names_itself_when_unnamed() -> None:

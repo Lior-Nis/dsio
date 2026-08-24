@@ -7,7 +7,8 @@ fold and writes one file --
 
 ```
 artifacts/
-    predictions.npz    row_id, fold, y_true, y_pred, y_score, split, split_digest
+    predictions.npz    row_id, fold, y_true, y_pred, y_score, split, split_digest,
+                        window_digest, config_identity
 ```
 
 Cross-validation is running the entry point N times; nothing in this module accumulates
@@ -101,13 +102,6 @@ class Fold:
                 "evaluation of something already trained — a benchmark pass, a shipped "
                 "model, an agent — set evaluation_only=True to say so."
             )
-
-    @property
-    def sizes(self) -> dict[str, int]:
-        sizes = {"train": int(self.train.size), "test": int(self.test.size)}
-        if self.val is not None:
-            sizes["val"] = int(self.val.size)
-        return sizes
 
 
 @dataclass(frozen=True)
