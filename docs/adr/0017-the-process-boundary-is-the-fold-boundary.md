@@ -3,7 +3,14 @@
 Status: accepted (2026-08-20)
 Supersedes: ADR 0008 ("The fold loop owns comparison") in its mechanism, and ADR 0012 ("The
 ledger is the resume state") entirely.
-Implemented: no. This is Plan 3.
+Implemented: yes, by Plan 3a. `SplitFile` (`splits/models.py`) holds every fold of a family
+as an ordered list and validates cross-fold test disjointness in `_validate_folds` at
+`SplitFile.load` time. `TorchTask.fold` (`train/torch_task.py`) is a required field, no
+default. `run_torch` is a linear single-fold runner: build config, resolve the named fold,
+fit, predict, write `predictions.npz`, stamp provenance — no in-process loop, no callback.
+`eval/pool.py::pool_folds` reads N single-fold `predictions.npz` files back into one
+`Pooled` set. `verdict.compare` (`eval/verdict.py`) pairs two `Pooled` sets on split family,
+store digest and fold-index set, using `_correspondence`.
 
 ## Context
 
@@ -42,15 +49,45 @@ Three properties follow for free, none of which needed code:
 ## Consequences
 
 The guarantees ADR 0008 bought do not disappear; they move, and two of them get stronger.
+`cross_validate`'s docstring actually named **four** invariants, not the three the plan
+first catalogued when it set out to delete the function — the fourth (a fold that cannot be
+scored is a split problem) was easy to miss because it reads as a metrics concern rather
+than a fold-loop one:
+
+1. **Predictions that do not line up with the fold they came from.** Now checked in
+   `run_torch` itself (`train/torch_task.py`), immediately after `_assemble` reassembles
+   predicted batches into fold order — a per-run check at prediction-write time, exactly as
+   the plan called for.
+2. **A row predicted by two folds.** Now checked in `pool_folds` (`eval/pool.py`), at
+   pooling time, over the `row_id` each fold's file recorded.
+3. **Scores present for some folds and absent for others.** Also checked in `pool_folds`,
+   by comparing how many of the N files carry a `y_score` key.
+4. **A fold that cannot be scored.** Checked in `run_torch`, immediately after guard 1,
+   by catching the metrics layer's `MetricError` and re-raising it as a split problem.
+
+Guards 1 and 4 landed in the runner because they are properties of one fold's own
+predictions and can be checked the moment that fold finishes; guards 2 and 3 landed in
+`pool_folds` because they are properties that only exist once more than one fold's output
+is in hand. None of the four were dropped — the plan's warning that "a task that deletes
+code without rehoming its guard has not finished" is the reason to state where each one
+went rather than just that `cross_validate` is gone.
 
 **Cross-fold disjointness** moves from run time to load time. One split file holds all folds
-as an ordered list, so `SplitFile`'s validator checks it when the file is read — strictly
-earlier than a check inside a loop, and it no longer costs a walk over every test row before
-the first model is fitted.
+as an ordered list, so `SplitFile._validate_folds` checks it via
+`_assert_test_parts_disjoint_across_folds` (`splits/models.py`) when the file is read —
+strictly earlier than a check inside a loop, and it no longer costs a walk over every test
+row before the first model is fitted.
 
-**The paired noise floor** still fires. Each run records the split digest plus its fold index,
-and comparison checks correspondence across the two sets. This additionally catches a case the
-in-process loop could not see: comparing fold 2 of split A against fold 2 of split B.
+**The paired noise floor** still fires. Each run's `predictions.npz` records the split
+family, the store digest and its fold index; `verdict.compare`'s `_correspondence` helper
+checks all three match before pairing. This additionally catches a case the in-process loop
+could not see: two runs that both name fold 2 of a split family called `"fam"`, but were
+read back from different store snapshots, are refused on the digest mismatch even though
+the fold index and split name alone would look identical. That claim used to be asserted in
+this ADR's prose alone; it is now
+`test_comparing_fold_2_of_one_split_against_fold_2_of_another_is_refused`
+(`tests/eval/test_verdict.py`), and disabling the digest check in `_correspondence` fails
+it.
 
 **Pooled out-of-fold metrics** become a function over N prediction files instead of an
 accumulator. Pooling is still the better estimator than averaging per-fold scores, and it is

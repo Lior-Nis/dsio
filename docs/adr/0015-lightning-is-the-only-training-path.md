@@ -37,7 +37,7 @@ Every abstraction that existed to be framework-neutral is deleted rather than ma
 
 | Deleted | Replaced by |
 |---|---|
-| modality dispatch inside `eval.loop.FitPredict` (choosing an sklearn, Nixtla or Lightning fit_predict by config) | nothing to dispatch any more — `cross_validate` (`eval/loop.py`) is unchanged and still called directly, always with a Lightning `fit_predict` closure (`train/torch_task.py`) |
+| modality dispatch inside `eval.loop.FitPredict` (choosing an sklearn, Nixtla or Lightning fit_predict by config) | nothing to dispatch any more — at this decision, `cross_validate` (`eval/loop.py`) was still called directly, always with a Lightning `fit_predict` closure (`train/torch_task.py`); Plan 3a (ADR 0017) later removed `cross_validate` itself, once there was only ever one closure to call |
 | `eval/metrics.py` implementations | evaluated, **rejected** — kept in numpy (see below) |
 | `tracking/` (`ExperimentTracker`, `MultiTracker`, `MlflowTracker`) | Lightning `Logger` / `MLFlowLogger` |
 | `agents/` | out of scope |
@@ -67,10 +67,17 @@ its own:
    `roc_auc` came out ~1.8e-08 off scikit-learn's float64 result — four orders of
    magnitude past the pin.
 2. The rationale above ("a hand-rolled version gets wrong the first time it sees two
-   GPUs") does not apply to this call path. `METRICS`/`compute()` is reached only from
-   `eval/loop.py`, pooling an `OutOfFold` of plain `np.ndarray`, and from `ssl/probe.py`
-   — both single-process, numpy in and out, computed after training rather than during
-   it. Training-time metric logging is a separate path through Lightning's `self.log`
+   GPUs") does not apply to this call path. At this decision, `METRICS`/`compute()` was
+   reached only from `eval/loop.py`, pooling an `OutOfFold` of plain `np.ndarray`, and
+   from `ssl/probe.py` — both single-process, numpy in and out, computed after training
+   rather than during it. Plan 3a (ADR 0017) later removed `eval/loop.py` and
+   `OutOfFold`, and Task 6b of that plan moved `ssl/probe.py`'s callbacks into
+   `train/callbacks.py` when it dissolved the `ssl/` directory; `compute()` is reached
+   today from `eval/pool.py::pool_folds` (pooling a run's `predictions.npz` files),
+   from `train/torch_task.py`, and from `train/callbacks.py`. The property this
+   argument rests on is unchanged: every one of those call sites is still
+   single-process, numpy in and out, computed after training rather than during it.
+   Training-time metric logging is a separate path through Lightning's `self.log`
    (`nn/module.py`). These metrics never run as accumulated GPU tensors and never
    reduce across processes, so torchmetrics's distributed-reduction benefit is not
    available here to justify the precision cost above.

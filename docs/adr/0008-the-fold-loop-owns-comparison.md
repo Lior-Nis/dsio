@@ -2,10 +2,13 @@
 
 Status: accepted (2026-08-18)
 Implements: ADR 0004 items 8 and 11; the plan's Phase 3.
-Superseded in mechanism by ADR 0017 (accepted 2026-08-20, implemented in Plan 3): the
+Superseded in mechanism by ADR 0017 (accepted 2026-08-20, implemented in Plan 3a): the
 in-process fold loop is removed and one run trains one fold. The noise-floor rule this ADR
 introduced — an improvement is a win only if it exceeds the floor — survives unchanged, as
-does the paired floor. Only the loop goes.
+does the paired floor: `noise_floor` and `paired_noise_floor` (`eval/verdict.py`) are
+untouched by Plan 3a; only `compare`'s pairing mechanism changed, from a whole-report
+`fold_fingerprint` to matching two `Pooled` runs on split digest and fold index (Task 5 of
+Plan 3a). Only the loop goes.
 
 ## Context
 
