@@ -100,7 +100,8 @@ plan that makes that true.
 Clone the branch, install, run the full check, and demonstrate fold-as-process: a shell loop
 over 5 folds produces 5 runs, and rerunning fold 2 alone reproduces its metrics exactly
 (spec Verification 4). Report the code-only line count via `scripts/count_code.py` against
-the 4,640 baseline.
+the 4,672 baseline (the merged figure the spec records; an earlier draft of this plan said
+4,640, which was measured mid-fix-wave at 73e8da2 rather than at merged main).
 
 ## Global constraints
 
@@ -109,7 +110,7 @@ Python >=3.12; torch/lightning only in the `cpu`/`gpu` extras. Every uv command 
 **VERIFY:** `uv run --extra cpu pytest && uv run --extra cpu ruff check . && uv run --extra cpu mypy && uv run --extra cpu lint-imports`
 ruff line-length 100, rules `E,F,W,I,UP,B,BLE,SIM,RUF`; no bare `except`, a typed re-raise is
 fine. mypy `disallow_untyped_defs`. Baseline at plan start: **410 tests**, **3 contracts**,
-**4,640 code lines**.
+**4,672 code lines**.
 
 **This repository has produced nineteen checks that could not fail.** Every guard added or
 touched must be verified by breaking what it guards, observing the failure, restoring, and
