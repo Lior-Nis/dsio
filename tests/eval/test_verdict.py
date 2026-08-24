@@ -108,6 +108,29 @@ def test_paired_comparison_sees_what_the_unpaired_floor_buries() -> None:
     assert result.improvement == pytest.approx(0.01)
 
 
+def test_folds_pair_by_index_not_by_declaration_order() -> None:
+    """Fold 3's score must be differenced against fold 3's, whatever order the folds arrive
+    in.
+
+    `pool_folds` sorts by recorded fold index on the pooling side, and a test guards that.
+    Pairing is the mirror hazard and had no guard: `_fold_series` sorts too, but every other
+    test here builds fold ids ascending, so removing that `sorted()` flipped nothing red.
+
+    Here the two runs declare the same folds in opposite orders. Paired by index, every
+    difference is exactly +0.01 and the floor collapses to a win. Paired by position, the
+    series are reversed against each other and the differences become +0.21/-0.09/+0.09/
+    -0.19 -- noise around zero, which the floor correctly refuses to call anything. So the
+    outcome itself distinguishes the two implementations.
+    """
+    baseline = pooled([0.70, 0.90, 0.75, 0.95], folds=(0, 1, 2, 3))
+    candidate = pooled([0.96, 0.76, 0.91, 0.71], folds=(3, 2, 1, 0))
+
+    result = compare(candidate, baseline, metric="accuracy")
+    assert result.method == "paired"
+    assert result.improvement == pytest.approx(0.01)
+    assert result.outcome is Outcome.WIN
+
+
 def test_a_consistent_improvement_stays_neutral_when_folds_cannot_be_paired() -> None:
     """The same numbers, judged without the pairing guarantee, are correctly not a win."""
     baseline_scores = [0.70, 0.90, 0.75, 0.95]
@@ -164,10 +187,21 @@ def test_comparing_fold_2_of_one_split_against_fold_2_of_another_is_refused() ->
 
 
 def test_comparing_different_split_families_is_refused_first() -> None:
+    """Two runs can mismatch on family, store snapshot and fold set at once, and the message
+    must name the family.
+
+    The precedence is the point, not just the refusal. "Different store snapshot" sends a
+    reader to re-stage a corpus; "different folds" sends them to the split file. Both are
+    wasted trips when the families were never the same experiment to begin with, so the most
+    fundamental mismatch has to be the one reported. Every side below differs on all three
+    axes, so a check order that reported the snapshot or the folds first would fail here --
+    which the previous version of this test could not detect, because it left the digest and
+    the fold set at their defaults and only one branch could ever fire.
+    """
     with pytest.raises(EvalError, match="different split families"):
         compare(
-            pooled([0.9, 0.9], split="family-a"),
-            pooled([0.8, 0.8], split="family-b"),
+            pooled([0.9, 0.9], split="family-a", split_digest="digest-a", folds=(0, 1)),
+            pooled([0.8, 0.8], split="family-b", split_digest="digest-b", folds=(2, 3)),
             metric="accuracy",
         )
 
