@@ -1,6 +1,6 @@
 # 11. SSL is first-class: pretraining is not a fold loop, and the probe is not a subprocess
 
-Status: accepted (2026-08-18); amended by Task 6b (2026-08-21) — see "Superseded by Task
+Status: accepted (2026-08-18); amended by Plan 2b's Task 6b (2026-08-21) — see "Superseded by Plan 2b's Task
 6b" below, which replaces this ADR's `SslMethod`/`step()` design while keeping its
 first-class-SSL decision.
 Implements: the plan's Phase 5.
@@ -129,7 +129,7 @@ Embedding caching is also not wired to `dsio.data.staging` yet — `SslModule.pr
 returns embeddings and `encode` is the stable seam, so the pieces exist, but the cached
 artifact does not.
 
-## Superseded by Task 6b (2026-08-21)
+## Superseded by Plan 2b's Task 6b (2026-08-21)
 
 This ADR's decisions above are the historical record of what shipped and why; they are not
 rewritten here. What follows is what changed once the "one objective per family" decision
@@ -154,7 +154,7 @@ deleted; `dsio.model.module.DsioModule` — the same class a supervised `TorchTa
 what a pretraining run builds too, for MAE, SimCLR and VICReg alike, with no `step()`
 override anywhere. This was the open question this ADR left standing (`SslMethod.step`
 existed specifically because SimCLR and VICReg needed the raw batch to build their own two
-views): Task 6b moved that view-building to a collate function
+views): that task moved the view-building to a collate function
 (`dsio.dataset.dataset.TwoViewCollate`), stacking two augmented views into the batch dimension with
 the target carrying each row's pair index — the same pair-index computation `SimCLR.step`
 used to do inline, just relocated to where a batch first exists. SimCLR's negatives turn

@@ -70,9 +70,9 @@ its own:
    GPUs") does not apply to this call path. At this decision, `METRICS`/`compute()` was
    reached only from `eval/loop.py`, pooling an `OutOfFold` of plain `np.ndarray`, and
    from `ssl/probe.py` — both single-process, numpy in and out, computed after training
-   rather than during it. Plan 3a (ADR 0017) later removed `eval/loop.py` and
-   `OutOfFold`, and Task 6b of that plan moved `ssl/probe.py`'s callbacks into
-   `train/callbacks.py` when it dissolved the `ssl/` directory; `compute()` is reached
+   rather than during it. Plan 2b — the plan this decision belongs to — then dissolved the
+   `ssl/` directory, moving `ssl/probe.py`'s callbacks into `train/callbacks.py`, and Plan
+   3a (ADR 0017) removed `eval/loop.py` and `OutOfFold`; `compute()` is reached
    today from `eval/pool.py::pool_folds` (pooling a run's `predictions.npz` files),
    from `train/torch_task.py`, and from `train/callbacks.py`. The property this
    argument rests on is unchanged: every one of those call sites is still
