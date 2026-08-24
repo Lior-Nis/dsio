@@ -36,9 +36,12 @@ given for free.
 build data → build module → `Trainer.fit` → predict → write artifacts → stamp provenance.
 
 There is no `cross_validate`, no `CVReport`, no in-process fold loop. Cross-validation is
-running the entry point N times, from a shell loop or an agent. `RunConfig` gains two fields —
-`split` (which committed file) and `fold` (which index) — and that is the entire interface
-between the loop and the run.
+running the entry point N times, from a shell loop or an agent. The interface between the
+loop and the run is `TorchTask.fold` (`train/torch_task.py`) — `split` (which committed
+file) and `fold` (which index) live on the task config, not on `RunConfig` itself, and are
+reached from outside exactly like any other config field: `dsio run <preset>
+task.fold=2` through the CLI's existing `nested.path=value` overrides. No new interface
+was added; the existing override grammar already reached this field.
 
 Three properties follow for free, none of which needed code:
 
@@ -99,5 +102,10 @@ trade is affordable here and would not be for a model that trains in two seconds
 
 The subtler cost is that nothing now enforces that N folds were all run. A shell loop that
 silently skips fold 3 produces a pooled metric over four folds that looks entirely normal.
-The committed split file is the defence — it names how many folds exist, so a comparison can
-refuse when the evidence is incomplete.
+`pool_folds` (`eval/pool.py`) can refuse that — it takes an opt-in `expected_folds` and
+raises if any of those indices never showed up among the files it was handed — but nothing
+makes a caller pass it. `pool_folds` never opens a split file itself; it only ever sees the
+paths it is given, so knowing "this experiment should have had folds 0-3" has to come from
+somewhere else, supplied explicitly: a caller that has already loaded the `SplitFile` can
+pass `[f.index for f in split_file.folds]` and turn a shell loop's silently skipped fold
+into a refusal. Until a caller does that, the incomplete-N-folds case is still silent.

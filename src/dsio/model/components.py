@@ -440,7 +440,7 @@ class FixedStandardize(nn.Module):
 
 
 # --- view augmentors, for two-view contrastive collation (DsioModule itself has no ------
-# --- stochastic slot; see TwoViewCollate in nn/data.py) ---------------------------------
+# --- stochastic slot; see TwoViewCollate in dataset/dataset.py) -------------------------
 
 
 @augmentor("jitter")

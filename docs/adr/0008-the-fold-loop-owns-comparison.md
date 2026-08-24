@@ -49,7 +49,10 @@ own" cannot drift into "ours is subtly different". Average precision is summed s
 `auc(recall, precision)` interpolates between operating points the model cannot achieve and
 is optimistically biased.
 
-**The canonical out-of-fold artifact is `oof.npz`, not parquet.** numpy is a hard dependency;
+**The canonical out-of-fold artifact is `predictions.npz`, not parquet.** (Named `oof.npz`
+at this decision; ADR 0017's fold-as-process rename reflects that one run now writes one
+fold's predictions, not an accumulated out-of-fold set — see `eval/contract.py`.) numpy is
+a hard dependency;
 pyarrow is not. Predictions are kept rather than only metrics, because a metric is a lossy
 summary chosen before you knew what you would need to ask, and predictions answer questions
 you have not thought of yet — subgroup error analysis, calibration, threshold selection,

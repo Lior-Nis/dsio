@@ -52,8 +52,9 @@ def resolve_masks(
 ) -> dict[str, np.ndarray]:
     """Boolean mask per part, over the dataset's examples, for one fold of ``split``.
 
-    The mask form is what the fold loop consumes: a :class:`~dsio.eval.contract.Fold` wants
-    integer positions, and a subset has forgotten where its examples came from.
+    The mask form is what :func:`dsio.splits.folds.folds_from_splits` turns into a
+    :class:`~dsio.eval.contract.Fold`'s integer positions; a subset has forgotten where
+    its examples came from, so the mask is kept as the intermediate form.
     :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
     validation and there is no second code path to keep in step.
 

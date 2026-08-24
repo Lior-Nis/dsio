@@ -78,7 +78,7 @@ its own:
    argument rests on is unchanged: every one of those call sites is still
    single-process, numpy in and out, computed after training rather than during it.
    Training-time metric logging is a separate path through Lightning's `self.log`
-   (`nn/module.py`). These metrics never run as accumulated GPU tensors and never
+   (`model/module.py`). These metrics never run as accumulated GPU tensors and never
    reduce across processes, so torchmetrics's distributed-reduction benefit is not
    available here to justify the precision cost above.
 

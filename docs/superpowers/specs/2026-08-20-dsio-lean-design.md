@@ -183,7 +183,9 @@ Cross-validation is running the entry point N times — from a shell loop, or an
 gives three properties for free: resume (rerun the fold that died), parallelism (N folds
 across N GPUs is N invocations), and native MLflow grouping (one experiment, N runs).
 
-`RunConfig` gains `split` (which committed file) and `fold` (which index). That is the entire
+`split` (which committed file) and `fold` (which index) live on the task config
+(`TorchTask.split` / `TorchTask.fold`), reached from outside through the CLI's existing
+`nested.path=value` overrides: `dsio run <preset> task.fold=2`. That is the entire
 interface between the loop and the run.
 
 Preserved guarantees:

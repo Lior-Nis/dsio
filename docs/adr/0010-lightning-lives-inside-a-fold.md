@@ -82,10 +82,11 @@ in a config still fails loudly rather than vanishing into a `**kwargs` catch-all
 are registered as classes rather than through wrapper functions precisely so the signature
 is real.
 
-**Committed splits are required, not optional.** The runner resolves `fold_paths` in
+**Committed splits are required, not optional.** The runner resolves the named split in
 pre-flight and fails with "commit a split file there first" rather than generating
-something unrecorded on the fly. Splits are provenance (ADR 0006); a torch run that
-invents its own has no provenance to cite.
+something unrecorded on the fly — `require_fold` (`splits/folds.py`), called from
+`check_torch` (`train/torch_task.py`) today. Splits are provenance (ADR 0006); a torch run
+that invents its own has no provenance to cite.
 
 ## What building this surfaced
 
