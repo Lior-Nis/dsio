@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dsio.eval.contract import CVReport, EvalError, Fold, FoldMetrics, fold_fingerprint
+from dsio.eval.contract import EvalError, Fold, fold_fingerprint
+from dsio.eval.pool import Pooled
 from dsio.eval.verdict import (
     Outcome,
     compare,
@@ -18,31 +19,32 @@ from dsio.eval.verdict import (
 )
 
 
-def report(
+def pooled(
     scores: list[float],
     *,
-    pooled: float | None = None,
+    pooled_value: float | None = None,
     metric: str = "accuracy",
-    fingerprint: str | None = "abc123",
-) -> CVReport:
-    return CVReport(
-        n_folds=len(scores),
-        n_rows=1000,
-        predicted_rows=1000,
-        metrics={metric: pooled if pooled is not None else float(np.mean(scores))},
-        per_fold_mean={metric: float(np.mean(scores))},
-        per_fold_std={metric: float(np.std(scores, ddof=1))} if len(scores) > 1 else {},
-        folds=tuple(
-            FoldMetrics(
-                fold=i,
-                name=f"fold{i}",
-                sizes={"train": 800, "test": 200},
-                seconds=1.0,
-                metrics={metric: value},
-            )
-            for i, value in enumerate(scores)
-        ),
-        fold_fingerprint=fingerprint,
+    split: str = "fam",
+    split_digest: str = "digest-a",
+    folds: tuple[int, ...] | None = None,
+) -> Pooled:
+    """A :class:`Pooled` shaped the way :func:`dsio.eval.pool.pool_folds` would produce one,
+    with per-fold scores set directly rather than computed from raw predictions -- what
+    `compare` is judged on is the fold-metric series, not the arithmetic that produced it.
+    """
+    fold_ids = folds if folds is not None else tuple(range(len(scores)))
+    n = len(scores)
+    return Pooled(
+        row_id=np.arange(n, dtype=np.int64),
+        fold=np.asarray(fold_ids, dtype=np.int64),
+        y_true=np.zeros(n, dtype=np.int64),
+        y_pred=np.zeros(n, dtype=np.int64),
+        y_score=None,
+        metrics={metric: pooled_value if pooled_value is not None else float(np.mean(scores))},
+        fold_metrics={index: {metric: value} for index, value in zip(fold_ids, scores)},
+        folds=fold_ids,
+        split=split,
+        split_digest=split_digest,
     )
 
 
@@ -90,7 +92,8 @@ def test_paired_comparison_sees_what_the_unpaired_floor_buries() -> None:
     """The improvement dsio's committed folds buy.
 
     Both models are hurt by the same hard fold. Unpaired, that shared difficulty inflates
-    the floor above a real and perfectly consistent improvement; paired, it cancels.
+    the floor above a real and perfectly consistent improvement; paired, it cancels. This is
+    the whole reason pairing exists -- the property must keep holding.
     """
     baseline_scores = [0.70, 0.90, 0.75, 0.95]
     candidate_scores = [s + 0.01 for s in baseline_scores]
@@ -99,9 +102,7 @@ def test_paired_comparison_sees_what_the_unpaired_floor_buries() -> None:
     paired = paired_noise_floor(candidate_scores, baseline_scores)
     assert paired < 1e-9 < unpaired
 
-    result = compare(
-        report(candidate_scores), report(baseline_scores), metric="accuracy"
-    )
+    result = compare(pooled(candidate_scores), pooled(baseline_scores), metric="accuracy")
     assert result.method == "paired"
     assert result.outcome is Outcome.WIN
     assert result.improvement == pytest.approx(0.01)
@@ -112,8 +113,8 @@ def test_a_consistent_improvement_stays_neutral_when_folds_cannot_be_paired() ->
     baseline_scores = [0.70, 0.90, 0.75, 0.95]
     candidate_scores = [s + 0.01 for s in baseline_scores]
     result = compare(
-        report(candidate_scores, fingerprint="one"),
-        report(baseline_scores, fingerprint="two"),
+        pooled(candidate_scores, split_digest="digest-one"),
+        pooled(baseline_scores, split_digest="digest-two"),
         metric="accuracy",
         require_same_folds=False,
     )
@@ -131,7 +132,7 @@ def test_an_inconsistent_improvement_is_not_a_win_even_when_paired() -> None:
     folds and reverses in the other two is still noise."""
     baseline_scores = [0.80, 0.80, 0.80, 0.80]
     candidate_scores = [0.90, 0.70, 0.90, 0.70]
-    result = compare(report(candidate_scores), report(baseline_scores), metric="accuracy")
+    result = compare(pooled(candidate_scores), pooled(baseline_scores), metric="accuracy")
     assert result.method == "paired"
     assert result.outcome is Outcome.NEUTRAL
 
@@ -140,22 +141,41 @@ def test_an_inconsistent_improvement_is_not_a_win_even_when_paired() -> None:
 
 
 def test_comparing_different_fold_assignments_is_refused() -> None:
-    """The doctrine is easy to state and impossible to enforce without a fingerprint.
-
-    A refusal beats a confident, meaningless delta.
-    """
-    with pytest.raises(EvalError, match="single source of truth"):
+    """The doctrine is easy to state and impossible to enforce without a correspondence
+    check. A refusal beats a confident, meaningless delta."""
+    with pytest.raises(EvalError, match="different folds"):
         compare(
-            report([0.9, 0.9], fingerprint="one"),
-            report([0.8, 0.8], fingerprint="two"),
+            pooled([0.9, 0.9], folds=(0, 1)),
+            pooled([0.8, 0.8], folds=(2, 3)),
+            metric="accuracy",
+        )
+
+
+def test_comparing_fold_2_of_one_split_against_fold_2_of_another_is_refused() -> None:
+    """The gain decision 6 buys over the old whole-report fingerprint: fold-as-process
+    means a comparison can be attempted one fold at a time, and matching on split digest
+    plus fold index catches it even though both sides happen to name the same fold index."""
+    with pytest.raises(EvalError, match="store snapshots"):
+        compare(
+            pooled([0.9], folds=(2,), split="fam", split_digest="digest-a"),
+            pooled([0.8], folds=(2,), split="fam", split_digest="digest-b"),
+            metric="accuracy",
+        )
+
+
+def test_comparing_different_split_families_is_refused_first() -> None:
+    with pytest.raises(EvalError, match="different split families"):
+        compare(
+            pooled([0.9, 0.9], split="family-a"),
+            pooled([0.8, 0.8], split="family-b"),
             metric="accuracy",
         )
 
 
 def test_the_refusal_can_be_waived_deliberately() -> None:
     result = compare(
-        report([0.9, 0.9], fingerprint="one"),
-        report([0.8, 0.8], fingerprint="two"),
+        pooled([0.9, 0.9], folds=(0, 1)),
+        pooled([0.8, 0.8], folds=(2, 3)),
         metric="accuracy",
         require_same_folds=False,
     )
@@ -164,25 +184,26 @@ def test_the_refusal_can_be_waived_deliberately() -> None:
 
 
 def test_a_missing_metric_is_unknown_and_says_what_was_recorded() -> None:
-    result = compare(report([0.9, 0.9]), report([0.8, 0.8]), metric="roc_auc")
+    result = compare(pooled([0.9, 0.9]), pooled([0.8, 0.8]), metric="roc_auc")
     assert result.outcome is Outcome.UNKNOWN
     assert "accuracy" in (result.reason or "")
 
 
 def test_compare_all_requires_an_explicit_direction_per_metric() -> None:
     with pytest.raises(EvalError, match="no such metric"):
-        compare_all(report([0.9, 0.9]), report([0.8, 0.8]), directions={"rmse": False})
+        compare_all(pooled([0.9, 0.9]), pooled([0.8, 0.8]), directions={"rmse": False})
 
 
 def test_compare_all_returns_one_row_per_metric() -> None:
-    candidate = report([0.9, 0.92])
-    baseline = report([0.8, 0.82])
+    candidate = pooled([0.9, 0.92])
+    baseline = pooled([0.8, 0.82])
     rows = compare_all(candidate, baseline, directions={"accuracy": True})
     assert [row.metric for row in rows] == ["accuracy"]
     assert rows[0].outcome is Outcome.WIN
 
 
-# --- the fingerprint ------------------------------------------------------------------
+# --- the fingerprint (still used to hash an exact fold assignment; unrelated to `compare`,
+# which now matches on split digest and fold-index correspondence instead) -----------------
 
 
 def test_identical_fold_assignments_fingerprint_identically() -> None:
@@ -226,7 +247,7 @@ def test_minimum_detectable_rows_answers_the_question_worth_asking_first() -> No
 
 
 def test_a_comparison_reports_its_improvement_as_a_multiple_of_the_floor() -> None:
-    result = compare(report([0.90, 0.93, 0.88]), report([0.80, 0.84, 0.80]), metric="accuracy")
+    result = compare(pooled([0.90, 0.93, 0.88]), pooled([0.80, 0.84, 0.80]), metric="accuracy")
     assert result.noise_floor is not None and result.noise_floor > 0
     assert result.ratio is not None and result.ratio > 1.0
     assert "WIN" in result.summary_line()
@@ -241,7 +262,7 @@ def test_a_perfectly_consistent_difference_has_no_floor_left_to_clear() -> None:
     second, independent floor: consistency across folds says nothing about whether the
     evaluation set was large enough to resolve the difference at all.
     """
-    result = compare(report([0.90, 0.91]), report([0.80, 0.81]), metric="accuracy")
+    result = compare(pooled([0.90, 0.91]), pooled([0.80, 0.81]), metric="accuracy")
     assert result.noise_floor == 0.0
     assert result.outcome is Outcome.WIN
     assert result.ratio is None

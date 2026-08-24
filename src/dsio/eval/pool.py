@@ -37,7 +37,13 @@ from dsio.eval.metrics import MetricError, compute
 
 @dataclass(frozen=True)
 class Pooled:
-    """Out-of-fold predictions from every fold of one split family, and their metrics."""
+    """Out-of-fold predictions from every fold of one split family, and their metrics.
+
+    ``fold_metrics`` carries each fold's *own* metrics alongside the pooled headline number,
+    keyed by fold index. `dsio.eval.verdict.compare` reads it to pair two runs' per-fold
+    series -- the reason this reader, and not the pooled metric alone, is the unit two runs
+    are judged by.
+    """
 
     row_id: np.ndarray
     fold: np.ndarray
@@ -45,6 +51,7 @@ class Pooled:
     y_pred: np.ndarray
     y_score: np.ndarray | None
     metrics: dict[str, float]
+    fold_metrics: dict[int, dict[str, float]]
     folds: tuple[int, ...]
     split: str
     split_digest: str
@@ -113,6 +120,12 @@ def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled
 
     try:
         values = compute(list(metrics), y_true, y_pred, y_score)
+        fold_metrics = {
+            int(d["fold"]): compute(
+                list(metrics), d["y_true"], d["y_pred"], d["y_score"] if scored else None
+            )
+            for d in files
+        }
     except MetricError as error:
         raise EvalError(
             f"{error}. Pooled predictions that cannot be scored are a split problem "
@@ -128,6 +141,7 @@ def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled
         y_pred=y_pred,
         y_score=y_score,
         metrics=values,
+        fold_metrics=fold_metrics,
         folds=tuple(int(d["fold"]) for d in files),
         split=split,
         split_digest=digest,
