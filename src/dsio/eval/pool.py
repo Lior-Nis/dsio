@@ -69,11 +69,15 @@ def pool_folds(paths: Sequence[Path | str], *, metrics: Sequence[str]) -> Pooled
     """Pool one ``predictions.npz`` per fold and score the result.
 
     ``paths`` may be run-artifact directories or the files themselves. Order does not
-    matter: folds are sorted by their recorded index before concatenation, never by
-    filename or argument position. Sorting lexically would give 0, 1, 10, 2 and produce a
-    perfectly plausible pooled number with the folds silently permuted -- the same trap
-    `dsio.splits.folds.fold_paths` documents, and no downstream assertion can detect it
-    because every fold is individually valid.
+    matter: folds are sorted by the fold index each file recorded when it was written,
+    never by filename or argument position. A run directory's name is whatever the run
+    ledger or a shell loop happened to call it; sorting by that string lexically would
+    give ten runs back as 0, 1, 10, 2 and produce a perfectly plausible pooled number
+    with the folds silently permuted -- undetectable downstream because every individual
+    fold's predictions are still valid on their own. Splits used to carry this exact
+    hazard too, one committed file per fold sorted by a number parsed from its filename;
+    it is why that layout is gone rather than kept, and why this reader does not repeat
+    the mistake by trusting a filename instead of the data.
     """
     if not paths:
         raise EvalError("pool_folds needs at least one fold's predictions")

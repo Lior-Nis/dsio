@@ -73,19 +73,19 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         {"test": ["p3", "p4", "p5"], "train": ["p0", "p1", "p2", "p6", "p7", "p8"]},
         {"test": ["p6", "p7", "p8"], "train": ["p0", "p1", "p2", "p3", "p4", "p5"]},
     ]
-    for fold, parts in enumerate(folds):
-        SplitFile(
-            store=store.path.name,
-            store_manifest_sha256=digest,
-            name="k3",
-            folds=[
-                SplitFold(
-                    index=fold,
-                    counts={part: len(members) for part, members in parts.items()},
-                    parts=parts,
-                )
-            ],
-        ).save(tmp_path / "splits" / "k3" / f"fold{fold}.yaml")
+    SplitFile(
+        store=store.path.name,
+        store_manifest_sha256=digest,
+        name="k3",
+        folds=[
+            SplitFold(
+                index=fold,
+                counts={part: len(members) for part, members in parts.items()},
+                parts=parts,
+            )
+            for fold, parts in enumerate(folds)
+        ],
+    ).save(tmp_path / "splits" / "k3" / "split.yaml")
     return tmp_path
 
 
@@ -227,14 +227,14 @@ def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
     from dsio.data.adapters import SignalExamples
     from dsio.data.store import data_root
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import fold_paths, load_folds
+    from dsio.splits.folds import load_folds, split_path
     from dsio.train.ssl_task import build_loaders, build_module
 
     task = pretrain_task(corpus, method)
     store = SignalStore(data_root() / task.store)
     index = load_or_build(store, task.window)
     examples = SignalExamples(store, index)
-    folds = load_folds(examples, fold_paths(task.splits_root, task.split))
+    folds = load_folds(examples, split_path(task.splits_root, task.split))
     fold = next(f for f in folds if f.index == task.fold)
 
     module, _ = build_module(task, channels=store.channels, length=task.window.length)

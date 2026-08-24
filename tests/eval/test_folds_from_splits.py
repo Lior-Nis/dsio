@@ -19,10 +19,10 @@ from dsio.data.views import WindowSpec, build_index
 from dsio.eval.contract import Fold
 from dsio.splits.folds import (
     _assert_test_parts_are_disjoint,
-    fold_paths,
     folds_from_splits,
     load_folds,
     require_fold,
+    split_path,
 )
 from dsio.splits.models import SplitError, SplitFile, SplitFold
 from dsio.splits.temporal import TemporalSpec, describe, walk_forward
@@ -278,62 +278,35 @@ def test_no_splits_is_rejected(store: SignalStore, index) -> None:
 # --- from disk ----------------------------------------------------------------------
 
 
-def test_folds_load_from_committed_files(store: SignalStore, index, tmp_path: Path) -> None:
+def test_folds_load_from_a_committed_file(store: SignalStore, index, tmp_path: Path) -> None:
     root = tmp_path / "splits"
-    for split in _kfold3(store):
-        split.save(root / "k3" / f"fold{split.folds[0].index}.yaml")
-    folds = load_folds(SignalExamples(store, index), fold_paths(root, "k3"))
+    _kfold3_as_one_file(store).model_copy(update={"name": "k3"}).save(root / "k3" / "split.yaml")
+    folds = load_folds(SignalExamples(store, index), split_path(root, "k3"))
     assert len(folds) == 3
     assert sum(fold.test.size for fold in folds) == len(index)
 
 
-def test_fold_paths_order_numerically_not_lexically(store: SignalStore, tmp_path: Path) -> None:
-    """Ten folds must not come back as 0, 1, 10, 2 — every fold is individually valid, so
-    nothing downstream can detect the permutation."""
-    root = tmp_path / "splits"
-    for split in _logo(store, name="k9"):
-        split.save(root / "k9" / f"fold{split.folds[0].index}.yaml")
-    (root / "k9" / "fold10.yaml").write_bytes((root / "k9" / "fold0.yaml").read_bytes())
-    ordinals = [int(path.stem.removeprefix("fold")) for path in fold_paths(root, "k9")]
-    assert ordinals == sorted(ordinals)
-    assert ordinals[-1] == 10
-
-
 def test_missing_split_files_say_how_to_make_them(tmp_path: Path) -> None:
     with pytest.raises(SplitError, match="commit a split file"):
-        fold_paths(tmp_path, "nothing")
+        split_path(tmp_path, "nothing")
 
 
 def test_require_fold_finds_a_fold_declared_in_a_single_file_family(
     store: SignalStore, tmp_path: Path
 ) -> None:
-    """The common case going forward: one file holds the whole family."""
+    """The only layout dsio reads: one file holds the whole family."""
     root = tmp_path / "splits"
     _kfold3_as_one_file(store).save(root / "k3one" / "split.yaml")
     found = require_fold(root, "k3one", 1)
     assert found.index == 1
 
 
-def test_require_fold_pools_folds_across_a_legacy_multi_file_family(
-    store: SignalStore, tmp_path: Path
-) -> None:
-    """The still-supported one-file-per-fold layout: a fold declared in the *second* file
-    must be found too, not just the first file `fold_paths` returns."""
-    root = tmp_path / "splits"
-    for split in _kfold3(store):
-        split.save(root / "k3" / f"fold{split.folds[0].index}.yaml")
-    found = require_fold(root, "k3", 2)
-    assert found.index == 2
-
-
 def test_require_fold_names_every_fold_the_family_declares(
     store: SignalStore, tmp_path: Path
 ) -> None:
-    """The message is `SplitFile.fold`'s own, pooled across every file in the family --
-    not just the folds the first file happens to declare."""
+    """The message is `SplitFile.fold`'s own, naming every fold the family declares."""
     root = tmp_path / "splits"
-    for split in _kfold3(store):
-        split.save(root / "k3" / f"fold{split.folds[0].index}.yaml")
+    _kfold3_as_one_file(store).model_copy(update={"name": "k3"}).save(root / "k3" / "split.yaml")
     with pytest.raises(SplitError, match=r"split 'k3' has no fold 9; it defines folds"):
         require_fold(root, "k3", 9)
 

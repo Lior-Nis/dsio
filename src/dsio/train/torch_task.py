@@ -50,7 +50,7 @@ from dsio.model.registry import (
     PREPROCESSORS,
     TRANSFORMS,
 )
-from dsio.splits.folds import fold_paths, load_folds, require_fold
+from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.runner import preflight, runner
 
 if TYPE_CHECKING:
@@ -413,7 +413,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
 
     index = load_or_build(store, task.window, labels=row_labels)
     examples = SignalExamples(store, index)
-    folds = load_folds(examples, fold_paths(task.splits_root, task.split))
+    folds = load_folds(examples, split_path(task.splits_root, task.split))
     # `require_fold` above already guarantees `task.fold` is declared, so this lookup
     # cannot fail on a live split file; kept as an assertion rather than silently trusting
     # it, so a TOCTOU (the file changing between the two reads) still fails loudly. Same

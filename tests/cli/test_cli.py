@@ -117,7 +117,7 @@ def workdir(tmp_path: Path) -> Path:
                 },
             )
         ],
-    ).save(tmp_path / "splits" / "k1" / "fold0.yaml")
+    ).save(tmp_path / "splits" / "k1" / "split.yaml")
     return tmp_path
 
 
@@ -175,7 +175,7 @@ def test_running_for_real_stages_the_starter_corpus_and_completes(tmp_path: Path
     assert code == 0, payload
     assert payload["status"] == "completed"
     assert payload["metrics"]["accuracy"] == 1.0
-    assert (tmp_path / "splits" / "spine_starter" / "fold0.yaml").is_file()
+    assert (tmp_path / "splits" / "spine_starter" / "split.yaml").is_file()
 
 
 def test_failure_envelope_carries_a_code(workdir: Path) -> None:

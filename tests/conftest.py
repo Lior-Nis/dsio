@@ -89,7 +89,7 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
                 parts=parts,
             )
         ],
-    ).save(tmp_path / "splits" / "k1" / "fold0.yaml")
+    ).save(tmp_path / "splits" / "k1" / "split.yaml")
 
     task = TorchTask(
         store="tone",

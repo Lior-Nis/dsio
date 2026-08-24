@@ -78,7 +78,7 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 parts=parts,
             )
         ],
-    ).save(tmp_path / "splits" / "k1" / "fold0.yaml")
+    ).save(tmp_path / "splits" / "k1" / "split.yaml")
     return tmp_path
 
 

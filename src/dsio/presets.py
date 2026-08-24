@@ -121,8 +121,8 @@ def _stage_starter_corpus() -> None:
                     f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
                 )
 
-    split_path = SPLITS_ROOT / _STARTER / "fold0.yaml"
-    if not split_path.exists():
+    split_file_path = SPLITS_ROOT / _STARTER / "split.yaml"
+    if not split_file_path.exists():
         SplitFile(
             store=_STARTER,
             name=_STARTER,
@@ -132,4 +132,4 @@ def _stage_starter_corpus() -> None:
                     parts={"test": ["p0", "p1"], "val": ["p2"], "train": ["p3", "p4", "p5"]},
                 )
             ],
-        ).save(split_path)
+        ).save(split_file_path)

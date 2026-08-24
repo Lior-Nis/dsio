@@ -70,19 +70,19 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         {"test": ["p3", "p4", "p5"], "val": ["p6"], "train": ["p0", "p1", "p2", "p7"]},
         {"test": ["p6", "p7"], "val": ["p0"], "train": ["p1", "p2", "p3", "p4", "p5"]},
     ]
-    for fold, parts in enumerate(folds):
-        SplitFile(
-            store=store.path.name,
-            store_manifest_sha256=digest,
-            name="k3",
-            folds=[
-                SplitFold(
-                    index=fold,
-                    counts={part: len(members) for part, members in parts.items()},
-                    parts=parts,
-                )
-            ],
-        ).save(tmp_path / "splits" / "k3" / f"fold{fold}.yaml")
+    SplitFile(
+        store=store.path.name,
+        store_manifest_sha256=digest,
+        name="k3",
+        folds=[
+            SplitFold(
+                index=fold,
+                counts={part: len(members) for part, members in parts.items()},
+                parts=parts,
+            )
+            for fold, parts in enumerate(folds)
+        ],
+    ).save(tmp_path / "splits" / "k3" / "split.yaml")
     return tmp_path
 
 
@@ -336,13 +336,13 @@ def test_no_group_is_both_trained_on_and_tested(corpus: Path, tmp_path: Path) ->
     """The leakage guarantee, verified at the level the runner actually consumes."""
     from dsio.data.adapters import SignalExamples
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import fold_paths, load_folds
+    from dsio.splits.folds import load_folds, split_path
 
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)
     row_labels = LABELS.get("tone")(store)
     index = load_or_build(store, task.window, labels=row_labels)
-    folds = load_folds(SignalExamples(store, index), fold_paths(task.splits_root, task.split))
+    folds = load_folds(SignalExamples(store, index), split_path(task.splits_root, task.split))
 
     groups = index.groups
     for fold in folds:
@@ -357,7 +357,7 @@ def test_running_one_fold_writes_only_that_folds_predictions(
     without one run's predictions silently covering another's positions."""
     from dsio.data.adapters import SignalExamples
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import fold_paths, load_folds
+    from dsio.splits.folds import load_folds, split_path
 
     config = RunConfig(name="subset", seed=0, task=make_task(corpus, fold=1))
     ledger = RunLedger(tmp_path / "runs")
@@ -373,7 +373,7 @@ def test_running_one_fold_writes_only_that_folds_predictions(
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)
     index = load_or_build(store, task.window, labels=LABELS.get("tone")(store))
-    folds = load_folds(SignalExamples(store, index), fold_paths(task.splits_root, task.split))
+    folds = load_folds(SignalExamples(store, index), split_path(task.splits_root, task.split))
     fold1 = next(f for f in folds if f.index == 1)
 
     with np.load(run.artifacts_dir / "predictions.npz", allow_pickle=False) as data:
