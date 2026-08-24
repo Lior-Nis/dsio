@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dsio.eval.contract import EvalError, Fold, fold_fingerprint
+from dsio.eval.contract import EvalError
 from dsio.eval.pool import Pooled
 from dsio.eval.verdict import (
     Outcome,
@@ -202,26 +202,11 @@ def test_compare_all_returns_one_row_per_metric() -> None:
     assert rows[0].outcome is Outcome.WIN
 
 
-# --- the fingerprint (still used to hash an exact fold assignment; unrelated to `compare`,
-# which now matches on split digest and fold-index correspondence instead) -----------------
-
-
-def test_identical_fold_assignments_fingerprint_identically() -> None:
-    left = [Fold(index=0, train=np.arange(10, 20), test=np.arange(0, 10))]
-    right = [Fold(index=0, train=np.arange(10, 30), test=np.arange(0, 10))]
-    assert fold_fingerprint(left) == fold_fingerprint(right), "only held-out rows matter"
-
-
-def test_a_different_held_out_set_fingerprints_differently() -> None:
-    left = [Fold(index=0, train=np.arange(10, 20), test=np.arange(0, 10))]
-    right = [Fold(index=0, train=np.arange(11, 20), test=np.arange(1, 11))]
-    assert fold_fingerprint(left) != fold_fingerprint(right)
-
-
-def test_fingerprint_ignores_the_order_folds_were_listed_in() -> None:
-    a = Fold(index=0, train=np.arange(10, 20), test=np.arange(0, 10))
-    b = Fold(index=1, train=np.arange(0, 10), test=np.arange(10, 20))
-    assert fold_fingerprint([a, b]) == fold_fingerprint([b, a])
+# The fingerprint that used to live here (`fold_fingerprint`, `eval/contract.py`) hashed an
+# exact fold assignment for `CVReport` to carry. Task 5 replaced its job in `compare` with
+# the split-digest-plus-fold-index correspondence checked below (see "the refusal"); once
+# `cross_validate`/`CVReport` were gone nothing called `fold_fingerprint` any more, so it
+# and these three tests of it were deleted rather than kept as an unused alternative.
 
 
 # --- the second, independent floor ----------------------------------------------------

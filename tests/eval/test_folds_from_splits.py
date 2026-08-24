@@ -16,8 +16,7 @@ import pytest
 from dsio.data.adapters import SignalExamples, entity_examples
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowSpec, build_index
-from dsio.eval.contract import Fold, FoldPrediction
-from dsio.eval.loop import cross_validate
+from dsio.eval.contract import Fold
 from dsio.splits.folds import (
     _assert_test_parts_are_disjoint,
     fold_paths,
@@ -339,43 +338,28 @@ def test_require_fold_names_every_fold_the_family_declares(
         require_fold(root, "k3", 9)
 
 
-# --- end to end through the loop ----------------------------------------------------
+# --- partial coverage from a purged split ---------------------------------------------
+#
+# There used to be a companion test here, `test_split_files_drive_the_loop_end_to_end`,
+# that ran `_kfold3`'s folds through the deleted `cross_validate` loop and re-checked full
+# coverage on the resulting `OutOfFold`. That was always a restatement of what
+# `test_folds_cover_the_index_without_copying_it` and
+# `test_every_window_is_tested_exactly_once_across_folds` above already prove directly on
+# the folds themselves, so it is gone rather than rehomed.
 
 
-def test_split_files_drive_the_loop_end_to_end(store: SignalStore, index) -> None:
-    """A group-level label, cross-validated over the store without materialising a fold."""
-    folds = folds_from_splits(SignalExamples(store, index), _kfold3(store))
-    labels = (np.array([int(g[1:]) for g in index.groups]) % 2).astype(int)
-
-    def fit_predict(fold: Fold) -> FoldPrediction:
-        # A group-mean baseline; the point is the plumbing, not the model.
-        prior = float(labels[fold.train].mean())
-        held = labels[fold.test]
-        score = np.full(held.size, prior)
-        return FoldPrediction(y_true=held, y_pred=(score > 0.5).astype(int), y_score=score)
-
-    report, oof = cross_validate(folds, fit_predict, metrics=["accuracy"], n_rows=len(index))
-    assert report.coverage == 1.0
-    assert len(oof) == len(index)
-    assert sorted(oof.row_id.tolist()) == list(range(len(index)))
-
-
-def test_a_purged_walk_forward_reports_partial_coverage(store: SignalStore, index) -> None:
-    """The discarded band is the point of purging, so coverage below 1.0 is correct here —
-    and must be recorded rather than silently rounded away."""
+def test_a_purged_walk_forward_produces_partial_coverage(store: SignalStore, index) -> None:
+    """The discarded band is the point of purging: `require_total=False` is what lets a
+    split say so instead of being rejected as incomplete, and the folds it returns must
+    cover less than the full index without being empty."""
     splits = _temporal_folds(
         SignalExamples(store, index),
         TemporalSpec(n_splits=2, test_fraction=0.4, label_horizon=100, embargo=100),
         name="wf",
     )
     folds = folds_from_splits(SignalExamples(store, index), splits, require_total=False)
-
-    def fit_predict(fold: Fold) -> FoldPrediction:
-        held = np.zeros(fold.test.size, dtype=int)
-        return FoldPrediction(y_true=held, y_pred=held)
-
-    report, _ = cross_validate(folds, fit_predict, metrics=["accuracy"], n_rows=len(index))
-    assert 0.0 < report.coverage < 1.0
+    covered = sum(fold.test.size for fold in folds)
+    assert 0 < covered < len(index)
 
 
 def _mask(size: int, positions: np.ndarray) -> np.ndarray:

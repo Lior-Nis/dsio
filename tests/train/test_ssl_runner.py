@@ -24,7 +24,7 @@ from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
-from dsio.eval.contract import read_report  # noqa: E402
+from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import RunLedger  # noqa: E402
 from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
@@ -256,13 +256,17 @@ def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
     assert losses == [losses[0]] * 5, f"{method}: val/loss moved across repeated passes: {losses}"
 
 
-def test_pretraining_writes_no_evaluation_report(corpus: Path) -> None:
-    """Pretraining is deliberately not a fold loop. A cross-validated masked-reconstruction
-    MSE is a number nobody should act on, so it is not produced."""
+def test_pretraining_writes_no_held_out_predictions(corpus: Path) -> None:
+    """Pretraining deliberately produces no scored artifact. A masked-reconstruction MSE on
+    held-out windows is a number nobody should act on, so it is not written.
+
+    Before decision 6 this asserted that `read_report` found no evaluation report. That
+    function is gone with the fold loop, but the property is unchanged: what pretraining
+    must not leave behind is now `predictions.npz`, the file `pool_folds` would pick up.
+    """
     config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
     active, _ = run(config, corpus)
-    with pytest.raises(ValueError, match="no evaluation report"):
-        read_report(active.artifacts_dir)
+    assert not (active.artifacts_dir / PREDICTIONS_FILE).exists()
 
 
 def test_the_encoder_records_its_lineage(corpus: Path) -> None:

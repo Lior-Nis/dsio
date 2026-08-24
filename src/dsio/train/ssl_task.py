@@ -1,9 +1,10 @@
 """The pretraining runner: one fit, one encoder, one pinned reference.
 
-Pretraining is deliberately **not** a fold loop. There is no held-out score to pool, because
-the pretext loss is not the thing being estimated — the encoder is the output, and its
-quality is measured downstream. Forcing it through ``cross_validate`` would produce a
-cross-validated masked-reconstruction MSE, which is a number nobody should act on.
+Pretraining deliberately produces no held-out score to pool, because the pretext loss is not
+the thing being estimated — the encoder is the output, and its quality is measured
+downstream. Scoring it across folds would produce a cross-validated masked-reconstruction
+MSE, which is a number nobody should act on, so this runner writes no ``predictions.npz``
+for :func:`dsio.eval.pool.pool_folds` to find.
 
 What it produces instead is an artifact with a pinned reference. The encoder goes into the
 model registry, whose ``ModelRef`` has no way to express "latest", and a downstream run

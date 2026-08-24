@@ -122,3 +122,19 @@ def test_a_fold_that_never_ran_is_named(tmp_path: Path) -> None:
 def test_pooling_nothing_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(EvalError, match="at least one fold"):
         pool_folds([], metrics=("accuracy",))
+
+
+def test_scores_survive_pooling_exactly_not_approximately(tmp_path: Path) -> None:
+    """A threshold sweep on rounded scores finds the wrong one.
+
+    Moved here from the deleted `test_loop.py`, which proved the same property of
+    `OutOfFold.save`/`.load` directly. Under fold-as-process the npz round trip happens in
+    two places instead of one -- the writer in `torch_task._write_predictions` and the
+    reader here in `pool_folds` -- so this is where it is re-proven now that both exist.
+    """
+    rng = np.random.default_rng(0)
+    scores = rng.random(50)
+    a = write_fold(tmp_path / "a", 0, list(range(50)), y_score=scores.tolist())
+    pooled = pool_folds([a], metrics=("accuracy",))
+    assert pooled.y_score is not None
+    assert np.array_equal(pooled.y_score, scores)

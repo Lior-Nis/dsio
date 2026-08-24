@@ -476,7 +476,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
     batches = trainer.predict(module, predict_loader)
     result = _assemble(batches, fold, window_labels)
 
-    # Guard 1, carried over from the old `cross_validate`: predictions that do not line
+    # Guard 1, carried over from the deleted `cross_validate`: predictions that do not line
     # up with the fold they came from. `_assemble` above already checks the stronger
     # property -- that the predicted rows are *exactly* the fold's test positions -- but
     # this is the guard the fold loop's docstring named, and its message is worth keeping
@@ -490,7 +490,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
             "was held out"
         )
 
-    # Guard 4, also carried over from `cross_validate`: a fold that cannot be scored is a
+    # Guard 4, also carried over from the deleted `cross_validate`: a fold that cannot be
     # split problem before it is a metric problem, and the message says so rather than
     # surfacing whatever bare exception the metric implementation happened to raise.
     try:
@@ -542,7 +542,7 @@ def _write_predictions(
     fold's slice appended into a shared ``OutOfFold`` across an in-process loop is now the
     whole file. ``split`` and ``split_digest`` -- the split family's name and the store
     digest it is bound to, the same digest ``windows.json`` records -- let a pooling
-    reader (a later task) refuse to combine runs from different split families or
+    reader (`dsio.eval.pool.pool_folds`) refuse to combine runs from different families or
     different store snapshots, the same binding ``SplitFile.store_manifest_sha256``
     already checks at load time, carried forward here because pooling happens in a
     different process than the one that validated it. ``y_score`` is omitted from the
