@@ -65,11 +65,23 @@ def test_resolve_tracking_uri_prefers_the_environment_variable(
 # --- local backends are never probed ----------------------------------------------------
 
 
-def test_a_local_backend_is_accepted_without_touching_the_network() -> None:
+def test_a_local_backend_is_accepted_without_touching_the_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`file:` URIs are the fake-backed tests' escape hatch, and have no server to be
-    down. An unreachable-looking path is deliberate: if this were probed like an
-    http(s) URI, it would have to fail (there is nothing listening at a filesystem
-    path), so the only way this passes is if no probe happens at all."""
+    down. An unreachable-looking path used to be this test's only evidence that no probe
+    happened -- but whether a nonexistent path "fails" if actually probed is a
+    filesystem-permission fact, not a fact about `require_mlflow`'s own logic. Asserting
+    the mechanism directly -- that ``MlflowClient`` is never even constructed for a local
+    URI -- is not falsifiable by anything about the path itself.
+    """
+    import dsio.train.tracking as tracking
+
+    class _PoisonedMlflowClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("MlflowClient must never be constructed for a local URI")
+
+    monkeypatch.setattr(tracking, "MlflowClient", _PoisonedMlflowClient)
     uri = "file:/no/such/directory/mlruns"
     assert require_mlflow(uri) == uri
 
@@ -160,6 +172,85 @@ def test_the_probes_timeout_override_is_restored_after_a_failure(
         require_mlflow(DEAD_PORT_URI)
     assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "77"
     assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "3"
+
+
+def test_bounded_probe_timeout_actually_shrinks_the_budget_inside_its_own_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The test above only proves the *outside* state is restored after the fact -- a
+    ``_bounded_probe_timeout`` that was a bare ``yield`` (doing nothing at all) would
+    pass it too, since nothing would ever have changed to begin with. This asserts the
+    budget the docstring promises is actually in effect *while the context is open*, not
+    only that whatever was there before comes back afterward.
+    """
+    import os
+
+    from dsio.train.tracking import (
+        _PROBE_MAX_RETRIES,
+        _PROBE_TIMEOUT_SECONDS,
+        _bounded_probe_timeout,
+    )
+
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_TIMEOUT", "77")
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "3")
+    with _bounded_probe_timeout():
+        assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == _PROBE_TIMEOUT_SECONDS
+        assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == _PROBE_MAX_RETRIES
+    assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "77"
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == "3"
+
+
+def test_require_mlflow_probes_the_store_not_merely_liveness() -> None:
+    """I5: ``require_mlflow``'s own docstring justifies probing ``search_experiments``
+    instead of a liveness route like ``/health`` because a server can answer ``/health``
+    while its backend store (Postgres, per decision 8) is unreachable -- but nothing in
+    this suite ever ran a server that could tell the two apart. Every unit test here uses
+    a closed port or a bogus host (no process at all), the fake-backed test uses a
+    `file:` URI (no process either), and the one `live` test needs a genuinely healthy
+    stack. Replacing the real probe with a bare TCP connect, or with a check against
+    `/health` alone, would leave all of them passing -- the same shape as the bug this
+    property exists to prevent.
+
+    A minimal HTTP server that answers 200 on ``/health`` and 500 on everything else
+    (standing in for "the process is up, the store behind it is not") is the one fixture
+    that can distinguish the two: ``require_mlflow`` must still refuse it.
+    """
+    import http.server
+    import threading
+    import urllib.request
+
+    class _LiveButStoreDownHandler(http.server.BaseHTTPRequestHandler):
+        def _respond(self) -> None:
+            if self.path == "/health":
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+            else:
+                self.send_response(500)
+                self.end_headers()
+
+        do_GET = _respond
+        do_POST = _respond
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+            pass  # quiet: this is a test fixture, not a service worth logging
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _LiveButStoreDownHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        uri = f"http://127.0.0.1:{server.server_port}"
+        # Confirms the fixture itself behaves as advertised -- a broken fixture that
+        # never answered 200 on /health at all would make the assertion below pass for
+        # the wrong reason (server unreachable at any path, not "up but store-less").
+        with urllib.request.urlopen(f"{uri}/health", timeout=5) as response:  # noqa: S310
+            assert response.status == 200
+
+        with pytest.raises(MlflowUnavailableError):
+            require_mlflow(uri)
+    finally:
+        server.shutdown()
+        thread.join()
 
 
 # --- live: the real compose stack -------------------------------------------------------
