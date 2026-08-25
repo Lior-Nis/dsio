@@ -61,7 +61,7 @@ SPLITS_ROOT = Path("splits")
 
 
 def _fold_invariant_config_hash(config: RunConfig) -> str:
-    """Content hash of ``config`` with the task's ``fold`` normalised out.
+    """Content hash of what produced these predictions, with ``fold`` normalised out.
 
     Folds of one experiment must agree on everything except which fold they are: same
     backbone, same hyperparameters, same window spec, same everything but ``fold``. A
@@ -69,10 +69,18 @@ def _fold_invariant_config_hash(config: RunConfig) -> str:
     ``predictions.npz`` and refuses to pool files whose hashes differ -- the check
     `cross_validate` never had to make, because it only ever held one closure and one
     `Examples` in memory. Structural guarantee then, checked invariant now.
+
+    Covers the task and the seed, and deliberately **not** ``name`` or ``tags``. Those
+    label a run; they do not change the model that produced its predictions. Including
+    them would make ``dsio run p task.fold=$i --name exp-fold$i`` -- naming each fold's
+    run distinctly, which is a natural thing to do -- refuse to pool a perfectly valid
+    cross-validation. A guard that rejects the obvious workflow gets worked around, and a
+    guard that is worked around protects nothing. ``seed`` stays in: it changes the
+    weights, so two folds seeded differently really are two different training runs.
     """
     data = config.to_dict()
-    data["task"] = {**data["task"], "fold": None}
-    return sha256_of(data)
+    identity = {"seed": data["seed"], "task": {**data["task"], "fold": None}}
+    return sha256_of(identity)
 
 
 class Component(DsioModel):

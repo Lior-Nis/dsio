@@ -28,6 +28,7 @@ from dsio.train.torch_task import (  # noqa: E402
     Component,
     TorchTask,
     TrainerConfig,
+    _fold_invariant_config_hash,
     build_callbacks,
     build_module,
     sanitise_metric,
@@ -103,6 +104,38 @@ def make_task(root: Path, **overrides) -> TorchTask:  # type: ignore[no-untyped-
         trainer=TrainerConfig(max_epochs=2, accelerator="cpu", devices=1, checkpoint=False),
     )
     return TorchTask(**{**defaults, **overrides})
+
+
+# --- what identifies "the same experiment" -------------------------------------------
+
+
+def test_naming_each_folds_run_distinctly_still_pools(corpus: Path) -> None:
+    """The identity must ignore what merely labels a run.
+
+    `dsio run p task.fold=$i --name exp-fold$i` is a natural way to drive a shell loop, and
+    every one of those runs belongs to one cross-validation. If `name` or `tags` reached the
+    hash, pooling a perfectly valid CV would be refused -- and a guard that rejects the
+    obvious workflow gets worked around, which protects nothing at all.
+    """
+    left = RunConfig(name="exp-fold0", tags=("sweep", "a"), task=make_task(corpus, fold=0))
+    right = RunConfig(name="exp-fold1", tags=("sweep", "b"), task=make_task(corpus, fold=1))
+    assert _fold_invariant_config_hash(left) == _fold_invariant_config_hash(right)
+
+
+def test_a_different_seed_is_a_different_experiment(corpus: Path) -> None:
+    """`seed` stays in the identity where `name` does not: it changes the weights, so two
+    folds seeded differently are two different training runs, not one CV."""
+    left = RunConfig(name="exp", seed=1, task=make_task(corpus, fold=0))
+    right = RunConfig(name="exp", seed=2, task=make_task(corpus, fold=1))
+    assert _fold_invariant_config_hash(left) != _fold_invariant_config_hash(right)
+
+
+def test_a_different_hyperparameter_is_a_different_experiment(corpus: Path) -> None:
+    """The identity is derived from the task, not hardcoded to a constant -- which is the
+    way this guard would fail while every refusal test above still passed."""
+    left = RunConfig(name="exp", task=make_task(corpus, fold=0, lr=1e-3))
+    right = RunConfig(name="exp", task=make_task(corpus, fold=1, lr=5e-3))
+    assert _fold_invariant_config_hash(left) != _fold_invariant_config_hash(right)
 
 
 # --- pre-flight ----------------------------------------------------------------------
