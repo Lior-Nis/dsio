@@ -35,10 +35,18 @@ x -> preprocessor? -> augmentor? -> transform -> spectral_augmentor? -> backbone
 *Diagram corrected 2026-08-26 (Task 6 of Plan 3b, deferred from Plan 3a's review): the two
 train-only slots shown above, `augmentor?` and `spectral_augmentor?`, no longer exist.
 `model/module.py`'s chain is `x -> preprocessor? -> transform -> backbone -> head`, and
-`DsioModule.__init__` takes only `backbone, head, loss, transform, preprocessor` — see
-that module's own docstring ("No stochastic slot, so nothing here can augment a validation
-batch"). Plan 2b's Task 6b moved stochastic augmentation to the dataset
-(`dsio.dataset.dataset.WindowDataset`) instead of a runtime-flag-guarded slot on the model.*
+`DsioModule.__init__` takes `backbone, head, loss, transform, preprocessor` as its
+*component* slots — see that module's own docstring ("No stochastic slot, so nothing here
+can augment a validation batch") — plus `lr, weight_decay, target_key, predict`, which are
+not chain slots at all: they are exactly the arguments `save_hyperparameters(ignore=...)`
+excludes from Lightning's own checkpoint hyperparameters, because the five components are
+already captured structurally (registered name plus params) and do not need a second,
+redundant record. `SslPretrainTask` separately still carries an `augmentor` field, unrelated
+to the deleted model slot — see that task's own docstring for what it does now (building a
+two-view contrastive batch at collate time, `dsio.dataset.dataset.TwoViewCollate`) instead
+of being a slot on `DsioModule`. Plan 2b's Task 6b moved stochastic augmentation to the
+dataset (`dsio.dataset.dataset.WindowDataset`) instead of a runtime-flag-guarded slot on the
+model.*
 
 `transform` defaults to identity rather than being optional, so the chain has one shape and
 `forward` needs no branch. One registry per slot, not one registry of models: FORGE's

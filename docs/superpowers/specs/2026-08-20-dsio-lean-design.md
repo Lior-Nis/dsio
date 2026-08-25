@@ -1,6 +1,8 @@
 # dsio — Lean Skeleton Design
 
-Status: proposed (2026-08-20)
+Status: accepted (2026-08-20) — implemented across Plans 2a, 2b, 3a and 3b; every
+decision this spec names (fold-as-process, MLflow as source of truth, the Lightning-only
+training path, and the rest) is now live in the shipped code, not merely proposed.
 Supersedes: `2026-08-15-dsio-design.md` (the template-and-spine design)
 
 ## Context

@@ -107,8 +107,37 @@ _CODES: list[tuple[type[BaseException], ErrorCode, bool]] = [
 ]
 
 
+def _mlflow_unavailable_error_type() -> type[BaseException] | None:
+    """``MlflowUnavailableError``'s type, or ``None`` if it cannot even be imported.
+
+    Deliberately not a module-level import: ``dsio.train.tracking`` imports Lightning at
+    its own module scope, and this module (``dsio.cli.envelope``) must stay importable
+    without torch/lightning installed at all -- a bare ``dsio run`` lists presets without
+    either (``dsio.train.load_runners``'s own docstring), and this is exactly the module
+    that has to turn a missing-torch ``ModuleNotFoundError`` into a helpful message
+    rather than crash trying to report it. If ``exc`` really is an
+    ``MlflowUnavailableError``, that module necessarily already imported successfully to
+    raise it, so this import is a cache hit off ``sys.modules``, never the first (and
+    possibly failing) import of Lightning.
+    """
+    try:
+        from dsio.train.tracking import MlflowUnavailableError
+    except ImportError:
+        return None
+    return MlflowUnavailableError
+
+
 def classify(exc: BaseException) -> tuple[ErrorCode, bool]:
     """Map an exception to an error code and whether retrying could help."""
+    mlflow_unavailable = _mlflow_unavailable_error_type()
+    if mlflow_unavailable is not None and isinstance(exc, mlflow_unavailable):
+        # I5's sibling fix, on the CLI side: unreachable MLflow used to fall through to
+        # the generic `ErrorCode.INTERNAL, False` below, indistinguishable from an actual
+        # dsio bug. It is retryable -- `docker compose up -d`, or pointing
+        # `MLFLOW_TRACKING_URI` elsewhere, fixes it without touching dsio -- the same
+        # "an external dependency is not available yet" shape `MISSING_DEPENDENCY`
+        # already exists for, just an infrastructure dependency rather than a Python one.
+        return ErrorCode.MISSING_DEPENDENCY, True
     for exc_type, code, retryable in _CODES:
         if isinstance(exc, exc_type):
             return code, retryable

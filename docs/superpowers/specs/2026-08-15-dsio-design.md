@@ -1,5 +1,7 @@
 # dsio — Design Spec
 
+Superseded by `2026-08-20-dsio-lean-design.md` — read that one first; it explains why.
+
 ## Context
 
 `dsio` is to be the foundational ML/DL experimentation system for the user's company and
