@@ -47,7 +47,7 @@ from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TR
 from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
-from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional
+from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional, build_callbacks
 from dsio.train.tracking import (
     build_mlflow_logger,
     finite_metrics,
@@ -363,6 +363,17 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
                 RankMeMonitor(val_loader, every_n_epochs=task.probe_every_n_epochs)
             )
 
+        # I1/"the rule": `task.trainer` is a full `TrainerConfig` here too, including a
+        # deliberate `monitor="val/loss"` default (this class's own field default,
+        # above) -- but until now nothing in this function ever read `checkpoint`,
+        # `early_stopping_patience`, `monitor` or `monitor_mode`, so `early_stopping_
+        # patience=5` on a 500-epoch pretrain silently ran the full 500. Reusing
+        # `build_callbacks` -- the same construction `run_torch` uses -- wires all four
+        # for pretraining too, rather than leaving them honoured nowhere.
+        callbacks += build_callbacks(
+            task.trainer, run.artifacts_dir, has_validation=val_loader is not None
+        )
+
         trainer = Trainer(
             max_epochs=task.trainer.max_epochs,
             accelerator=task.trainer.accelerator,
@@ -376,6 +387,9 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
             deterministic="warn" if task.trainer.deterministic else False,
             default_root_dir=run.artifacts_dir,
             logger=mlflow_logger,
+            # I1: same fix as `run_torch` -- without this, Lightning installs its own
+            # default `ModelCheckpoint` regardless of `task.trainer.checkpoint`.
+            enable_checkpointing=task.trainer.checkpoint,
             callbacks=callbacks,
         )
         trainer.fit(module, train_loader, val_loader)

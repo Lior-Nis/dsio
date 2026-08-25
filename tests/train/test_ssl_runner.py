@@ -411,6 +411,66 @@ def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
     assert mlflow_run.info.status == "FAILED"
 
 
+# --- I1: checkpointing must do what `TrainerConfig.checkpoint` says, here too --------
+
+
+def test_checkpoint_false_writes_no_checkpoint_file_anywhere(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """I1: `run_ssl_pretrain` used to read none of `TrainerConfig.checkpoint`,
+    `early_stopping_patience`, `monitor` or `monitor_mode` at all, even though
+    `SslPretrainTask`'s own field default (`trainer: TrainerConfig =
+    TrainerConfig(monitor="val/loss")`) is a deliberate choice for this exact runner. Its
+    `Trainer(...)` also never set `enable_checkpointing`, so Lightning installed its own
+    default `ModelCheckpoint` regardless of `checkpoint=False` -- the same leak `run_torch`
+    had, reproduced here on fold 1, which this fixture's own split family declares with no
+    `val` part at all (`corpus`'s `folds` list, this file), so this also exercises the
+    no-validation branch of `build_callbacks`.
+    """
+    config = RunConfig(
+        name="ssl-no-checkpoint",
+        seed=0,
+        task=pretrain_task(corpus, fold=1, trainer=TrainerConfig(max_epochs=1, checkpoint=False)),
+    )
+    active, _ = run(config, corpus)
+
+    # See `test_torch_runner.py`'s identical checks for why this searches `tmp_path`,
+    # not `active.dir`: Lightning's own default checkpoint resolves its `dirpath` from
+    # the logger's save directory, a sibling of the run's own scratch directory, not a
+    # descendant of it.
+    ckpt_files = list(tmp_path.rglob("*.ckpt"))
+    assert ckpt_files == [], f"checkpoint=False leaked: {ckpt_files}"
+
+
+def test_checkpoint_true_writes_exactly_one_dsio_named_checkpoint(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """The acceptance half: `checkpoint=True`, on the same no-validation fold, must
+    still produce exactly one checkpoint -- previously `checkpoint=True` did nothing at
+    all here, so pretraining got either Lightning's uncontrolled default or (with
+    `enable_checkpointing` now wired) silently nothing, depending on which half of I1
+    shipped without the other. Reusing `build_callbacks` (the same construction
+    `run_torch` uses) is what makes `checkpoint=True` actually checkpoint pretraining.
+    """
+    config = RunConfig(
+        name="ssl-with-checkpoint",
+        seed=0,
+        task=pretrain_task(corpus, fold=1, trainer=TrainerConfig(max_epochs=1, checkpoint=True)),
+    )
+    active, _ = run(config, corpus)
+
+    own_checkpoints = list(active.artifacts_dir.glob("*.ckpt"))
+    assert len(own_checkpoints) == 1, f"expected exactly one checkpoint, found: {own_checkpoints}"
+    checkpoint = own_checkpoints[0]
+    assert checkpoint.name.startswith("epoch")
+    assert "=" not in checkpoint.name, "Lightning's own default filename, not dsio's"
+
+    assert not any(tmp_path.rglob("checkpoints")), (
+        "a Lightning-created 'checkpoints/' subdirectory means Lightning's own default "
+        "ModelCheckpoint ran alongside dsio's"
+    )
+
+
 # --- the handoff --------------------------------------------------------------------
 
 

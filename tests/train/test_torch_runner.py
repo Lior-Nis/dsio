@@ -409,7 +409,7 @@ def test_a_failing_callback_is_never_swallowed(
     monkeypatch.setattr(callbacks, "ModelCheckpoint", explode)
     task = make_task(corpus, trainer=TrainerConfig(checkpoint=True))
     with pytest.raises(RuntimeError, match="not writable"):
-        build_callbacks(task, corpus / "ckpt")
+        build_callbacks(task.trainer, corpus / "ckpt", has_validation=True)
 
 
 def test_checkpoint_filenames_contain_no_path_separator(corpus: Path) -> None:
@@ -421,10 +421,121 @@ def test_checkpoint_filenames_contain_no_path_separator(corpus: Path) -> None:
     literal text specifically, not just whatever precedes the first ``{``.
     """
     task = make_task(corpus, trainer=TrainerConfig(checkpoint=True, monitor="val/loss"))
-    callbacks = build_callbacks(task, corpus / "ckpt")
+    callbacks = build_callbacks(task.trainer, corpus / "ckpt", has_validation=True)
     checkpoint = next(cb for cb in callbacks if hasattr(cb, "filename"))
     literal_text = re.sub(r"\{[^}]*\}", "", checkpoint.filename)
     assert "/" not in literal_text
+
+
+def test_checkpoint_true_still_checkpoints_without_a_validation_set(corpus: Path) -> None:
+    """I1's second bug: the caller used to pass ``build_callbacks(...) if validation is
+    not None else []`` -- so a fold with no validation set got an *empty* callback list
+    even when ``checkpoint=True`` asked for one. Combined with Lightning's own
+    ``enable_checkpointing`` defaulting on, that meant Lightning installed its own
+    default ``ModelCheckpoint`` instead of dsio's -- exactly backwards from what
+    ``checkpoint=True`` (or ``False``) is supposed to control. ``has_validation=False``
+    must still produce a real ``ModelCheckpoint``, just one that is not metric-ranked
+    (there is no ``val/loss`` to rank by without a validation loop).
+    """
+    trainer_config = TrainerConfig(checkpoint=True)
+    callbacks = build_callbacks(trainer_config, corpus / "ckpt", has_validation=False)
+    from lightning.pytorch.callbacks import ModelCheckpoint
+
+    checkpoints = [cb for cb in callbacks if isinstance(cb, ModelCheckpoint)]
+    assert len(checkpoints) == 1
+    assert checkpoints[0].monitor is None
+
+
+def test_checkpoint_false_leaves_no_checkpoint_callback_even_without_validation(
+    corpus: Path,
+) -> None:
+    """The other half: ``checkpoint=False`` with no validation set must still produce no
+    checkpoint callback at all -- paired with ``enable_checkpointing=False`` on the
+    ``Trainer`` itself (see the two end-to-end tests below), this is what actually
+    disables checkpointing rather than merely omitting dsio's own callback while
+    Lightning quietly installs its default."""
+    trainer_config = TrainerConfig(checkpoint=False)
+    callbacks = build_callbacks(trainer_config, corpus / "ckpt", has_validation=False)
+    assert callbacks == []
+
+
+def test_checkpoint_false_writes_no_checkpoint_file_anywhere(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """I1: ``TrainerConfig.checkpoint=False`` used to do nothing -- ``build_callbacks``
+    correctly added no ``ModelCheckpoint``, but the ``Trainer`` was never told
+    ``enable_checkpointing=False``, so Lightning installed its own default one anyway,
+    writing a real ``.ckpt`` file that ``log_run_artifacts``'s bulk upload then shipped
+    to MLflow with no digest and no fail-closed policy -- exactly what ``log_model=False``
+    (``build_mlflow_logger``) exists to prevent. A real end-to-end fold with
+    ``checkpoint=False`` must leave the scratch directory with no checkpoint file at all,
+    not merely with none of dsio's own naming.
+    """
+    config = RunConfig(
+        name="no-checkpoint",
+        task=make_task(corpus, trainer=TrainerConfig(max_epochs=1, checkpoint=False)),
+    )
+    run = start_run(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    execute(config, run)
+
+    # Searched from `tmp_path`, not `run.dir`: Lightning's own default `ModelCheckpoint`
+    # (when `enable_checkpointing` is left unset) resolves its `dirpath` from the
+    # *logger's* save directory, not `default_root_dir` -- for `MLFlowLogger` on a
+    # `file:` backend that is under `tmp_path / "mlruns"`, a sibling of `run.dir`
+    # (`tmp_path / "runs"`), not a descendant of it. A check scoped to `run.dir` alone
+    # would have missed exactly the leak this test exists to catch.
+    ckpt_files = list(tmp_path.rglob("*.ckpt"))
+    assert ckpt_files == [], f"checkpoint=False leaked: {ckpt_files}"
+
+
+def test_checkpoint_true_writes_exactly_one_dsio_named_checkpoint(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """The acceptance half of the pair above: ``checkpoint=True`` must produce exactly
+    one checkpoint, written directly into ``run.artifacts_dir`` under dsio's own
+    ``sanitise_metric``-safe naming -- not Lightning's own default filename or dirpath.
+
+    ``log_run_artifacts`` uploads ``run.artifacts_dir`` wholesale to the (file-backed, in
+    this test suite) MLflow store, so the one real checkpoint dsio wrote legitimately
+    shows up *twice* on disk -- the original and MLflow's own mirrored copy under
+    ``tmp_path / "mlruns"``. That is correct behaviour, not the leak, so this checks
+    ``run.artifacts_dir`` directly for the one true write and checks the rest of
+    ``tmp_path`` only for the *shape* Lightning's own default checkpoint would have left
+    behind: a ``checkpoints/`` subdirectory (dsio's own callback never creates one -- it
+    writes straight into ``dirpath``) and a filename using Lightning's own ``epoch=NN``
+    separator rather than dsio's sanitised ``epoch00-...`` one.
+    """
+    config = RunConfig(
+        name="with-checkpoint",
+        task=make_task(corpus, trainer=TrainerConfig(max_epochs=1, checkpoint=True)),
+    )
+    run = start_run(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    execute(config, run)
+
+    own_checkpoints = list(run.artifacts_dir.glob("*.ckpt"))
+    assert len(own_checkpoints) == 1, f"expected exactly one checkpoint, found: {own_checkpoints}"
+    checkpoint = own_checkpoints[0]
+    assert checkpoint.name.startswith("epoch")
+    assert "=" not in checkpoint.name, "Lightning's own default filename, not dsio's"
+
+    assert not any(path.name == "checkpoints" for path in tmp_path.rglob("checkpoints")), (
+        "a Lightning-created 'checkpoints/' subdirectory means Lightning's own default "
+        "ModelCheckpoint ran alongside dsio's"
+    )
+    all_ckpt_names = {path.name for path in tmp_path.rglob("*.ckpt")}
+    assert all_ckpt_names == {checkpoint.name}, (
+        f"expected only dsio's own checkpoint name to appear anywhere, found: {all_ckpt_names}"
+    )
 
 
 def test_each_fold_gets_a_fresh_module(corpus: Path) -> None:

@@ -188,7 +188,6 @@ class TorchTask(TaskConfig):
     trainer: TrainerConfig = TrainerConfig()
 
     metrics: tuple[str, ...] = ("accuracy", "f1_macro")
-    keep_checkpoints: bool = True
 
     predict: Literal["prediction", "embedding"] = Field(
         default="prediction",
@@ -384,35 +383,69 @@ def sanitise_metric(name: str) -> str:
     return name.replace("/", "_").replace("\\", "_").replace("=", "-")
 
 
-def build_callbacks(task: TorchTask, directory: Path) -> list[Any]:
-    """Construct the callbacks a fold needs, letting any failure propagate.
+def build_callbacks(
+    trainer: TrainerConfig, directory: Path, *, has_validation: bool
+) -> list[Any]:
+    """Construct the checkpoint/early-stopping callbacks a fold needs, letting any
+    construction failure propagate.
 
     Wrapping this in a bare ``except`` that logs a warning means a ModelCheckpoint which
     fails to construct silently disables checkpointing for a multi-hour run, and the loss of
     the weights is discovered days later. A misconfigured callback is a configuration bug and
     must stop the run.
+
+    Takes a bare :class:`TrainerConfig`, not a task, so both runners that read one --
+    ``run_torch``'s ``TorchTask`` and ``run_ssl_pretrain``'s ``SslPretrainTask`` -- can
+    share this one construction (I1: pretraining used to read none of
+    ``checkpoint``/``early_stopping_patience``/``monitor``/``monitor_mode`` at all, so
+    ``SslPretrainTask``'s own deliberate ``TrainerConfig(monitor="val/loss")`` default did
+    nothing).
+
+    ``has_validation`` gates anything that monitors ``trainer.monitor``: with no
+    validation loader, that metric is never logged (``DsioModule._common_step`` only logs
+    under its own ``stage``), so ``EarlyStopping`` would raise on the metric it can never
+    find, and a metric-ranked ``ModelCheckpoint`` would silently save nothing every
+    epoch. ``checkpoint=True`` still gets a real ``ModelCheckpoint`` in that case -- it
+    just keeps the most recent epoch instead of ranking by a metric that does not exist --
+    rather than being dropped to an empty list the way a fold with no validation set used
+    to be: an empty callback list combined with Lightning's own ``enable_checkpointing``
+    default (``True`` unless a caller says otherwise) is exactly how Lightning ended up
+    installing its *own* default ``ModelCheckpoint`` regardless of what
+    ``checkpoint=False`` asked for.
     """
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
     callbacks: list[Any] = []
-    if task.trainer.checkpoint:
-        monitor = task.trainer.monitor
-        callbacks.append(
-            ModelCheckpoint(
-                dirpath=directory,
-                filename="epoch{epoch:02d}-" + sanitise_metric(monitor) + "{" + monitor + ":.4f}",
-                monitor=monitor,
-                mode=task.trainer.monitor_mode,
-                save_top_k=1,
-                auto_insert_metric_name=False,
+    if trainer.checkpoint:
+        if has_validation:
+            monitor = trainer.monitor
+            callbacks.append(
+                ModelCheckpoint(
+                    dirpath=directory,
+                    filename=(
+                        "epoch{epoch:02d}-" + sanitise_metric(monitor) + "{" + monitor + ":.4f}"
+                    ),
+                    monitor=monitor,
+                    mode=trainer.monitor_mode,
+                    save_top_k=1,
+                    auto_insert_metric_name=False,
+                )
             )
-        )
-    if task.trainer.early_stopping_patience is not None:
+        else:
+            callbacks.append(
+                ModelCheckpoint(
+                    dirpath=directory,
+                    filename="epoch{epoch:02d}",
+                    save_top_k=1,
+                    auto_insert_metric_name=False,
+                )
+            )
+    if has_validation and trainer.early_stopping_patience is not None:
         callbacks.append(
             EarlyStopping(
-                monitor=task.trainer.monitor,
-                mode=task.trainer.monitor_mode,
-                patience=task.trainer.early_stopping_patience,
+                monitor=trainer.monitor,
+                mode=trainer.monitor_mode,
+                patience=trainer.early_stopping_patience,
             )
         )
     return callbacks
@@ -534,7 +567,16 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
             deterministic="warn" if task.trainer.deterministic else False,
             default_root_dir=directory,
             logger=mlflow_logger,
-            callbacks=build_callbacks(task, directory) if validation is not None else [],
+            # I1: without this, Lightning installs its *own* default `ModelCheckpoint`
+            # regardless of `task.trainer.checkpoint` -- `checkpoint=False` (e.g.
+            # `spine_baseline`) silently got a checkpoint anyway, doubly-nested under
+            # this run's own artifact directory, which then reached MLflow through
+            # `log_run_artifacts`'s bulk upload even though `log_model=False`
+            # (`build_mlflow_logger`) exists specifically to keep an undigested model out.
+            enable_checkpointing=task.trainer.checkpoint,
+            callbacks=build_callbacks(
+                task.trainer, directory, has_validation=validation is not None
+            ),
         )
         trainer.fit(module, train_loader, val_loader)
 
