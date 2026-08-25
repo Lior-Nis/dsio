@@ -297,16 +297,23 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     task = config.task
     assert isinstance(task, SslPretrainTask)
 
-    # Created and stamped as early as `require_mlflow` allows -- see `run_torch`'s own
-    # comment (`torch_task.py`) for why this moved here from just before `Trainer(...)`,
-    # and why everything below is wrapped in `try`/`except`: this pretraining run has no
-    # `trainer.predict` step, but registering the encoder and stamping its lineage still
-    # happen after `trainer.fit` returns and Lightning has already finalized the logger
-    # to "success" -- a failure there must still flip the MLflow run back to FAILED.
+    # Created as early as `require_mlflow` allows -- see `run_torch`'s own comment
+    # (`torch_task.py`) for why everything below, *including* `stamp_provenance` itself,
+    # is wrapped in `try`/`except`: this pretraining run has no `trainer.predict` step,
+    # but registering the encoder and stamping its lineage still happen after
+    # `trainer.fit` returns and Lightning has already finalized the logger to "success"
+    # -- and a crash while `stamp_provenance` is itself talking to MLflow (a network
+    # call, just like everything after it) must not leave the run stuck RUNNING forever
+    # instead of flipping to FAILED. `run.mlflow_run_id` is only set once
+    # `stamp_provenance`'s own run-creation call has actually succeeded, so the `except`
+    # below uses it -- not a bare `mlflow_logger.run_id` re-access, which would itself
+    # attempt to lazily create a *second* run if creating the first one is what failed --
+    # to decide whether there is a run to terminate at all.
     mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
-    stamp_provenance(run, mlflow_logger)
 
     try:
+        stamp_provenance(run, mlflow_logger)
+
         require_fold(task.splits_root, task.split, task.fold)
 
         store = SignalStore(data_root() / task.store)
@@ -426,7 +433,8 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         mlflow_logger.log_metrics(finite_metrics(metrics))
         log_run_artifacts(run, mlflow_logger)
     except BaseException:
-        mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
+        if run.mlflow_run_id is not None:
+            mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
         raise
     return metrics
 

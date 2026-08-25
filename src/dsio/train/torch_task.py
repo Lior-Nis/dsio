@@ -448,17 +448,27 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
     # is written before any work begins": there, the write was to a local `run.json`;
     # here, it is to MLflow, which is now the thing whose absence makes a run unrecorded.
     mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
-    stamp_provenance(run, mlflow_logger)
 
     # Everything from here on is wrapped so that any failure -- not just one Lightning's
     # own `Trainer` catches internally (`trainer.fit`/`trainer.predict` already finalize
-    # the logger to "failed" on an exception raised during either call) -- leaves the
-    # MLflow run visibly FAILED rather than FINISHED. Lightning's own teardown marks the
-    # run FINISHED the moment `trainer.predict` *returns*, before the guards below and
-    # `compute()` have even run; without this, a fold that fails to assemble or score
-    # would look like a completed run in MLflow, which is exactly the "a crash does not
-    # leave a run looking successful" guarantee decision 7 asks for.
+    # the logger to "failed" on an exception raised during either call), but also a crash
+    # during `stamp_provenance` itself (`client.log_artifact`/`set_tag` are network
+    # calls, and MLflow can go away mid-run just as easily as before it) -- leaves the
+    # MLflow run visibly FAILED rather than either FINISHED or orphaned RUNNING forever.
+    # Lightning's own teardown marks the run FINISHED the moment `trainer.predict`
+    # *returns*, before the guards below and `compute()` have even run; without the
+    # `except` below, a fold that fails to assemble or score would look like a completed
+    # run in MLflow, and a fold that fails *while being stamped* would look like one
+    # still in progress, forever -- neither is the "a crash does not leave a run looking
+    # successful" guarantee decision 7 asks for. `stamp_provenance` is what actually
+    # creates the MLflow run (`mlflow_logger.experiment`'s lazy `create_run`, on first
+    # access); `run.mlflow_run_id` is only set once that access has succeeded, so the
+    # `except` below uses it -- not a bare re-access of `mlflow_logger.run_id`, which
+    # would itself attempt to lazily create a *second* run if the first creation is what
+    # failed -- to decide whether there is a run to terminate at all.
     try:
+        stamp_provenance(run, mlflow_logger)
+
         require_fold(task.splits_root, task.split, task.fold)
 
         store = SignalStore(data_root() / task.store)
@@ -596,7 +606,8 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         mlflow_logger.log_metrics(finite_metrics(dict(values)))
         log_run_artifacts(run, mlflow_logger)
     except BaseException:
-        mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
+        if run.mlflow_run_id is not None:
+            mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
         raise
     return dict(values)
 

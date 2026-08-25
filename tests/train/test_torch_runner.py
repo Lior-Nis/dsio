@@ -285,6 +285,52 @@ def test_a_completed_run_logs_its_metrics_to_mlflow(corpus: Path, tmp_path: Path
     assert "val/loss" in logged
 
 
+def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug 3: `stamp_provenance` used to run *outside* the `try`/`except BaseException`
+    that flips a crashed run to MLflow's `FAILED` status. `stamp_provenance` is what
+    actually creates the MLflow run (`mlflow_logger.experiment`'s lazy `create_run`,
+    accessed on first `.run_id`/`.experiment` read) -- so a crash anywhere in the rest of
+    its own work (logging the config/reproduce-script/diff artifacts, tagging
+    `config_hash`) left a run that unambiguously exists, sitting in MLflow's default
+    `RUNNING` status forever: neither finished nor failed, the record lying in a third
+    way decision 7 does not allow.
+
+    Reproduces exactly that shape: a fake `stamp_provenance` that does the one thing the
+    real one does first -- reads `mlflow_logger.run_id` (creating the run) and records it
+    onto `run.mlflow_run_id`, precisely mirroring `dsio.train.tracking.stamp_provenance`'s
+    own first two lines -- then raises, before any of its own artifact/tag logging runs.
+    That run must still end up `FAILED`, not stuck `RUNNING`.
+    """
+    import dsio.train.torch_task as torch_task
+
+    def fake_stamp_provenance(run: object, mlflow_logger: object) -> None:
+        mlflow_run_id = mlflow_logger.run_id  # type: ignore[attr-defined]
+        run.mlflow_run_id = mlflow_run_id  # type: ignore[attr-defined]
+        raise RuntimeError("boom: crash mid-provenance-stamp, after the run was created")
+
+    monkeypatch.setattr(torch_task, "stamp_provenance", fake_stamp_provenance)
+
+    config = RunConfig(name="prov-crash", seed=0, task=make_task(corpus))
+    run = start_run(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(RuntimeError, match="boom: crash mid-provenance-stamp"):
+        execute(config, run)
+
+    assert run.mlflow_run_id is not None
+
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(resolve_tracking_uri())
+    mlflow_run = client.get_run(run.mlflow_run_id)
+    assert mlflow_run.info.status == "FAILED"
+
+
 def test_two_folds_of_one_config_land_in_one_mlflow_experiment(
     corpus: Path, tmp_path: Path
 ) -> None:
