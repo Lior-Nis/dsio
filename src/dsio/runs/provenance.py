@@ -24,6 +24,28 @@ _GIT_TIMEOUT_SECONDS = 15
 
 def _git(*args: str, cwd: Path | None = None) -> str | None:
     """Run a git command, returning stripped stdout or ``None`` if git cannot answer."""
+    raw = _git_raw(*args, cwd=cwd)
+    return raw.strip() if raw is not None else None
+
+
+def _git_raw(
+    *args: str, cwd: Path | None = None, ok_returncodes: frozenset[int] = frozenset({0})
+) -> str | None:
+    """Run a git command, returning *unstripped* stdout, or ``None`` if git cannot answer.
+
+    Diff output must never be passed through ``str.strip()``: a unified diff's blank
+    context line is a line containing a single space, and stripping the whole output
+    eats that trailing space, silently shortening the final hunk by one line relative to
+    its own ``@@ -a,b +c,d @@`` header. ``git apply`` then rejects the patch with
+    "corrupt patch" -- which is exactly bug C1, caught because most Python edits end on a
+    blank line (the gap between two ``def``s). Callers that build patches
+    (:func:`working_tree_patch`) must use this, not :func:`_git`.
+
+    ``ok_returncodes`` widens what counts as success: ``git diff --no-index`` exits ``1``
+    whenever the compared paths differ, which for an untracked file (diffed against
+    ``/dev/null``) is *always* -- so callers that want that diff's content must accept
+    ``1`` as success too, not just ``0``.
+    """
     try:
         completed = subprocess.run(
             ["git", *args],
@@ -35,9 +57,9 @@ def _git(*args: str, cwd: Path | None = None) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if completed.returncode != 0:
+    if completed.returncode not in ok_returncodes:
         return None
-    return completed.stdout.strip()
+    return completed.stdout
 
 
 class GitState(DsioModel):
@@ -59,9 +81,13 @@ def working_tree_patch(cwd: Path | None = None) -> bytes:
 
     ``git diff HEAD`` covers tracked modifications; untracked files are appended as
     ``/dev/null`` diffs so the patch alone is sufficient to rebuild the tree state.
+
+    Built entirely from :func:`_git_raw`, never :func:`_git`: stripping a diff's stdout
+    corrupts it (see :func:`_git_raw`'s docstring), and this is the one value in the
+    module that ``git apply`` later has to parse back byte-for-byte.
     """
     parts: list[str] = []
-    tracked = _git("diff", "HEAD", cwd=cwd)
+    tracked = _git_raw("diff", "HEAD", cwd=cwd)
     if tracked:
         parts.append(tracked)
 
@@ -70,15 +96,21 @@ def working_tree_patch(cwd: Path | None = None) -> bytes:
     for name in (untracked or "").splitlines():
         if not name:
             continue
-        rendered = _git("diff", "--no-index", "--", "/dev/null", name, cwd=cwd)
-        if rendered:
+        # `--no-index` exits 1 whenever the two sides differ, which for a brand-new file
+        # diffed against `/dev/null` is *always* -- so `1` must count as success here, or
+        # every untracked file's content silently falls through to the sha256 stand-in
+        # below instead of actually being captured.
+        rendered = _git_raw(
+            "diff", "--no-index", "--", "/dev/null", name, cwd=cwd, ok_returncodes=frozenset({0, 1})
+        )
+        if rendered and "Binary files" not in rendered:
             parts.append(rendered)
         elif (root / name).is_file():
-            # --no-index returns non-zero for binary or unreadable paths; record its
+            # Binary content, or a path `--no-index` could not read at all: record its
             # digest so the file is at least identified rather than silently dropped.
             digest = sha256_of_file(str(root / name))
-            parts.append(f"# untracked binary {name} sha256={digest}")
-    return ("\n".join(parts) + "\n").encode("utf-8") if parts else b""
+            parts.append(f"# untracked binary {name} sha256={digest}\n")
+    return "".join(parts).encode("utf-8")
 
 
 def capture_git(cwd: Path | None = None) -> GitState:

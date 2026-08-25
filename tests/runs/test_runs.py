@@ -216,6 +216,67 @@ def test_provenance_lands_in_mlflow_byte_identical(config: RunConfig, git_repo: 
         assert downloaded.read_bytes() == local
 
 
+def test_dirty_patch_actually_applies_with_real_git_apply(
+    git_repo: Path, config: RunConfig, tmp_path: Path
+) -> None:
+    """C1: the test above only proves dsio's downloaded patch matches dsio's own local
+    write -- dsio's output compared to dsio's output, which a corrupt patch would pass
+    just as easily. This proves the thing that actually matters: a fresh clone can
+    ``git checkout`` the recorded commit, ``git apply`` the downloaded ``git.patch``, and
+    land on file content identical to the dirty tree that produced the run -- the literal
+    steps ``reproduce.sh`` itself runs.
+
+    The edit lands on the *last* statement of ``foo``, with three blank lines separating
+    it from ``bar``, so the trailing context of its diff hunk is three blank-context
+    lines (a unified diff's blank context line is a single space, not an empty line) and
+    never reaches ``bar``'s code. That is what used to break: ``_git``'s ``str.strip()``
+    ate the trailing blank context, shortening the final hunk by one line relative to its
+    own ``@@ -1,5 +1,5 @@`` header, and ``git apply`` rejected it with "corrupt patch". A
+    dirty edit that instead landed mid-function -- trailing context a code line -- would
+    have passed this test by the same luck the earlier fix wave shipped with.
+    """
+    source = "def foo():\n    return 1\n\n\n\ndef bar():\n    return 2\n"
+    (git_repo / "module.py").write_text(source)
+    subprocess.run(["git", "add", "module.py"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add module.py"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    edited = source.replace("return 1", "return 100")
+    (git_repo / "module.py").write_text(edited)
+
+    load_runners()
+    run = _start(config, repo_root=git_repo)
+    execute(config, run)
+    assert run.mlflow_run_id is not None
+
+    client = MlflowClient(resolve_tracking_uri())
+    downloaded_patch = Path(
+        client.download_artifacts(run.mlflow_run_id, PATCH_FILE)
+    ).read_bytes()
+    assert downloaded_patch == (run.dir / PATCH_FILE).read_bytes()
+
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(git_repo), str(clone)], check=True, capture_output=True
+    )
+    subprocess.run(["git", "checkout", "-q", sha], cwd=clone, check=True, capture_output=True)
+    patch_path = clone / "downloaded.patch"
+    patch_path.write_bytes(downloaded_patch)
+
+    applied = subprocess.run(
+        ["git", "apply", str(patch_path)], cwd=clone, capture_output=True, text=True
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert (clone / "module.py").read_text() == edited
+
+
 # --- git and environment capture (unchanged by decision 7) ------------------------------
 
 
@@ -242,6 +303,24 @@ def test_dirty_tree_is_allowed_and_still_reconstructible(git_repo: Path) -> None
     assert state.code_hash is not None
     assert state.code_hash.startswith(f"{state.sha}-dirty-")
     assert state.patch_sha256 is not None
+
+
+def test_untracked_file_content_is_captured_not_just_a_comment(git_repo: Path) -> None:
+    """I6: ``git diff --no-index`` exits ``1`` whenever the two sides differ, which for a
+    brand-new file diffed against ``/dev/null`` is *always* -- so the old code, which
+    treated any non-zero exit as failure, could never see the diff and always fell
+    through to the ``# untracked binary ... sha256=...`` stand-in, contradicting this
+    module's own docstring promise that "the patch alone is sufficient to rebuild the
+    tree state". A text file's actual content must appear in the patch, not just its
+    digest.
+    """
+    from dsio.runs.provenance import working_tree_patch
+
+    (git_repo / "untracked.txt").write_text("hello from an untracked file\n")
+
+    patch = working_tree_patch(cwd=git_repo).decode("utf-8")
+    assert "hello from an untracked file" in patch
+    assert "untracked binary" not in patch
 
 
 def test_dirty_hash_tracks_content_not_just_filenames(git_repo: Path) -> None:
@@ -298,8 +377,12 @@ def test_reproduce_script_syncs_the_extra_that_produced_this_run(
     assert run.record.env.extra == "cpu"
     script = (run.dir / REPRODUCE_FILE).read_text()
     assert "uv sync --locked --extra cpu" in script
-    # And never the bare, dependency-stripping form on its own line.
-    assert "\nuv sync --locked\n" not in script
+    # No second assertion for "and never the bare form" here: `_reproduce_script`
+    # (`dsio.runs.record`) emits one or the other from a single `if record.env.extra: ...
+    # else: ...`, never both, so that property cannot fail independently of the assertion
+    # above -- it is already the other half of the pair `test_reproduce_script_falls_
+    # back_to_a_bare_sync_with_a_warning_when_the_extra_is_unknown` below proves on its
+    # own, against the `else` branch this test never takes.
 
 
 def test_reproduce_script_falls_back_to_a_bare_sync_with_a_warning_when_the_extra_is_unknown(
