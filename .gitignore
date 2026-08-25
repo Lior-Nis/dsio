@@ -12,6 +12,13 @@
 /models/
 /data/
 
+# MLflow. The compose stack (compose.yaml) keeps the backend store in Postgres and
+# artifacts in the named `mlartifacts` volume, never in the source tree — these entries
+# are a backstop against `mlflow` writing its bare-filesystem defaults if ever run
+# without the tracking URI pointed at the server.
+/mlruns/
+/mlartifacts/
+
 # Python
 __pycache__/
 *.py[cod]

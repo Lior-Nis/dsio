@@ -1,0 +1,33 @@
+# Local infrastructure for decision 7/8 of docs/superpowers/specs/2026-08-20-dsio-lean-design.md:
+# MLflow is the source of truth for runs, and a run fails without it. Local only; cloud
+# training is deliberately out of scope here.
+#
+# Postgres rather than SQLite: decision 6 makes concurrent runs normal (multiple agents
+# launching experiments in parallel), and SQLite is single-writer while MLflow's own
+# gunicorn workers would contend on it.
+#
+# Named volumes, not bind mounts: artifacts must never land in the source tree.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: mlflow
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+  mlflow:
+    build: ./docker/mlflow # ghcr.io/mlflow/mlflow + psycopg2-binary baked in
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql+psycopg2://mlflow:mlflow@postgres/mlflow
+      --default-artifact-root /artifacts
+    volumes: [mlartifacts:/artifacts]
+    ports: ["5000:5000"]
+    depends_on: { postgres: { condition: service_healthy } }
+    restart: unless-stopped
+volumes: { pgdata: , mlartifacts: }

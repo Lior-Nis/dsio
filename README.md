@@ -81,3 +81,20 @@ uv run --extra cpu pytest -q && uv run --extra cpu ruff check . && uv run --extr
 ```
 
 Decisions and their reasons live in `docs/adr/`.
+
+## Tracking
+
+MLflow is the source of truth for runs (see decision 7 of
+`docs/superpowers/specs/2026-08-20-dsio-lean-design.md`): a run fails if it cannot reach it.
+Start the local stack before running anything that trains:
+
+```bash
+docker compose up -d      # Postgres 16 + MLflow, both named volumes — nothing lands in the repo
+docker compose ps         # both services up, postgres healthy
+```
+
+MLflow serves its UI and API on `http://localhost:5000`. The backend store lives in Postgres
+and artifacts in the `mlartifacts` volume; both are named volumes, never bind mounts, so
+`git status` stays clean regardless of how many runs you log. `restart: unless-stopped` means
+the containers come back after a reboot on their own — run `docker compose down` when you
+actually want to stop them.
