@@ -3,7 +3,7 @@
 A reproducible ML/DL experimentation spine.
 
 `dsio` owns the parts every project rebuilds badly: typed configuration, staged data with
-content-addressed caching, leakage-safe splits, a run ledger that makes results
+content-addressed caching, leakage-safe splits, provenance capture that makes results
 reconstructible, and evaluation with honest verdicts. Torch and Lightning are the one
 first-class training path (see `docs/adr/0015-lightning-is-the-only-training-path.md`):
 a model is a `LightningModule` assembled from registered backbone/head/loss/transform
@@ -46,9 +46,11 @@ A single `uv` project rooted at one package:
 
 ```
 pyproject.toml    the project
-src/dsio/         the package: config, data, dataset, model, splits, train, eval, runs, cli, presets
+src/dsio/         the package: config, data, dataset, model, splits, train, eval, runs,
+                  artifacts, contracts, cli, presets
 tests/            its test suite
-runs/             the run ledger (gitignored; the records are the source of truth)
+runs/             a run's local scratch space before its provenance and artifacts land in
+                  MLflow (gitignored; MLflow is the source of truth -- see "Tracking" below)
 stores/ views/    canonical data and derived indices (manifests committed)
 ```
 
@@ -68,7 +70,10 @@ deterministic; index everything cheap and combinatorial.
 
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree
-gate sits at model-registry promotion, where it belongs.
+gate belongs at model-registry promotion: `dsio.artifacts.store.promotion_blockers`
+enforces it today as a policy function with its own tests, ahead of the CLI command
+(`dsio registry promote`) that would call it, which is still aspirational — see
+`docs/adr/0003-never-block-gate-at-promotion.md`.
 
 **Correctness is structural.** Leakage walls are import-linter contracts, not review
 conventions.
@@ -98,3 +103,17 @@ and artifacts in the `mlartifacts` volume; both are named volumes, never bind mo
 `git status` stays clean regardless of how many runs you log. `restart: unless-stopped` means
 the containers come back after a reboot on their own — run `docker compose down` when you
 actually want to stop them.
+
+**Repairing a stack older than `49cad22`.** `mlflow server`'s `--default-artifact-root`
+only affects experiments created *after* it is set, so a long-lived stack whose Postgres
+volume predates that commit keeps experiments (including the built-in Default experiment,
+id `0`, which is provisioned once at database init and can never be recreated) pointed at a
+bare, non-proxied `/artifacts` path — any client that tries to write to one gets
+`PermissionError`. Repoint the existing rows at the proxy scheme directly in Postgres:
+
+```sql
+UPDATE experiments SET artifact_location = 'mlflow-artifacts:/' || experiment_id
+WHERE artifact_location LIKE '/artifacts/%';
+```
+
+A fresh clone with fresh named volumes never hits this.
