@@ -7,6 +7,18 @@
 # gunicorn workers would contend on it.
 #
 # Named volumes, not bind mounts: artifacts must never land in the source tree.
+#
+# Artifact-proxy mode, not a bare `--default-artifact-root` path: with a plain filesystem
+# path (e.g. `/artifacts`), MLflow does NOT proxy artifact writes over HTTP -- a host-side
+# client resolves that path *locally* and tries to write to it directly, which only exists
+# inside this container. `--serve-artifacts` (the v3.10.0 default, made explicit here) plus
+# `--artifacts-destination /artifacts` makes the server itself own reads/writes against the
+# named volume and address new experiments' artifacts via the `mlflow-artifacts:/` proxy
+# scheme, which every client -- including one with no filesystem access to this container --
+# can reach over HTTP. Leaving `--default-artifact-root` unset is deliberate: per MLflow's
+# own `mlflow server --help`, omitting it makes new experiments default to the
+# `mlflow-artifacts:/` proxy URI precisely because `--serve-artifacts` is enabled; setting it
+# to any bare path (proxied or not) reintroduces the bug this comment describes.
 services:
   postgres:
     image: postgres:16
@@ -25,7 +37,7 @@ services:
     command: >
       mlflow server --host 0.0.0.0 --port 5000
       --backend-store-uri postgresql+psycopg2://mlflow:mlflow@postgres/mlflow
-      --default-artifact-root /artifacts
+      --serve-artifacts --artifacts-destination /artifacts
     volumes: [mlartifacts:/artifacts]
     ports: ["5000:5000"]
     depends_on: { postgres: { condition: service_healthy } }

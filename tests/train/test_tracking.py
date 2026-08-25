@@ -170,3 +170,48 @@ def test_require_mlflow_succeeds_against_the_running_compose_stack() -> None:
     """Needs `docker compose up -d` (compose.yaml). Excluded by default; run with
     `uv run --extra cpu pytest -m live`."""
     assert require_mlflow("http://localhost:5000") == "http://localhost:5000"
+
+
+@pytest.mark.live
+def test_the_live_stack_actually_stores_and_serves_back_an_artifact(tmp_path: Path) -> None:
+    """Bug 1's own regression test, at the only level that is honest about what broke:
+    a health check (`docker compose ps`, `curl /health`) and even
+    `test_require_mlflow_succeeds_against_the_running_compose_stack` above both pass
+    against a stack that cannot store a single artifact -- neither exercises an artifact
+    write at all. `compose.yaml` used to pass `--default-artifact-root /artifacts`, a
+    plain filesystem path; MLflow only proxies artifact writes over HTTP (the
+    `mlflow-artifacts:/` scheme) when that flag is left unset with `--serve-artifacts`
+    enabled (see `compose.yaml`'s own comment for the full argument, and MLflow's
+    `mlflow server --help`), so a bare path made every client resolve it *locally* and
+    try to write to a directory that only exists inside the `mlflow` container. This logs
+    a real artifact to a freshly-created experiment against the running server (a new
+    name every run, via `tmp_path`, so it always gets the proxy scheme MLflow assigns to
+    experiments created *after* the fix -- see `compose.yaml`'s comment on why
+    experiments created under the old flag are not retroactively repaired), reads it back
+    over HTTP, and checks the bytes actually round-tripped -- not merely that the call
+    didn't raise.
+    """
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient("http://localhost:5000")
+    experiment_name = f"live-artifact-roundtrip-{time.time_ns()}"
+    experiment_id = client.create_experiment(experiment_name)
+    experiment = client.get_experiment(experiment_id)
+    # The proxy scheme, not a bare filesystem path -- this is the assertion that would
+    # have caught Bug 1 directly, before ever attempting a write.
+    assert experiment.artifact_location.startswith("mlflow-artifacts:/"), (
+        f"experiment artifact_location {experiment.artifact_location!r} is not proxied; "
+        "a client would try to write it directly, which is exactly Bug 1"
+    )
+
+    run = client.create_run(experiment_id)
+    run_id = run.info.run_id
+    payload = b"dsio live artifact round-trip probe\n"
+    local_file = tmp_path / "probe.txt"
+    local_file.write_bytes(payload)
+    try:
+        client.log_artifact(run_id, str(local_file))
+        downloaded = Path(client.download_artifacts(run_id, "probe.txt"))
+        assert downloaded.read_bytes() == payload
+    finally:
+        client.set_terminated(run_id, "FINISHED")
