@@ -32,6 +32,14 @@ paradigm is one object with different pieces in it.
 x -> preprocessor? -> augmentor? -> transform -> spectral_augmentor? -> backbone -> head
 ```
 
+*Diagram corrected 2026-08-26 (Task 6 of Plan 3b, deferred from Plan 3a's review): the two
+train-only slots shown above, `augmentor?` and `spectral_augmentor?`, no longer exist.
+`model/module.py`'s chain is `x -> preprocessor? -> transform -> backbone -> head`, and
+`DsioModule.__init__` takes only `backbone, head, loss, transform, preprocessor` — see
+that module's own docstring ("No stochastic slot, so nothing here can augment a validation
+batch"). Plan 2b's Task 6b moved stochastic augmentation to the dataset
+(`dsio.dataset.dataset.WindowDataset`) instead of a runtime-flag-guarded slot on the model.*
+
 `transform` defaults to identity rather than being optional, so the chain has one shape and
 `forward` needs no branch. One registry per slot, not one registry of models: FORGE's
 documented change-amplification cost was that adding a pretext task meant touching seven
