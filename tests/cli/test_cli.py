@@ -249,3 +249,38 @@ def test_summary_projection_omits_the_config(
     assert "config" in full
     assert "config" not in brief
     assert full["config_hash"] == brief["config_hash"]
+
+
+# --- live: the real compose stack -------------------------------------------------------
+
+
+@pytest.mark.live
+def test_live_run_writes_stdout_that_is_valid_json(
+    workdir: Path, preset_env: dict[str, str]
+) -> None:
+    """I7: MLflow prints a "🏃 View run"/"🧪 View experiment" banner straight to stdout
+    the instant a run is created (`mlflow.tracking._tracking_service.client.
+    MlflowTrackingServiceClient._log_url`, called from `create_run`) -- but only when
+    the tracking store is a real REST-backed one (`isinstance(self.store, RestStore)`),
+    never the `file:` backend every other CLI test in this suite runs against. So this
+    is the one test in the suite that can actually reproduce -- or catch a regression of
+    -- `dsio run ... > out.json` producing a file `json.load` cannot parse. Needs
+    `docker compose up -d` (compose.yaml); excluded by default, run with
+    `uv run --extra cpu pytest -m live`.
+    """
+    import os
+
+    env = {**os.environ, **preset_env, "MLFLOW_TRACKING_URI": "http://localhost:5000"}
+    completed = subprocess.run(
+        [sys.executable, "-m", "dsio.cli.main", "run", "project_preset", "--summary"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "View run" not in completed.stdout, (
+        "MLflow's banner reached stdout -- json.load on this output would fail"
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
