@@ -1,9 +1,13 @@
 """Shared fixtures.
 
-Every test that touches the ledger, registry or data store is pointed at a tmp_path
-root. A test that writes into the real `runs/` (or `stores/`) would pollute the very
-record the system exists to protect — `spine_baseline` (`dsio.presets`) now stages a
-synthetic corpus on resolution, so this isolation is no longer just about the ledger.
+Every test that touches a run's local scratch directory, the model registry or the data
+store is pointed at a tmp_path root. `DSIO_RUNS_ROOT` (`dsio.runs.record.RUNS_ROOT_ENV`)
+no longer points at a ledger -- there is not one any more, per decision 7 of the lean
+design -- but it still matters: unset, a run's scratch directory (`Run.dir`, holding the
+resolved config, the reproduce script and whatever a runner writes before it becomes an
+MLflow artifact) lands under the OS temp directory, not a tmp_path pytest cleans up on
+its own. Pointing it here keeps that scratch space contained the same way `stores/`
+already needs to be.
 
 The same isolation now covers MLflow. `dsio.train.tracking.require_mlflow` (Task 2 of
 plan 3b) makes every torch/ssl_pretrain run fail immediately if MLflow is unreachable, and
@@ -29,7 +33,7 @@ import pytest
 from dsio.artifacts.store import REGISTRY_ROOT_ENV
 from dsio.config import RunConfig
 from dsio.data.store import DATA_ROOT_ENV
-from dsio.runs.record import RUNS_ROOT_ENV, RunLedger
+from dsio.runs.record import RUNS_ROOT_ENV
 
 
 @pytest.fixture(autouse=True)
@@ -39,11 +43,6 @@ def _isolated_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "stores"))
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"file:{tmp_path / 'mlruns'}")
     monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
-
-
-@pytest.fixture
-def ledger() -> RunLedger:
-    return RunLedger()
 
 
 @pytest.fixture

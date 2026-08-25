@@ -26,7 +26,7 @@ from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
-from dsio.runs.record import RunLedger  # noqa: E402
+from dsio.runs.record import start_run  # noqa: E402
 from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
@@ -133,12 +133,12 @@ def pretrain_task(root: Path, method: str = "mae", **overrides) -> SslPretrainTa
 
 
 def run(config: RunConfig, root: Path):  # type: ignore[no-untyped-def]
-    ledger = RunLedger(root / "runs")
-    active = ledger.start(
+    active = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
         seed=config.seed,
+        root=root / "runs",
     )
     with active:
         metrics = execute(config, active)
@@ -193,7 +193,9 @@ def test_every_method_pretrains_and_registers_an_encoder(method: str, corpus: Pa
     assert metrics["feature_dim"] == 16.0
     assert metrics["train_windows"] > 0
     version = ModelRegistry().versions(f"enc_{method}")[-1]
-    assert version.run_id == active.run_id
+    # `run_id` cites MLflow's own run id, not dsio's human-readable label -- see
+    # `run_ssl_pretrain`'s comment on the same field in `dsio.train.ssl_task`.
+    assert version.run_id == active.mlflow_run_id
     assert version.size_bytes > 0
 
 

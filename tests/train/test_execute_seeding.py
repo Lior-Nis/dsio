@@ -26,7 +26,7 @@ from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
-from dsio.runs.record import RunLedger  # noqa: E402
+from dsio.runs.record import start_run  # noqa: E402
 from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train import load_runners  # noqa: E402
 from dsio.train.runner import execute  # noqa: E402
@@ -83,12 +83,12 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _run_once(config: RunConfig, runs_root: Path) -> dict[str, float]:
-    ledger = RunLedger(runs_root)
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
         seed=config.seed,
+        root=runs_root,
     )
     with run:
         return execute(config, run)

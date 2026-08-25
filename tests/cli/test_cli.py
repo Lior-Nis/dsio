@@ -222,15 +222,19 @@ def test_the_run_record_stamps_which_fold_ran(
 ) -> None:
     """`dsio run` never sees `fold` by name -- `run_cmd.py` reaches for it off the
     resolved task generically (`getattr(config.task, "fold", None)`) -- so this proves
-    the wiring end to end, not just that `RunLedger.start` can accept the field."""
-    from dsio.runs.record import RunLedger
+    the wiring end to end, via the MLflow tag `stamp_provenance` sets
+    (`dsio.train.tracking`), not just that a local record can carry the field."""
+    from mlflow.tracking import MlflowClient
+
+    from dsio.train.tracking import resolve_tracking_uri
 
     runs_root = workdir / "runs"
     env = {**preset_env, "DSIO_RUNS_ROOT": str(runs_root)}
     code, payload = dsio("run", "project_preset", "--summary", cwd=workdir, env_extra=env)
     assert code == 0, payload
-    record = RunLedger(runs_root).load(payload["run_id"]).record
-    assert record.fold == 0
+    client = MlflowClient(resolve_tracking_uri())
+    tags = client.get_run(payload["mlflow_run_id"]).data.tags
+    assert tags["fold"] == "0"
 
 
 def test_summary_projection_omits_the_config(

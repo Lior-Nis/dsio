@@ -1,7 +1,8 @@
 """Durable file writes.
 
-Used by both the run ledger and the model registry. A partially-written run record or
-model artifact is worse than a missing one, because it looks complete.
+Used by both a run's local provenance files (``dsio.runs.record``) and the model
+registry. A partially-written provenance file or model artifact is worse than a missing
+one, because it looks complete.
 """
 
 from __future__ import annotations

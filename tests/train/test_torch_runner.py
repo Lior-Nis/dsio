@@ -21,7 +21,7 @@ from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
-from dsio.runs.record import RunLedger  # noqa: E402
+from dsio.runs.record import start_run  # noqa: E402
 from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
@@ -174,8 +174,7 @@ def test_a_bad_fold_fails_the_same_way_even_without_preflight(
     gives it, not just the one that remembered to call `check()` first -- every test
     below this one calls `execute()` directly, exactly like this."""
     config = RunConfig(name="ghost-fold", task=make_task(corpus, fold=7))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -192,8 +191,7 @@ def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path, tmp_path: Pa
     config = RunConfig(
         name="ghost-fold", task=make_task(corpus, fold=7, store="does-not-exist")
     )
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -223,8 +221,7 @@ def test_mlflow_unreachable_fails_the_same_way_even_without_preflight(
     preflight` proves for `require_fold`, above."""
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
     config = RunConfig(name="unreachable", task=make_task(corpus))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -246,8 +243,7 @@ def test_mlflow_unreachable_fails_before_the_store_even_opens(
     config = RunConfig(
         name="unreachable", task=make_task(corpus, fold=7, store="does-not-exist")
     )
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -264,8 +260,7 @@ def test_a_completed_run_logs_its_metrics_to_mlflow(corpus: Path, tmp_path: Path
     MLflow, through the same `MLFlowLogger` the Trainer streams `self.log(...)` calls
     through (`build_mlflow_logger`, `dsio.train.tracking`)."""
     config = RunConfig(name="mlflow-logs", task=make_task(corpus))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -296,13 +291,11 @@ def test_two_folds_of_one_config_land_in_one_mlflow_experiment(
     """`build_mlflow_logger` sets `experiment_name=config.name`, which is what makes a
     shell loop over folds (`dsio run p task.fold=$i`, same `name` every invocation)
     group natively in MLflow, rather than scattering one experiment per run."""
-    ledger = RunLedger(tmp_path / "runs")
-
     from mlflow.tracking import MlflowClient
 
     for fold in (0, 1):
         config = RunConfig(name="cv-sweep", task=make_task(corpus, fold=fold))
-        run = ledger.start(
+        run = start_run(
             name=config.name,
             config=config.to_dict(),
             config_hash=config.config_hash,
@@ -431,8 +424,7 @@ def test_the_runner_produces_the_same_artifact_contract(corpus: Path, tmp_path: 
     config = RunConfig(name="tone", seed=0, task=make_task(corpus))
     check(config)
 
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -475,8 +467,7 @@ def test_pool_folds_refuses_folds_trained_under_different_backbones(
             ),
         )
         config = RunConfig(name="mismatch", seed=0, task=task)
-        ledger = RunLedger(tmp_path / "runs")
-        run = ledger.start(
+        run = start_run(
             name=config.name,
             config=config.to_dict(),
             config_hash=config.config_hash,
@@ -506,8 +497,7 @@ def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> N
         ),
     )
     config = RunConfig(name="tone", seed=0, task=task)
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -546,8 +536,7 @@ def test_running_one_fold_writes_only_that_folds_predictions(
     from dsio.splits.folds import load_folds, split_path
 
     config = RunConfig(name="subset", seed=0, task=make_task(corpus, fold=1))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -573,8 +562,7 @@ def test_the_run_records_which_corpus_it_read(corpus: Path, tmp_path: Path) -> N
     import json
 
     config = RunConfig(name="prov", seed=0, task=make_task(corpus))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -617,8 +605,7 @@ def test_a_short_prediction_fails_the_run_instead_of_scoring_silently(
     monkeypatch.setattr(torch_task, "_assemble", truncated_assemble)
 
     config = RunConfig(name="short", seed=0, task=make_task(corpus))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -645,8 +632,7 @@ def test_a_fold_that_cannot_be_scored_fails_with_a_split_explanation(
     monkeypatch.setattr(torch_task, "compute", explode)
 
     config = RunConfig(name="unscoreable", seed=0, task=make_task(corpus))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,

@@ -27,6 +27,7 @@ from dsio.train.tracking import (  # noqa: E402
     TRACKING_URI_ENV,
     MlflowUnavailableError,
     build_mlflow_logger,
+    finite_metrics,
     require_mlflow,
     resolve_tracking_uri,
 )
@@ -91,6 +92,26 @@ def test_build_mlflow_logger_disables_model_logging(tmp_path: Path) -> None:
     assert logger._experiment_name == "probe-experiment"
     assert logger._run_name == "run-123"
     assert logger._tracking_uri == uri
+
+
+# --- metrics filtering: rehomed from the deleted `Run.log_metrics` ----------------------
+
+
+def test_finite_metrics_drops_non_finite_values() -> None:
+    """The property ``RunLedger``'s old ``Run.log_metrics`` used to guard: a NaN or inf
+    in a metric stream breaks every downstream comparison, so it is dropped rather than
+    logged. Rehomed here because metrics are logged straight to MLflow now
+    (``dsio.train.torch_task.run_torch``, ``dsio.train.ssl_task.run_ssl_pretrain``), not
+    through ``Run`` -- see ``tests/runs/test_runs.py``'s note on the deleted test."""
+    finite = finite_metrics({"good": 1.0, "bad": float("nan"), "worse": float("inf")})
+    assert finite == {"good": 1.0}
+
+
+def test_finite_metrics_keeps_every_finite_value() -> None:
+    """The acceptance half: a guard that drops non-finite values must not also drop
+    ordinary ones, including a legitimate zero."""
+    finite = finite_metrics({"accuracy": 0.875, "loss": 0.0, "auc": 1.0})
+    assert finite == {"accuracy": 0.875, "loss": 0.0, "auc": 1.0}
 
 
 # --- unreachable http(s) fails, fast, with a useful message -----------------------------

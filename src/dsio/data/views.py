@@ -6,7 +6,7 @@ store reaches hundreds of gigabytes; the same configurations are a few index fil
 copy.
 
 The index is content-addressed by its spec, so a view either already exists for exactly
-these parameters or is rebuilt — the same rule the run ledger uses for identity.
+these parameters or is rebuilt — the same rule a run's ``config_hash`` uses for identity.
 
 **Every window carries its entity and group.** That is not bookkeeping. Overlapping windows
 that straddle a split boundary put near-identical rows in train and test simultaneously —

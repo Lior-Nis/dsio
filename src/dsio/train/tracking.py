@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lightning.pytorch.loggers import MLFlowLogger
 from mlflow.environment_variables import (
@@ -109,6 +109,13 @@ def require_mlflow(tracking_uri: str | None = None) -> str:
     return uri
 
 
+#: MLflow's own cap on a param value's length (`mlflow.utils.validation.
+#: MAX_PARAM_VAL_LENGTH` is more generous in recent servers, but 250 is the number the
+#: spec's own table names, and truncating consistently is what "for search only" means:
+#: the config artifact, not the params table, is what recovers a value exactly).
+_MAX_PARAM_VALUE_LENGTH = 250
+
+
 def build_mlflow_logger(config: RunConfig, run: Run, tracking_uri: str) -> MLFlowLogger:
     """The Lightning logger a runner's ``Trainer`` streams ``self.log(...)`` metrics through.
 
@@ -127,3 +134,86 @@ def build_mlflow_logger(config: RunConfig, run: Run, tracking_uri: str) -> MLFlo
         tracking_uri=tracking_uri,
         log_model=False,
     )
+
+
+def finite_metrics(metrics: dict[str, float]) -> dict[str, float]:
+    """Drop non-finite values before they reach MLflow.
+
+    ``RunLedger``'s old ``Run.log_metrics`` filtered these for the same reason this does:
+    a NaN or inf in a metric stream breaks every downstream comparison, and silently
+    poisoning a run's record is worse than a gap. Lightning's own per-step ``self.log(...)``
+    calls never went through that filter (they flow straight from the training loop to
+    ``mlflow_logger.log_metrics``, not through ``Run``), so this only ever needs to guard
+    the held-out metrics a runner computes explicitly and logs itself
+    (``dsio.train.torch_task.run_torch``, ``dsio.train.ssl_task.run_ssl_pretrain``) --
+    which is exactly where callers of this function are.
+    """
+    return {
+        key: float(value)
+        for key, value in metrics.items()
+        if isinstance(value, int | float)
+        and float(value) == float(value)
+        and float(value) not in (float("inf"), float("-inf"))
+    }
+
+
+def stamp_provenance(run: Run, mlflow_logger: MLFlowLogger) -> None:
+    """Log everything ADR 0002 said MLflow could not hold, as decision 7's own table says
+    to: the dirty diff and the reproduce script as artifacts, the resolved config as an
+    artifact (params cap at 250 characters; the file is what recovers it exactly), and
+    ``config_hash`` as a tag so a run's identity is searchable, not just recoverable.
+
+    Called first thing inside a runner, right after ``build_mlflow_logger`` -- before the
+    store, a module or a ``Trainer`` exist -- so a run's provenance lands in MLflow before
+    any expensive work happens, the same guarantee ``RunLedger.start`` used to give by
+    writing ``run.json`` to disk first. Accessing ``mlflow_logger.run_id`` here is also
+    what actually creates the MLflow run (it is created lazily, on first access): calling
+    this early is what makes that happen early too, not merely what happens to log early.
+    """
+    client = mlflow_logger.experiment
+    mlflow_run_id = mlflow_logger.run_id
+    run.mlflow_run_id = mlflow_run_id
+
+    client.set_tag(mlflow_run_id, "config_hash", run.record.config_hash)
+    if run.record.fold is not None:
+        client.set_tag(mlflow_run_id, "fold", str(run.record.fold))
+
+    for path in run.provenance_files:
+        client.log_artifact(mlflow_run_id, str(path))
+
+    for key, value in _flatten_params(run.record.config).items():
+        client.log_param(mlflow_run_id, key, value)
+
+
+def log_run_artifacts(run: Run, mlflow_logger: MLFlowLogger) -> None:
+    """Upload whatever a runner wrote into ``run.artifacts_dir`` -- predictions,
+    checkpoints, an exported encoder -- to the same MLflow run its metrics landed in.
+
+    ``run.artifacts_dir`` is local scratch space (see ``dsio.runs.record``'s module
+    docstring): this is the point at which those files actually become MLflow artifacts,
+    called once a runner has finished writing them, at the end of its work.
+    """
+    directory = run.artifacts_dir
+    if any(directory.iterdir()):
+        mlflow_logger.experiment.log_artifacts(mlflow_logger.run_id, str(directory))
+
+
+def _flatten_params(config: dict[str, Any], prefix: str = "") -> dict[str, str]:
+    """Flatten scalar leaves of a nested config into dotted keys for MLflow's params table.
+
+    Params exist for *search* only (decision 7's table) -- filtering runs by
+    ``task.lr`` in the UI -- not for reconstructing the config, which is what
+    ``config.resolved.yaml`` (logged as an artifact, byte-exact) is for. A sequence has
+    no single scalar representation worth filtering on, so it is skipped rather than
+    mangled into a lossy string.
+    """
+    flat: dict[str, str] = {}
+    for key, value in config.items():
+        dotted = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            flat.update(_flatten_params(value, dotted))
+        elif isinstance(value, list | tuple):
+            continue
+        else:
+            flat[dotted] = str(value)[:_MAX_PARAM_VALUE_LENGTH]
+    return flat
