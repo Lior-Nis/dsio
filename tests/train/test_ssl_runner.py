@@ -24,10 +24,10 @@ from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
-from dsio.eval.contract import read_report  # noqa: E402
+from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import RunLedger  # noqa: E402
-from dsio.splits.models import SplitFile  # noqa: E402
+from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
@@ -73,15 +73,19 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         {"test": ["p3", "p4", "p5"], "train": ["p0", "p1", "p2", "p6", "p7", "p8"]},
         {"test": ["p6", "p7", "p8"], "train": ["p0", "p1", "p2", "p3", "p4", "p5"]},
     ]
-    for fold, parts in enumerate(folds):
-        SplitFile(
-            store=store.path.name,
-            store_manifest_sha256=digest,
-            name="k3",
-            fold=fold,
-            counts={part: len(members) for part, members in parts.items()},
-            parts=parts,
-        ).save(tmp_path / "splits" / "k3" / f"fold{fold}.yaml")
+    SplitFile(
+        store=store.path.name,
+        store_manifest_sha256=digest,
+        name="k3",
+        folds=[
+            SplitFold(
+                index=fold,
+                counts={part: len(members) for part, members in parts.items()},
+                parts=parts,
+            )
+            for fold, parts in enumerate(folds)
+        ],
+    ).save(tmp_path / "splits" / "k3" / "split.yaml")
     return tmp_path
 
 
@@ -167,6 +171,15 @@ def test_preflight_resolves_probe_only_names(corpus: Path) -> None:
         check(config)
 
 
+def test_preflight_rejects_a_fold_the_split_family_does_not_declare(corpus: Path) -> None:
+    """The same guard `run_ssl_pretrain` has at the top of the runner, reached here from
+    the CLI's pre-flight step instead -- both call `require_fold`, so both name the same
+    missing fold with `SplitFile.fold`'s own message."""
+    config = RunConfig(name="p", task=pretrain_task(corpus, fold=7))
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        check(config)
+
+
 # --- pretraining --------------------------------------------------------------------
 
 
@@ -214,14 +227,14 @@ def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
     from dsio.data.adapters import SignalExamples
     from dsio.data.store import data_root
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import fold_paths, load_folds
+    from dsio.splits.folds import load_folds, split_path
     from dsio.train.ssl_task import build_loaders, build_module
 
     task = pretrain_task(corpus, method)
     store = SignalStore(data_root() / task.store)
     index = load_or_build(store, task.window)
     examples = SignalExamples(store, index)
-    folds = load_folds(examples, fold_paths(task.splits_root, task.split))
+    folds = load_folds(examples, split_path(task.splits_root, task.split))
     fold = next(f for f in folds if f.index == task.fold)
 
     module, _ = build_module(task, channels=store.channels, length=task.window.length)
@@ -243,13 +256,17 @@ def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
     assert losses == [losses[0]] * 5, f"{method}: val/loss moved across repeated passes: {losses}"
 
 
-def test_pretraining_writes_no_evaluation_report(corpus: Path) -> None:
-    """Pretraining is deliberately not a fold loop. A cross-validated masked-reconstruction
-    MSE is a number nobody should act on, so it is not produced."""
+def test_pretraining_writes_no_held_out_predictions(corpus: Path) -> None:
+    """Pretraining deliberately produces no scored artifact. A masked-reconstruction MSE on
+    held-out windows is a number nobody should act on, so it is not written.
+
+    Before decision 6 this asserted that `read_report` found no evaluation report. That
+    function is gone with the fold loop, but the property is unchanged: what pretraining
+    must not leave behind is now `predictions.npz`, the file `pool_folds` would pick up.
+    """
     config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
     active, _ = run(config, corpus)
-    with pytest.raises(ValueError, match="no evaluation report"):
-        read_report(active.artifacts_dir)
+    assert not (active.artifacts_dir / PREDICTIONS_FILE).exists()
 
 
 def test_the_encoder_records_its_lineage(corpus: Path) -> None:
@@ -274,8 +291,22 @@ def test_the_online_probe_runs_during_pretraining(corpus: Path) -> None:
 
 
 def test_pretraining_on_a_missing_fold_fails_loudly(corpus: Path) -> None:
+    """The message is `SplitFile.fold`'s, reused via `require_fold` rather than
+    hand-rolled a second time here, so it names every fold the family actually has."""
     config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus, fold=7))
-    with pytest.raises(ValueError, match="fold 7 is not in split family"):
+    with pytest.raises(ValueError, match=r"split 'k3' has no fold 7; it defines folds"):
+        run(config, corpus)
+
+
+def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path) -> None:
+    """Proves the guard runs before any data loading, not merely that it eventually
+    fires: a store that does not exist would raise `StoreError` first if the fold check
+    ran any later than the top of `run_ssl_pretrain` -- which is where it used to run,
+    after the store, index and examples were already built."""
+    config = RunConfig(
+        name="pre", seed=0, task=pretrain_task(corpus, fold=7, store="does-not-exist")
+    )
+    with pytest.raises(ValueError, match=r"split 'k3' has no fold 7; it defines folds"):
         run(config, corpus)
 
 
@@ -288,6 +319,7 @@ def downstream_task(root: Path, encoder: EncoderRef | None) -> TorchTask:
         window=WINDOW,
         labels="tone",
         split="k3",
+        fold=0,
         splits_root=root / "splits",
         backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 16, "depth": 1}),
         head=Component(name="linear", params={"out_dim": 2}),
@@ -312,8 +344,8 @@ def test_a_pinned_encoder_loads_into_a_downstream_run(corpus: Path, pretrained: 
     check(config)
     active, metrics = run(config, corpus)
     assert "accuracy" in metrics
-    report, _ = read_report(active.artifacts_dir)
-    assert report.n_folds == 3
+    with np.load(active.artifacts_dir / "predictions.npz", allow_pickle=False) as data:
+        assert int(data["fold"]) == 0
 
 
 def test_a_tampered_digest_fails_closed(corpus: Path, pretrained: EncoderRef) -> None:

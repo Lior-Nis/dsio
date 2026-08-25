@@ -12,7 +12,7 @@ import pytest
 from dsio.data.adapters import TableExamples
 from dsio.data.examples import Examples, ExamplesError, assert_consistent, check, group_attribute
 from dsio.splits.folds import folds_from_splits
-from dsio.splits.models import SplitFile
+from dsio.splits.models import SplitFile, SplitFold
 from dsio.splits.resolve import resolve
 
 
@@ -135,17 +135,25 @@ def _table_kfold(table: TableExamples) -> list[SplitFile]:
             store=table.name,
             store_manifest_sha256=table.digest,
             name="k2",
-            fold=0,
-            counts={"train": 6, "test": 6},
-            parts={"train": ["g2", "g3"], "test": ["g0", "g1"]},
+            folds=[
+                SplitFold(
+                    index=0,
+                    counts={"train": 6, "test": 6},
+                    parts={"train": ["g2", "g3"], "test": ["g0", "g1"]},
+                )
+            ],
         ),
         SplitFile(
             store=table.name,
             store_manifest_sha256=table.digest,
             name="k2",
-            fold=1,
-            counts={"train": 6, "test": 6},
-            parts={"train": ["g0", "g1"], "test": ["g2", "g3"]},
+            folds=[
+                SplitFold(
+                    index=1,
+                    counts={"train": 6, "test": 6},
+                    parts={"train": ["g0", "g1"], "test": ["g2", "g3"]},
+                )
+            ],
         ),
     ]
 
@@ -154,7 +162,7 @@ def test_splitting_works_on_a_dataset_that_is_only_grouping(table: TableExamples
     """The headline: no store, no windows, no tensors — and the split layer does not care."""
     splits = _table_kfold(table)
     assert len(splits) == 2
-    parts = resolve(table, splits[0])
+    parts = resolve(table, splits[0], splits[0].fold(0))
     assert set(parts) >= {"train", "test"}
     assert sum(len(part) for part in parts.values()) == len(table)
 
@@ -182,6 +190,6 @@ def test_a_table_cannot_prove_row_overlap_and_says_why(table: TableExamples) -> 
     from dsio.splits.resolve import assert_no_row_overlap
 
     splits = _table_kfold(table)
-    parts = resolve(table, splits[0])
+    parts = resolve(table, splits[0], splits[0].fold(0))
     with pytest.raises(SplitError, match="cannot prove row-level disjointness"):
         assert_no_row_overlap(parts)

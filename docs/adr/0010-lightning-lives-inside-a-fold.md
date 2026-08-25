@@ -2,10 +2,10 @@
 
 Status: accepted (2026-08-18)
 Implements: the plan's Phase 4 (torch runner), and ADR 0004 items 9 and 10.
-Superseded in part by ADR 0017 (accepted 2026-08-20, implemented in Plan 3): Lightning's
-loop no longer sits inside a fold loop, because there is no fold loop — one run is one fold.
-The component chain and its enforced invariants survive; ADR 0015 makes them the only
-training path rather than one of three.
+Superseded in part by ADR 0017 (accepted 2026-08-20, implemented in Plan 3a): Lightning's
+loop no longer sits inside a fold loop, because there is no fold loop — one run
+(`train/torch_task.py::run_torch`) is one fold. The component chain and its enforced
+invariants survive; ADR 0015 makes them the only training path rather than one of three.
 
 ## Context
 
@@ -82,10 +82,11 @@ in a config still fails loudly rather than vanishing into a `**kwargs` catch-all
 are registered as classes rather than through wrapper functions precisely so the signature
 is real.
 
-**Committed splits are required, not optional.** The runner resolves `fold_paths` in
+**Committed splits are required, not optional.** The runner resolves the named split in
 pre-flight and fails with "commit a split file there first" rather than generating
-something unrecorded on the fly. Splits are provenance (ADR 0006); a torch run that
-invents its own has no provenance to cite.
+something unrecorded on the fly — `require_fold` (`splits/folds.py`), called from
+`check_torch` (`train/torch_task.py`) today. Splits are provenance (ADR 0006); a torch run
+that invents its own has no provenance to cite.
 
 ## What building this surfaced
 

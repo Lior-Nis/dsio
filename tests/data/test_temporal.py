@@ -10,7 +10,7 @@ import pytest
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, StoreError
 from dsio.data.views import WindowSpec, build_index
-from dsio.splits.models import SplitFile
+from dsio.splits.models import SplitFile, SplitFold
 from dsio.splits.resolve import resolve
 from dsio.splits.temporal import (
     TemporalBounds,
@@ -46,15 +46,14 @@ def _temporal_folds(
                 store=examples.name,
                 store_manifest_sha256=examples.digest,
                 name=name,
-                fold=fold,
-                counts=counts,
-                parts=groups or {},
-                temporal=bounds,
                 notes=(
                     f"{counts['discarded']} window(s) discarded by purge and embargo"
                     if counts.get("discarded")
                     else None
                 ),
+                folds=[
+                    SplitFold(index=fold, counts=counts, parts=groups or {}, temporal=bounds)
+                ],
             )
         )
     return files
@@ -248,7 +247,7 @@ def test_generated_temporal_split_resolves(market: SignalStore, index) -> None:
     folds = _temporal_folds(SignalExamples(market, index), spec, name="wf")
     assert len(folds) == 3
 
-    parts = resolve(SignalExamples(market, index), folds[0])
+    parts = resolve(SignalExamples(market, index), folds[0], folds[0].fold(0))
     assert set(parts) == {"train", "test"}
     assert len(parts["train"]) > 0 and len(parts["test"]) > 0
     assert len(parts["train"]) + len(parts["test"]) < len(index)  # the band was discarded
@@ -267,7 +266,7 @@ def test_a_temporal_split_needs_a_dataset_with_a_clock(market: SignalStore, inde
         digest=SignalExamples(market, index).digest,
     )
     with pytest.raises(SplitError, match="no time coordinates"):
-        resolve(timeless, folds[0])
+        resolve(timeless, folds[0], folds[0].fold(0))
 
 
 def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) -> None:
@@ -277,10 +276,13 @@ def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) 
     path = tmp_path / "wf0.yaml"
     folds[0].save(path)
     restored = SplitFile.load(path)
-    assert restored.temporal is not None
-    assert restored.temporal.label_horizon == 30
-    assert restored.temporal.embargo == 40
-    assert restored.temporal.spans["test"][0].start == folds[0].temporal.spans["test"][0].start
+    restored_temporal = restored.fold(0).temporal
+    original_temporal = folds[0].fold(0).temporal
+    assert restored_temporal is not None
+    assert restored_temporal.label_horizon == 30
+    assert restored_temporal.embargo == 40
+    assert original_temporal is not None
+    assert restored_temporal.spans["test"][0].start == original_temporal.spans["test"][0].start
 
 
 def test_temporal_header_states_the_rules(market: SignalStore, index) -> None:
@@ -298,7 +300,7 @@ def test_temporal_composes_with_a_group_partition(market: SignalStore, index) ->
     folds = _temporal_folds(SignalExamples(market, index), TemporalSpec(n_splits=1,
         test_fraction=0.2), name="wf", groups=groups
     )
-    parts = resolve(SignalExamples(market, index), folds[0])
+    parts = resolve(SignalExamples(market, index), folds[0], folds[0].fold(0))
     assert set(parts["train"].groups.tolist()) <= {"AAPL", "MSFT"}
     assert set(parts["test"].groups.tolist()) <= {"NVDA"}
 

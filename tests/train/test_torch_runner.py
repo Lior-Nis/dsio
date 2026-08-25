@@ -20,15 +20,15 @@ from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
-from dsio.eval.contract import read_report  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import RunLedger  # noqa: E402
-from dsio.splits.models import SplitFile  # noqa: E402
+from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
     Component,
     TorchTask,
     TrainerConfig,
+    _fold_invariant_config_hash,
     build_callbacks,
     build_module,
     sanitise_metric,
@@ -71,15 +71,19 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         {"test": ["p3", "p4", "p5"], "val": ["p6"], "train": ["p0", "p1", "p2", "p7"]},
         {"test": ["p6", "p7"], "val": ["p0"], "train": ["p1", "p2", "p3", "p4", "p5"]},
     ]
-    for fold, parts in enumerate(folds):
-        SplitFile(
-            store=store.path.name,
-            store_manifest_sha256=digest,
-            name="k3",
-            fold=fold,
-            counts={part: len(members) for part, members in parts.items()},
-            parts=parts,
-        ).save(tmp_path / "splits" / "k3" / f"fold{fold}.yaml")
+    SplitFile(
+        store=store.path.name,
+        store_manifest_sha256=digest,
+        name="k3",
+        folds=[
+            SplitFold(
+                index=fold,
+                counts={part: len(members) for part, members in parts.items()},
+                parts=parts,
+            )
+            for fold, parts in enumerate(folds)
+        ],
+    ).save(tmp_path / "splits" / "k3" / "split.yaml")
     return tmp_path
 
 
@@ -89,6 +93,7 @@ def make_task(root: Path, **overrides) -> TorchTask:  # type: ignore[no-untyped-
         window=WindowSpec(length=128, stride=64, label_policy="majority"),
         labels="tone",
         split="k3",
+        fold=0,
         splits_root=root / "splits",
         backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 8, "depth": 1}),
         head=Component(name="linear", params={"out_dim": 2}),
@@ -99,6 +104,38 @@ def make_task(root: Path, **overrides) -> TorchTask:  # type: ignore[no-untyped-
         trainer=TrainerConfig(max_epochs=2, accelerator="cpu", devices=1, checkpoint=False),
     )
     return TorchTask(**{**defaults, **overrides})
+
+
+# --- what identifies "the same experiment" -------------------------------------------
+
+
+def test_naming_each_folds_run_distinctly_still_pools(corpus: Path) -> None:
+    """The identity must ignore what merely labels a run.
+
+    `dsio run p task.fold=$i --name exp-fold$i` is a natural way to drive a shell loop, and
+    every one of those runs belongs to one cross-validation. If `name` or `tags` reached the
+    hash, pooling a perfectly valid CV would be refused -- and a guard that rejects the
+    obvious workflow gets worked around, which protects nothing at all.
+    """
+    left = RunConfig(name="exp-fold0", tags=("sweep", "a"), task=make_task(corpus, fold=0))
+    right = RunConfig(name="exp-fold1", tags=("sweep", "b"), task=make_task(corpus, fold=1))
+    assert _fold_invariant_config_hash(left) == _fold_invariant_config_hash(right)
+
+
+def test_a_different_seed_is_a_different_experiment(corpus: Path) -> None:
+    """`seed` stays in the identity where `name` does not: it changes the weights, so two
+    folds seeded differently are two different training runs, not one CV."""
+    left = RunConfig(name="exp", seed=1, task=make_task(corpus, fold=0))
+    right = RunConfig(name="exp", seed=2, task=make_task(corpus, fold=1))
+    assert _fold_invariant_config_hash(left) != _fold_invariant_config_hash(right)
+
+
+def test_a_different_hyperparameter_is_a_different_experiment(corpus: Path) -> None:
+    """The identity is derived from the task, not hardcoded to a constant -- which is the
+    way this guard would fail while every refusal test above still passed."""
+    left = RunConfig(name="exp", task=make_task(corpus, fold=0, lr=1e-3))
+    right = RunConfig(name="exp", task=make_task(corpus, fold=1, lr=5e-3))
+    assert _fold_invariant_config_hash(left) != _fold_invariant_config_hash(right)
 
 
 # --- pre-flight ----------------------------------------------------------------------
@@ -118,6 +155,51 @@ def test_preflight_requires_the_split_files_to_exist(corpus: Path) -> None:
     config = RunConfig(name="nosplit", task=make_task(corpus, split="never_made"))
     with pytest.raises(Exception, match="commit a split file"):
         check(config)
+
+
+def test_preflight_rejects_a_fold_the_split_family_does_not_declare(corpus: Path) -> None:
+    """The message is `SplitFile.fold`'s, reused via `require_fold` rather than
+    hand-rolled a second time here -- the same message `SslPretrainTask` produces for
+    the same mistake (see `test_pretraining_on_a_missing_fold_fails_loudly`)."""
+    config = RunConfig(name="ghost-fold", task=make_task(corpus, fold=7))
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        check(config)
+
+
+def test_a_bad_fold_fails_the_same_way_even_without_preflight(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """Every caller that reaches `execute()` gets the same guard the CLI's pre-flight
+    gives it, not just the one that remembered to call `check()` first -- every test
+    below this one calls `execute()` directly, exactly like this."""
+    config = RunConfig(name="ghost-fold", task=make_task(corpus, fold=7))
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        execute(config, run)
+
+
+def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path, tmp_path: Path) -> None:
+    """Proves the guard runs before any data loading, not merely that it eventually
+    fires: a store that does not exist would raise `StoreError` first if the fold check
+    ran any later than the top of `run_torch`."""
+    config = RunConfig(
+        name="ghost-fold", task=make_task(corpus, fold=7, store="does-not-exist")
+    )
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
+        execute(config, run)
 
 
 def test_a_label_policy_of_none_is_rejected_at_config_time(corpus: Path) -> None:
@@ -230,7 +312,7 @@ def test_build_module_wires_predict_into_the_module(corpus: Path) -> None:
 
 
 def test_the_runner_produces_the_same_artifact_contract(corpus: Path, tmp_path: Path) -> None:
-    """The point of the fold loop: a torch run and a tabular run are read identically."""
+    """One run, one fold: `predictions.npz` carries what a pooling reader needs later."""
     config = RunConfig(name="tone", seed=0, task=make_task(corpus))
     check(config)
 
@@ -244,13 +326,53 @@ def test_the_runner_produces_the_same_artifact_contract(corpus: Path, tmp_path: 
     with run:
         metrics = execute(config, run)
 
-    assert set(metrics) >= {"accuracy", "roc_auc", "coverage"}
-    report, oof = read_report(run.artifacts_dir)
-    assert report.n_folds == 3
-    assert report.coverage == 1.0
-    assert report.fold_fingerprint is not None
-    assert oof is not None and len(oof) == report.predicted_rows
-    assert sorted(oof.row_id.tolist()) == list(range(report.n_rows))
+    assert set(metrics) >= {"accuracy", "roc_auc"}
+
+    with np.load(run.artifacts_dir / "predictions.npz", allow_pickle=False) as data:
+        assert int(data["fold"]) == 0
+        assert str(data["split"]) == "k3"
+        assert len(data["row_id"]) == len(data["y_true"]) == len(data["y_pred"])
+        assert "y_score" in data.files
+        store = SignalStore(Path(corpus) / "stores" / "tone")
+        assert str(data["split_digest"]) == store.manifest().signal_sha256
+        # Critical 1: the fifth invariant `cross_validate` used to get for free from holding
+        # one closure and one `Examples` -- a pooling reader needs both recorded per fold.
+        assert str(data["window_digest"]) == config.task.window.digest  # type: ignore[attr-defined]
+        assert str(data["config_identity"])
+
+
+def test_pool_folds_refuses_folds_trained_under_different_backbones(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """Critical 1, end to end. The reviewer demonstrated the failure with real runs: three
+    folds trained with different `hidden`/`depth`/`lr` pooled without complaint into a
+    plausible-looking `{'accuracy': 0.375, 'roc_auc': 0.500}`. Two real single-fold runs
+    here, one per backbone width, must refuse to pool rather than repeat that."""
+    from dsio.eval.pool import pool_folds
+
+    run_dirs = []
+    for fold, hidden in ((0, 8), (1, 16)):
+        task = make_task(
+            corpus,
+            fold=fold,
+            backbone=Component(
+                name="conv1d", params={"hidden": hidden, "out_dim": 8, "depth": 1}
+            ),
+        )
+        config = RunConfig(name="mismatch", seed=0, task=task)
+        ledger = RunLedger(tmp_path / "runs")
+        run = ledger.start(
+            name=config.name,
+            config=config.to_dict(),
+            config_hash=config.config_hash,
+            seed=config.seed,
+        )
+        with run:
+            execute(config, run)
+        run_dirs.append(run.artifacts_dir)
+
+    with pytest.raises(Exception, match="config"):
+        pool_folds(run_dirs, metrics=("accuracy",))
 
 
 def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> None:
@@ -285,22 +407,30 @@ def test_no_group_is_both_trained_on_and_tested(corpus: Path, tmp_path: Path) ->
     """The leakage guarantee, verified at the level the runner actually consumes."""
     from dsio.data.adapters import SignalExamples
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import fold_paths, load_folds
+    from dsio.splits.folds import load_folds, split_path
 
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)
     row_labels = LABELS.get("tone")(store)
     index = load_or_build(store, task.window, labels=row_labels)
-    folds = load_folds(SignalExamples(store, index), fold_paths(task.splits_root, task.split))
+    folds = load_folds(SignalExamples(store, index), split_path(task.splits_root, task.split))
 
     groups = index.groups
     for fold in folds:
         assert not (set(groups[fold.train]) & set(groups[fold.test]))
 
 
-def test_running_a_subset_of_folds_keeps_their_numbers(corpus: Path, tmp_path: Path) -> None:
-    """fold1 must mean fold1 whether or not fold0 was run, or two runs stop comparing."""
-    config = RunConfig(name="subset", seed=0, task=make_task(corpus, folds=(1, 2)))
+def test_running_one_fold_writes_only_that_folds_predictions(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """fold1 must mean fold1, and running it alone must not touch fold0's or fold2's rows --
+    the property fold-as-process needs so that N single-fold runs can be pooled later
+    without one run's predictions silently covering another's positions."""
+    from dsio.data.adapters import SignalExamples
+    from dsio.data.views import load_or_build
+    from dsio.splits.folds import load_folds, split_path
+
+    config = RunConfig(name="subset", seed=0, task=make_task(corpus, fold=1))
     ledger = RunLedger(tmp_path / "runs")
     run = ledger.start(
         name=config.name,
@@ -310,22 +440,17 @@ def test_running_a_subset_of_folds_keeps_their_numbers(corpus: Path, tmp_path: P
     )
     with run:
         execute(config, run)
-    report, _ = read_report(run.artifacts_dir)
-    assert [fold.fold for fold in report.folds] == [1, 2]
-    assert report.coverage < 1.0, "a subset of folds cannot cover every window"
 
+    store = SignalStore(Path(corpus) / "stores" / "tone")
+    task = make_task(corpus)
+    index = load_or_build(store, task.window, labels=LABELS.get("tone")(store))
+    folds = load_folds(SignalExamples(store, index), split_path(task.splits_root, task.split))
+    fold1 = next(f for f in folds if f.index == 1)
 
-def test_asking_for_folds_that_do_not_exist_fails_loudly(corpus: Path, tmp_path: Path) -> None:
-    config = RunConfig(name="ghost", seed=0, task=make_task(corpus, folds=(9,)))
-    ledger = RunLedger(tmp_path / "runs")
-    run = ledger.start(
-        name=config.name,
-        config=config.to_dict(),
-        config_hash=config.config_hash,
-        seed=config.seed,
-    )
-    with pytest.raises(ValueError, match="match none of the split family"):
-        execute(config, run)
+    with np.load(run.artifacts_dir / "predictions.npz", allow_pickle=False) as data:
+        assert int(data["fold"]) == 1
+        assert sorted(data["row_id"].tolist()) == sorted(fold1.test.tolist())
+        assert len(data["row_id"]) < len(index), "one fold cannot cover every window"
 
 
 def test_the_run_records_which_corpus_it_read(corpus: Path, tmp_path: Path) -> None:
@@ -346,3 +471,71 @@ def test_the_run_records_which_corpus_it_read(corpus: Path, tmp_path: Path) -> N
     store = SignalStore(Path(corpus) / "stores" / "tone")
     assert payload["store_sha256"] == store.manifest().signal_sha256
     assert payload["split"] == "k3"
+    assert payload["fold"] == 0
+
+
+# --- guards carried over from `cross_validate` -----------------------------------------
+
+
+def test_a_short_prediction_fails_the_run_instead_of_scoring_silently(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard 1, inherited from the deleted `cross_validate` loop: predictions that do not
+    line up with the fold they came from must fail the run, not produce a quiet,
+    merely-disappointing number.
+
+    `_assemble` already refuses a *row* mismatch (see the loader/fold disagreement check
+    in `_assemble` itself), which is a stronger property than a plain count. This test
+    proves the count guard fires on its own terms even so, by monkeypatching `_assemble`
+    to bypass its own check and return one prediction short.
+    """
+    import dsio.train.torch_task as torch_task
+    from dsio.eval.contract import FoldPrediction
+
+    real_assemble = torch_task._assemble
+
+    def truncated_assemble(batches: object, fold: object, window_labels: object) -> FoldPrediction:
+        result = real_assemble(batches, fold, window_labels)
+        score = None if result.y_score is None else result.y_score[:-1]
+        return FoldPrediction(y_true=result.y_true[:-1], y_pred=result.y_pred[:-1], y_score=score)
+
+    monkeypatch.setattr(torch_task, "_assemble", truncated_assemble)
+
+    config = RunConfig(name="short", seed=0, task=make_task(corpus))
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(Exception, match="the runner and the fold disagree about what was held out"):
+        execute(config, run)
+
+
+def test_a_fold_that_cannot_be_scored_fails_with_a_split_explanation(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard 4, inherited from the deleted `cross_validate` loop: a `MetricError` -- a
+    fold with only one class, or a runner that produced no scores for a ranking metric --
+    is re-raised as an `EvalError` pointing at stratification, not surfaced as a bare
+    metric exception nobody connects to the split.
+    """
+    import dsio.train.torch_task as torch_task
+    from dsio.eval.metrics import MetricError
+
+    def explode(*args: object, **kwargs: object) -> dict[str, float]:
+        raise MetricError("roc_auc is undefined when one class is absent")
+
+    monkeypatch.setattr(torch_task, "compute", explode)
+
+    config = RunConfig(name="unscoreable", seed=0, task=make_task(corpus))
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(Exception, match="check stratification"):
+        execute(config, run)

@@ -25,6 +25,7 @@ import numpy as np
 from pydantic import Field, model_validator
 
 from dsio.contracts import DsioModel, short_digest
+from dsio.contracts.hashing import DIGEST_PREFIX_LEN, sha256_of_bytes
 from dsio.data.store import SignalStore, StoreError
 
 VIEWS_DIRNAME = "views"
@@ -377,10 +378,43 @@ def _derive_labels(labels: np.ndarray, starts: np.ndarray, spec: WindowSpec) -> 
     return out
 
 
-def index_path(store: SignalStore, spec: WindowSpec, root: Path | None = None) -> Path:
-    """Content-addressed location for a built index."""
+def _labels_digest(labels: np.ndarray | None) -> str:
+    """Short digest of a labels array, folded into the index cache key.
+
+    ``load_or_build`` bakes whatever ``labels=`` array the caller passed into the cached
+    index -- `run_torch` derives every ``y_true`` from ``index.labels``. Without this, two
+    calls against the same store and the same `WindowSpec` that differ only in which label
+    provider they used would collide on one cache file, and whichever call built it first
+    would silently win: `task.labels` is part of the config hash, so provenance would state
+    the second label provider while the computation used the first. `WindowSpec.digest`
+    cannot catch this on its own -- labels are not part of the spec, they are supplied at
+    call time.
+    """
+    if labels is None:
+        return "none"
+    array = np.asarray(labels)
+    payload = array.tobytes() + f"|{array.dtype!s}|{array.shape!r}".encode()
+    return sha256_of_bytes(payload)[:DIGEST_PREFIX_LEN]
+
+
+def index_path(
+    store: SignalStore,
+    spec: WindowSpec,
+    root: Path | None = None,
+    *,
+    labels: np.ndarray | None = None,
+) -> Path:
+    """Content-addressed location for a built index.
+
+    Keyed by the spec's own digest plus the store's signal digest and a digest of the
+    labels array -- not the spec digest alone. The store digest means a re-staged corpus at
+    the same path does not silently reuse an index built from different bytes; the labels
+    digest means two calls that differ only in which label provider they passed do not
+    collide on the same cache entry (see :func:`_labels_digest`).
+    """
     base = root or store.path.parent.parent / VIEWS_DIRNAME
-    return base / store.path.name / f"{spec.digest}.npz"
+    signal_digest = store.manifest().signal_sha256[:DIGEST_PREFIX_LEN]
+    return base / store.path.name / f"{spec.digest}-{signal_digest}-{_labels_digest(labels)}.npz"
 
 
 def load_or_build(
@@ -393,7 +427,7 @@ def load_or_build(
     root: Path | None = None,
 ) -> WindowIndex:
     """Return the index for ``spec``, building and caching it if absent."""
-    path = index_path(store, spec, root)
+    path = index_path(store, spec, root, labels=labels)
     if path.is_file():
         return WindowIndex.load(path)
     index = build_index(

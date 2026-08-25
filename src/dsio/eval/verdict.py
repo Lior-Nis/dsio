@@ -5,15 +5,18 @@ noise floor. Otherwise it is neutral, however good the number looks. Chasing imp
 below the floor is how a week disappears into variance.
 
 **The paired floor.** Estimating the floor from the candidate's own fold spread is the
-best available when you cannot be sure two runs used the same folds. dsio commits its folds
-and fingerprints the assignment, so when two runs *provably* held out the same examples the
-far sharper comparison is available: the standard error of the per-fold *differences*.
-Fold-to-fold variation the two models share — one fold simply being harder — cancels, and a
-real 0.002 improvement becomes visible where the unpaired floor would have buried it under a
-0.02 fold spread.
+best available when you cannot be sure two runs used the same folds. Decision 6 makes the
+process boundary the fold boundary: each run pools N single-fold processes
+(:func:`dsio.eval.pool.pool_folds`) and records the split family, the store digest, and
+which fold indices it covers. When two pooled runs match on all three, the far sharper
+comparison is available: the standard error of the per-fold *differences*. Fold-to-fold
+variation the two models share — one fold simply being harder — cancels, and a real 0.002
+improvement becomes visible where the unpaired floor would have buried it under a 0.02 fold
+spread.
 
-**The refusal.** Two runs with different fold assignments are not compared at all. A
-refusal is worth far more than a confident, meaningless delta.
+**The refusal.** Two runs that do not correspond — different split families, different
+store snapshots, or different folds — are not compared at all. A refusal is worth far more
+than a confident, meaningless delta.
 """
 
 from __future__ import annotations
@@ -26,7 +29,8 @@ import numpy as np
 from pydantic import Field
 
 from dsio.contracts import DsioModel
-from dsio.eval.contract import CVReport, EvalError
+from dsio.eval.contract import EvalError
+from dsio.eval.pool import Pooled
 
 DEFAULT_K = 1.0
 
@@ -124,7 +128,7 @@ def verdict(
     """Classify a candidate against a baseline using the unpaired floor.
 
     The entry point for when all you have is two numbers and a fold
-    spread. Prefer :func:`compare`, which takes the reports and can pair the folds.
+    spread. Prefer :func:`compare`, which takes the pooled runs and can pair the folds.
     """
     if _missing(candidate) or _missing(baseline):
         return Comparison(
@@ -153,41 +157,41 @@ def verdict(
 
 
 def compare(
-    candidate: CVReport,
-    baseline: CVReport,
+    candidate: Pooled,
+    baseline: Pooled,
     *,
     metric: str,
     higher_is_better: bool = True,
     k: float = DEFAULT_K,
     require_same_folds: bool = True,
 ) -> Comparison:
-    """Judge two cross-validated runs against each other on one metric.
+    """Judge two pooled, cross-validated runs against each other on one metric.
 
-    Pairs the folds when both reports share a fold fingerprint, which is the normal case
-    for two runs driven by the same committed split files. Falls back to the unpaired floor
-    when one of them predates fingerprinting or the folds genuinely differ and the caller
-    has said that is acceptable.
+    Each run is N single-fold processes pooled by :func:`dsio.eval.pool.pool_folds`
+    (decision 6: the process boundary is the fold boundary). Pairs the folds when both
+    pooled runs share a split family, a store snapshot, and the same set of fold indices —
+    the normal case for two runs driven by the same committed split file. Falls back to the
+    unpaired floor when that correspondence does not hold and the caller has said that is
+    acceptable.
     """
-    for report, label in ((candidate, "candidate"), (baseline, "baseline")):
-        if metric not in report.metrics:
+    for pooled, label in ((candidate, "candidate"), (baseline, "baseline")):
+        if metric not in pooled.metrics:
             return Comparison(
                 metric=metric,
                 outcome=Outcome.UNKNOWN,
                 higher_is_better=higher_is_better,
                 reason=(
                     f"{label} did not record {metric!r}; it has "
-                    f"{', '.join(sorted(report.metrics)) or 'nothing'}"
+                    f"{', '.join(sorted(pooled.metrics)) or 'nothing'}"
                 ),
             )
 
-    comparable = _fold_structure_matches(candidate, baseline)
+    mismatch = _correspondence(candidate, baseline)
+    comparable = mismatch is None
     if require_same_folds and not comparable:
         raise EvalError(
-            f"refusing to compare runs on different fold assignments "
-            f"({candidate.fold_fingerprint} vs {baseline.fold_fingerprint}). The fold "
-            "assignment is the single source of truth; a delta across different folds "
-            "measures the folds, not the models. Re-run against the same split files, or "
-            "pass require_same_folds=False and accept the unpaired floor."
+            f"refusing to compare: {mismatch}. Re-run against the same split file, or pass "
+            "require_same_folds=False and accept the unpaired floor."
         )
 
     left = candidate.metrics[metric]
@@ -225,8 +229,8 @@ def compare(
 
 
 def compare_all(
-    candidate: CVReport,
-    baseline: CVReport,
+    candidate: Pooled,
+    baseline: Pooled,
     *,
     directions: dict[str, bool],
     k: float = DEFAULT_K,
@@ -283,18 +287,42 @@ def minimum_detectable_rows(delta: float, p: float = 0.5) -> int:
     return math.ceil(p * (1.0 - p) / (delta * delta))
 
 
-def _fold_series(report: CVReport, metric: str) -> list[float] | None:
-    if len(report.folds) < 2:
+def _fold_series(pooled: Pooled, metric: str) -> list[float] | None:
+    if len(pooled.folds) < 2:
         return None
-    if any(metric not in fold.metrics for fold in report.folds):
+    if any(metric not in pooled.fold_metrics.get(index, {}) for index in pooled.folds):
         return None
-    return [fold.metrics[metric] for fold in sorted(report.folds, key=lambda f: f.fold)]
+    return [pooled.fold_metrics[index][metric] for index in sorted(pooled.folds)]
 
 
-def _fold_structure_matches(left: CVReport, right: CVReport) -> bool:
-    if left.fold_fingerprint is None or right.fold_fingerprint is None:
-        return False
-    return left.fold_fingerprint == right.fold_fingerprint
+def _correspondence(candidate: Pooled, baseline: Pooled) -> str | None:
+    """``None`` when two pooled runs may be compared; otherwise, why not.
+
+    Three distinct mistakes, three distinct messages: a different split family, the same
+    family read from a different store snapshot, and the same family and snapshot but a
+    different set of folds. Matching on split family, store digest, and fold-index set
+    additionally catches "fold 2 of split A compared against fold 2 of split B" -- a case
+    the old whole-report fold fingerprint could not even be asked about, because it only
+    existed once an in-process loop had finished every fold.
+    """
+    if candidate.split != baseline.split:
+        return (
+            f"different split families ({candidate.split!r} vs {baseline.split!r}); "
+            "comparing across families measures the data, not the model"
+        )
+    if candidate.split_digest != baseline.split_digest:
+        return (
+            f"same split family {candidate.split!r} but different store snapshots "
+            f"({candidate.split_digest[:12]} vs {baseline.split_digest[:12]}); a delta "
+            "across store snapshots measures the data, not the model"
+        )
+    if set(candidate.folds) != set(baseline.folds):
+        return (
+            f"same split family and store snapshot but different folds "
+            f"({sorted(candidate.folds)} vs {sorted(baseline.folds)}); a delta across "
+            "different fold assignments measures the folds, not the models"
+        )
+    return None
 
 
 def _classify(improvement: float, floor: float) -> Outcome:

@@ -21,39 +21,46 @@ from typing import Any
 import numpy as np
 
 from dsio.data.examples import Examples
-from dsio.splits.models import SplitError, SplitFile
+from dsio.splits.models import SplitError, SplitFile, SplitFold
 from dsio.splits.temporal import apply as apply_temporal
 
 
 def resolve(
     examples: Examples,
     split: SplitFile,
+    fold: SplitFold,
     *,
     require_total: bool = True,
 ) -> dict[str, Examples]:
-    """Divide a dataset into one subset per part.
+    """Divide a dataset into one subset per part, for one fold of ``split``.
 
     ``require_total`` rejects a split that does not account for every group present.
     Silently dropping examples is how a fold quietly trains on less data than its name
     claims — but it applies to the *group* partition only. A temporal split deliberately
     discards the purged and embargoed band, and that is the point of it.
     """
-    masks = resolve_masks(examples, split, require_total=require_total)
+    masks = resolve_masks(examples, split, fold, require_total=require_total)
     return {part: examples.subset(mask) for part, mask in masks.items()}
 
 
 def resolve_masks(
     examples: Examples,
     split: SplitFile,
+    fold: SplitFold,
     *,
     require_total: bool = True,
 ) -> dict[str, np.ndarray]:
-    """Boolean mask per part, over the dataset's examples.
+    """Boolean mask per part, over the dataset's examples, for one fold of ``split``.
 
-    The mask form is what the fold loop consumes: a :class:`~dsio.eval.contract.Fold` wants
-    integer positions, and a subset has forgotten where its examples came from.
+    The mask form is what :func:`dsio.splits.folds.folds_from_splits` turns into a
+    :class:`~dsio.eval.contract.Fold`'s integer positions; a subset has forgotten where
+    its examples came from, so the mask is kept as the intermediate form.
     :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
     validation and there is no second code path to keep in step.
+
+    The store binding (``store`` / ``store_manifest_sha256``) lives on ``split``, not on
+    ``fold`` — one family binds to one corpus, so that check runs once per call rather than
+    being duplicated onto every fold.
     """
     if split.store != examples.name:
         raise SplitError(
@@ -69,32 +76,32 @@ def resolve_masks(
             )
 
     present = {str(g) for g in examples.groups}
-    named = split.all_groups
+    named = fold.all_groups
 
     unknown = named - present
     if unknown:
         raise SplitError(
-            f"split {split.name!r} names {len(unknown)} group(s) absent from the index: "
-            f"{', '.join(sorted(unknown)[:5])}"
+            f"split {split.name!r} fold {fold.index} names {len(unknown)} group(s) absent "
+            f"from the index: {', '.join(sorted(unknown)[:5])}"
         )
-    if require_total and split.parts:
+    if require_total and fold.parts:
         unassigned = present - named
         if unassigned:
             raise SplitError(
-                f"split {split.name!r} does not assign {len(unassigned)} group(s) present "
-                f"in the index: {', '.join(sorted(unassigned)[:5])}"
+                f"split {split.name!r} fold {fold.index} does not assign {len(unassigned)} "
+                f"group(s) present in the index: {', '.join(sorted(unassigned)[:5])}"
             )
 
     groups = np.asarray([str(g) for g in examples.groups])
-    parts = set(split.parts) | set(split.temporal.spans if split.temporal else ())
+    parts = set(fold.parts) | set(fold.temporal.spans if fold.temporal else ())
 
     times: tuple[np.ndarray, np.ndarray] | None = None
-    if split.temporal is not None:
+    if fold.temporal is not None:
         times = examples.times()
         if times is None:
             raise SplitError(
-                f"split {split.name!r} has temporal bounds, but {examples.name!r} has no "
-                "time coordinates to apply them to"
+                f"split {split.name!r} fold {fold.index} has temporal bounds, but "
+                f"{examples.name!r} has no time coordinates to apply them to"
             )
 
     out: dict[str, np.ndarray] = {}
@@ -102,10 +109,10 @@ def resolve_masks(
         mask = np.ones(len(examples), dtype=bool)
         # A part named only in `temporal` spans every group; the time bounds alone
         # decide it. That is what makes a purely temporal split expressible.
-        if split.parts and part in split.parts:
-            mask &= np.isin(groups, list(split.parts[part]))
-        if split.temporal is not None and times is not None and part in split.temporal.spans:
-            mask &= apply_temporal(split.temporal, *times, part=part)
+        if fold.parts and part in fold.parts:
+            mask &= np.isin(groups, list(fold.parts[part]))
+        if fold.temporal is not None and times is not None and part in fold.temporal.spans:
+            mask &= apply_temporal(fold.temporal, *times, part=part)
         out[part] = mask
     return out
 

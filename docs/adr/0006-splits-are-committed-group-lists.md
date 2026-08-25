@@ -6,13 +6,30 @@ Amends: ADR 0004, item 6, which recommended *Repeatable Splitting* by hash of a 
 Amended (2026-08-20): Generation moved out of the package. `SplitSpec`, `StratifyKey`,
 `BalanceReport` and the `stratified_kfold` scheme described below no longer exist in
 `dsio` — a project now writes its own offline generation script (sklearn's splitters cover
-the non-temporal schemes) and commits the YAML it produces. The committed group-list
-format this ADR argues for is unchanged, `dsio` still reads and validates it exactly as
-described, and the purged/embargoed walk-forward maths in "Temporal splits are the other
-half" is unaffected — that scheme has no sklearn equivalent and stays in the package. The
-example split file's `# scheme: stratified_kfold, ...` header line is accordingly no
-longer something `SplitFile.to_yaml()` can emit; a project's own generator is free to
-record its own provenance in `notes` instead.
+the non-temporal schemes) and commits the YAML it produces. The purged/embargoed
+walk-forward maths in "Temporal splits are the other half" is unaffected — that scheme has
+no sklearn equivalent and stays in the package. The example split file's
+`# scheme: stratified_kfold, ...` header line is accordingly no longer something
+`SplitFile.to_yaml()` can emit; a project's own generator is free to record its own
+provenance in `notes` instead.
+
+Amended (2026-08-20): Decision 6 (ADR 0017, "the process boundary is the fold boundary")
+changed the committed *format* itself, not just where a split is generated. Before this
+amendment, one committed file held one fold, and a family of *k* folds was *k* files whose
+order was recovered by parsing a number out of each filename. `dsio.eval.pool.pool_folds`'s
+own docstring now names that exact hazard: it sorts by the fold index recorded *inside*
+each file, never by filename or argument position, "precisely because [the old split
+layout] used to make that mistake." One `SplitFile` now holds an entire family as
+`folds: list[SplitFold]` — an ordered list whose order is not the point. Each
+`SplitFold.index` is that fold's identity, declared inside the fold rather than recovered
+from its position in the list or from a filename, so running folds 1 and 3 alone can never
+renumber them 0 and 1. `schema_version` bumped to `dsio.split/2` to mark the break; `load`
+refuses a file declaring anything else.
+
+The argument below is unchanged by this: a split is still a committed list of group IDs,
+the group is still the leakage boundary, and naming groups explicitly still beats deriving
+them from a hash. Only the format changed, in the ways the worked example and the
+"Validation, which is the point" section below now show.
 
 ## Context
 
@@ -44,41 +61,74 @@ split costs a boolean mask instead of a dataset.
 
 ## Decision
 
-A split is a committed YAML file naming **groups**, never windows:
+A split is a committed YAML file naming **groups**, never windows. `dsio.split/2` holds a
+whole family — every fold the family has — as one ordered list, each fold's `index` its
+identity rather than its position:
 
 ```yaml
-# dsio split: patient_3fold (fold 0)
+# dsio split: patient_3fold (folds 0, 1, 2)
 # store: kaggle_defog
 # group key: group  <- the leakage boundary
-# scheme: stratified_kfold, stratified by fog_count, seed 42
-# counts: test=33, train=32, val=33
-parts:
-  train: [0489dc, 0e0908, ...]
-  test:  [...]
-  val:   [...]
+# [0] counts: test=33, train=32, val=33
+# [1] counts: test=32, train=33, val=33
+# [2] counts: test=33, train=33, val=32
+schema_version: dsio.split/2
+store: kaggle_defog
 store_manifest_sha256: a3f9c1...
+group_key: group
+name: patient_3fold
+folds:
+  - index: 0
+    counts: {test: 33, train: 32, val: 33}
+    parts:
+      train: [0489dc, 0e0908, ...]
+      test:  [...]
+      val:   [...]
+  - index: 1
+    counts: {test: 32, train: 33, val: 33}
+    parts: {train: [...], test: [...], val: [...]}
+  - index: 2
+    counts: {test: 33, train: 33, val: 32}
+    parts: {train: [...], test: [...], val: [...]}
 ```
 
 The group is **the most leaky key** — the coarsest identifier that can make two windows
 near-identical. Subject, machine, well, symbol. It is the smallest unit that may be
 assigned to one side of a split, and the store records it per entity as a required field.
+`store` and `store_manifest_sha256` bind the whole family to one corpus once, rather than
+being repeated per fold.
 
-Files are **generated from a declarative `SplitSpec`, never hand-written** — the half of
-the original objection worth keeping. Schemes: `holdout`, `kfold`, `stratified_kfold`,
-`leave_one_group_out`, `explicit`. Stratified assignment is serpentine.
+Files are committed, not hand-written from scratch: `SplitSpec` no longer exists (see the
+amendment above), so a project's own generation script decides how to produce each fold's
+parts, subject to the disjointness `SplitFold` and `SplitFile` validate on construction.
 
 ## Validation, which is the point
 
-`SplitFile` rejects at construction:
+Two different disjointness properties, checked in two different places.
+
+`SplitFold` rejects at construction — one fold's own parts, in isolation:
 
 - **parts that are not mutually disjoint** — the check FORGE's `SplitsConfig` lacked. It
   validated duplicates *within* each list but never *across* them, so a patient in both
   train and test would have passed silently.
 - duplicates within a part;
-- an empty split.
+- a fold declaring neither group parts nor temporal bounds.
 
-`resolve()` additionally rejects a split whose store name or manifest digest does not match
-the store it is being applied to, and — unless explicitly waived — one that leaves any
+`SplitFile` additionally rejects, once every fold of the family is known:
+
+- fewer than one fold;
+- duplicate `index` values across folds, which would make `fold(index)` lookup ambiguous;
+- **a group assigned to the *test* part of two folds in the family** — the property a
+  pooled out-of-fold metric depends on, and one the old one-file-per-fold layout could
+  only have checked by opening every file in the family first, which nothing did.
+
+All of these fire on `SplitFile.load` *and* on direct construction, so a split assembled
+by a test or a generation script gets the same guarantees as one read off disk; `load`
+reports them as `SplitError`, direct construction as pydantic's own `ValidationError`.
+
+`splits.resolve.resolve()` additionally rejects, once a fold is applied to a concrete
+dataset: a split whose store name or manifest digest does not match the store it is being
+applied to, and — unless the caller passes `require_total=False` — a fold that leaves any
 group in the index unassigned, since silently dropping windows makes a fold train on less
 data than its name claims.
 

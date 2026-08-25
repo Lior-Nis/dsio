@@ -2,10 +2,14 @@
 
 Status: accepted (2026-08-18)
 Implements: the plan's Phase 6, and its "matrix resumability" verification test.
-Superseded (2026-08-20): `matrix/` is deleted. Resume no longer comes from a matrix
-consulting the ledger before dispatch — it comes from re-running one fold as its own
-process, which is naturally idempotent because the run ledger still keys on config hash.
-See ADR 0017: resume comes from the process boundary now, not from ledger state.
+Superseded entirely by ADR 0017 (accepted 2026-08-20, implemented in Plan 3a): `matrix/`
+and its Optuna search are deleted — nothing under `src/` implements a matrix, a search, or
+an axis grammar. Resume no longer comes from a matrix consulting the ledger before
+dispatch — it comes from re-running one fold as its own process (`TorchTask.split` and
+`TorchTask.fold`, `train/torch_task.py`, reached as `RunConfig.task`), which is naturally
+idempotent because `RunConfig.config_hash` (`config/schema.py`) still feeds the run ledger's
+`config_hash` (`runs/record.py`). Resume comes from the process boundary now, not from
+ledger state.
 
 ## Context
 

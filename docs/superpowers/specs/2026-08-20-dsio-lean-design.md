@@ -48,11 +48,11 @@ starts with `#`):
 | | Code | Doc | Blank | Total |
 |---|---|---|---|---|
 | Before Plan 2b (`b05579c`) | 4,781 | 1,491 | 1,475 | 7,747 |
-| After Plan 2b (`73e8da2`) | **4,640** | 1,692 | 1,405 | 7,737 |
+| After Plan 2b (`6a159ba`, merged) | **4,672** | 1,734 | 1,412 | 7,818 |
 
-Plan 2b cut 141 lines of code and added 201 of prose, so the total barely moved while the
+Plan 2b cut 109 lines of code and added 243 of prose, so the total rose slightly while the
 code genuinely shrank. Plan 3's deletions are almost entirely code, putting the endpoint near
-**3,950 code lines** — inside the target. The total will land near 7,000, and that is fine:
+**3,980 code lines** — inside the target. The total will land near 7,000, and that is fine:
 the ~5,400 figure was only ever a proxy for "nothing here reimplements Lightning, torchmetrics
 or MLflow", and that criterion is the one above, not an arithmetic one.
 
@@ -183,7 +183,9 @@ Cross-validation is running the entry point N times — from a shell loop, or an
 gives three properties for free: resume (rerun the fold that died), parallelism (N folds
 across N GPUs is N invocations), and native MLflow grouping (one experiment, N runs).
 
-`RunConfig` gains `split` (which committed file) and `fold` (which index). That is the entire
+`split` (which committed file) and `fold` (which index) live on the task config
+(`TorchTask.split` / `TorchTask.fold`), reached from outside through the CLI's existing
+`nested.path=value` overrides: `dsio run <preset> task.fold=2`. That is the entire
 interface between the loop and the run.
 
 Preserved guarantees:

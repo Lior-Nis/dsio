@@ -44,6 +44,7 @@ recorded = {
         "window": {"length": 8, "stride": 8, "label_policy": "majority"},
         "labels": "does-not-need-to-exist-for-validation",
         "split": "does-not-need-to-exist-for-validation",
+        "fold": 0,
         "backbone": {"name": "does-not-need-to-exist-for-validation"},
     },
 }
