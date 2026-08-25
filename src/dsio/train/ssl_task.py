@@ -48,6 +48,7 @@ from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
 from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional
+from dsio.train.tracking import build_mlflow_logger, require_mlflow
 
 if TYPE_CHECKING:
     from dsio.config.schema import RunConfig
@@ -120,7 +121,13 @@ class SslPretrainTask(TaskConfig):
 
 @preflight("ssl_pretrain")
 def check_ssl(config: RunConfig) -> None:
-    """Resolve every name, including the ones only the probe needs."""
+    """Resolve every name, including the ones only the probe needs.
+
+    ``require_mlflow`` runs first, ahead of every registry lookup below: decision 7 makes
+    MLflow a run's hard dependency, and a run that cannot write to it should not spend even
+    a typo-check's worth of time before saying so.
+    """
+    require_mlflow()
     task = config.task
     assert isinstance(task, SslPretrainTask)
     BACKBONES.get(task.backbone.name)
@@ -274,12 +281,16 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     import torch
     from lightning import Trainer
 
-    task = config.task
-    assert isinstance(task, SslPretrainTask)
-
     # Fails before the store, module or trainer exist -- the same guarantee `check_ssl`
     # gives the CLI's pre-flight path, reasserted here for any caller (every test in this
     # module, and any future caller) that reaches `execute()` without going through it.
+    # MLflow first, per decision 7: a run that cannot write to it should not even resolve
+    # a fold first.
+    tracking_uri = require_mlflow()
+
+    task = config.task
+    assert isinstance(task, SslPretrainTask)
+
     require_fold(task.splits_root, task.split, task.fold)
 
     store = SignalStore(data_root() / task.store)
@@ -322,6 +333,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     elif val_loader is not None:
         callbacks.append(RankMeMonitor(val_loader, every_n_epochs=task.probe_every_n_epochs))
 
+    mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
     trainer = Trainer(
         max_epochs=task.trainer.max_epochs,
         accelerator=task.trainer.accelerator,
@@ -334,7 +346,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         enable_model_summary=False,
         deterministic="warn" if task.trainer.deterministic else False,
         default_root_dir=run.artifacts_dir,
-        logger=False,
+        logger=mlflow_logger,
         callbacks=callbacks,
     )
     trainer.fit(module, train_loader, val_loader)
@@ -379,6 +391,11 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         for name, value in probe.history[-1].items():
             metrics[f"probe_{name}"] = float(value)
     run.log_metrics(metrics)
+    # `train_windows`, `feature_dim` and `encoder_version` are computed here, not inside a
+    # `*_step` hook, so nothing during training's own `self.log(...)` calls captured them --
+    # logged explicitly, through the same logger the Trainer streamed epoch metrics to, so
+    # they land in the same MLflow run as everything else this pretraining fold produced.
+    mlflow_logger.log_metrics(metrics)
     return metrics
 
 

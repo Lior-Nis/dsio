@@ -4,6 +4,17 @@ Every test that touches the ledger, registry or data store is pointed at a tmp_p
 root. A test that writes into the real `runs/` (or `stores/`) would pollute the very
 record the system exists to protect — `spine_baseline` (`dsio.presets`) now stages a
 synthetic corpus on resolution, so this isolation is no longer just about the ledger.
+
+The same isolation now covers MLflow. `dsio.train.tracking.require_mlflow` (Task 2 of
+plan 3b) makes every torch/ssl_pretrain run fail immediately if MLflow is unreachable, and
+`uv run --extra cpu pytest` must still pass on a machine with nothing running (the plan's
+"the suite must not need Docker" constraint) — so every test, by default, is pointed at a
+`file:` tracking URI under its own `tmp_path` rather than the compose stack's
+`localhost:5000`. That makes the *default* suite exercise the real MLflow client against a
+local backend (a "fake-backed" test, in the plan's own vocabulary), not a mock, and not a
+live server. `MLFLOW_ALLOW_FILE_STORE` opts back into the file store, which recent MLflow
+versions otherwise refuse with a "migrate to a database backend" error. Tests that need the
+live compose stack override `MLFLOW_TRACKING_URI` themselves and are marked `live`.
 """
 
 from __future__ import annotations
@@ -26,6 +37,8 @@ def _isolated_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(RUNS_ROOT_ENV, str(tmp_path / "runs"))
     monkeypatch.setenv(REGISTRY_ROOT_ENV, str(tmp_path / "models"))
     monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "stores"))
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"file:{tmp_path / 'mlruns'}")
+    monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
 
 
 @pytest.fixture

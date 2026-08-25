@@ -33,6 +33,7 @@ from dsio.train.torch_task import (  # noqa: E402
     build_module,
     sanitise_metric,
 )
+from dsio.train.tracking import MlflowUnavailableError, resolve_tracking_uri  # noqa: E402
 
 
 @pytest.fixture
@@ -200,6 +201,120 @@ def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path, tmp_path: Pa
     )
     with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):
         execute(config, run)
+
+
+# --- MLflow: decision 7's "a run fails without MLflow" -------------------------------
+
+
+def test_preflight_fails_when_mlflow_is_unreachable(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(name="unreachable", task=make_task(corpus))
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        check(config)
+
+
+def test_mlflow_unreachable_fails_the_same_way_even_without_preflight(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every caller that reaches `execute()` gets the same guard the CLI's pre-flight
+    gives it -- the same property `test_a_bad_fold_fails_the_same_way_even_without_
+    preflight` proves for `require_fold`, above."""
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(name="unreachable", task=make_task(corpus))
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        execute(config, run)
+
+
+def test_mlflow_unreachable_fails_before_the_store_even_opens(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves the guard runs before any data loading -- and before `require_fold` --
+    not merely that it eventually fires: a nonexistent store on a bad fold would raise a
+    fold or store error first if the MLflow check ran any later than the very top of
+    `run_torch`. This is the stronger claim decision 7 asks for: not "it raises
+    eventually", but "it raises before anything expensive has happened"."""
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(
+        name="unreachable", task=make_task(corpus, fold=7, store="does-not-exist")
+    )
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        execute(config, run)
+
+
+def test_a_completed_run_logs_its_metrics_to_mlflow(corpus: Path, tmp_path: Path) -> None:
+    """A refusal-only suite proves half the guard. With MLflow reachable -- the `file:`
+    backend every test in this suite already uses, per `tests/conftest.py` -- a run must
+    not merely be *allowed* to proceed: its held-out metrics must actually land in
+    MLflow, through the same `MLFlowLogger` the Trainer streams `self.log(...)` calls
+    through (`build_mlflow_logger`, `dsio.train.tracking`)."""
+    config = RunConfig(name="mlflow-logs", task=make_task(corpus))
+    ledger = RunLedger(tmp_path / "runs")
+    run = ledger.start(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+    )
+    metrics = execute(config, run)
+
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(resolve_tracking_uri())
+    experiment = client.get_experiment_by_name(config.name)
+    assert experiment is not None
+    mlflow_runs = client.search_runs([experiment.experiment_id])
+    assert len(mlflow_runs) == 1
+    logged = mlflow_runs[0].data.metrics
+    for name, value in metrics.items():
+        assert logged[name] == pytest.approx(value)
+    # `val/loss` is never in `metrics` (the held-out `task.metrics` dict) -- it only ever
+    # reaches MLflow if the Trainer's own `self.log(...)` calls were actually streamed
+    # through `mlflow_logger`, i.e. only if `Trainer(..., logger=mlflow_logger)` really
+    # wired the two together, not merely if the final `log_metrics` call happened to fire.
+    assert "val/loss" in logged
+
+
+def test_two_folds_of_one_config_land_in_one_mlflow_experiment(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """`build_mlflow_logger` sets `experiment_name=config.name`, which is what makes a
+    shell loop over folds (`dsio run p task.fold=$i`, same `name` every invocation)
+    group natively in MLflow, rather than scattering one experiment per run."""
+    ledger = RunLedger(tmp_path / "runs")
+
+    from mlflow.tracking import MlflowClient
+
+    for fold in (0, 1):
+        config = RunConfig(name="cv-sweep", task=make_task(corpus, fold=fold))
+        run = ledger.start(
+            name=config.name,
+            config=config.to_dict(),
+            config_hash=config.config_hash,
+            seed=config.seed,
+        )
+        execute(config, run)
+
+    client = MlflowClient(resolve_tracking_uri())
+    experiment = client.get_experiment_by_name("cv-sweep")
+    assert experiment is not None
+    mlflow_runs = client.search_runs([experiment.experiment_id])
+    assert len(mlflow_runs) == 2
 
 
 def test_a_label_policy_of_none_is_rejected_at_config_time(corpus: Path) -> None:

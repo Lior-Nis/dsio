@@ -37,6 +37,7 @@ from dsio.train.torch_task import (  # noqa: E402
     TrainerConfig,
     load_encoder,
 )
+from dsio.train.tracking import MlflowUnavailableError, resolve_tracking_uri  # noqa: E402
 
 
 @pytest.fixture
@@ -308,6 +309,67 @@ def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path) -> None:
     )
     with pytest.raises(ValueError, match=r"split 'k3' has no fold 7; it defines folds"):
         run(config, corpus)
+
+
+# --- MLflow: decision 7's "a run fails without MLflow" -------------------------------
+
+
+def test_preflight_fails_when_mlflow_is_unreachable(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        check(config)
+
+
+def test_mlflow_unreachable_fails_the_same_way_even_without_preflight(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        run(config, corpus)
+
+
+def test_mlflow_unreachable_fails_before_the_store_even_opens(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves the guard runs before any data loading -- and before `require_fold` --
+    not merely that it eventually fires: a nonexistent store on a bad fold would raise a
+    fold or store error first if the MLflow check ran any later than the very top of
+    `run_ssl_pretrain`."""
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(
+        name="pre", seed=0, task=pretrain_task(corpus, fold=7, store="does-not-exist")
+    )
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        run(config, corpus)
+
+
+def test_a_completed_pretrain_run_logs_its_metrics_to_mlflow(corpus: Path) -> None:
+    """A refusal-only suite proves half the guard. With MLflow reachable -- the `file:`
+    backend every test in this suite already uses, per `tests/conftest.py` -- a run must
+    not merely be *allowed* to proceed: its metrics must actually land in MLflow, through
+    the same `MLFlowLogger` the Trainer streams `self.log(...)` calls through."""
+    config = RunConfig(name="pre-mlflow-logs", seed=0, task=pretrain_task(corpus))
+    _, metrics = run(config, corpus)
+
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(resolve_tracking_uri())
+    experiment = client.get_experiment_by_name(config.name)
+    assert experiment is not None
+    mlflow_runs = client.search_runs([experiment.experiment_id])
+    assert len(mlflow_runs) == 1
+    logged = mlflow_runs[0].data.metrics
+    for name, value in metrics.items():
+        assert logged[name] == pytest.approx(value)
+    # `val/loss` is never in `metrics` (`run_ssl_pretrain`'s own returned dict) -- it only
+    # ever reaches MLflow if the Trainer's own `self.log(...)` calls were actually streamed
+    # through `mlflow_logger`, i.e. only if `Trainer(..., logger=mlflow_logger)` really
+    # wired the two together, not merely if the final `log_metrics` call happened to fire.
+    assert "val/loss" in logged
 
 
 # --- the handoff --------------------------------------------------------------------
