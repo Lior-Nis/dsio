@@ -60,10 +60,28 @@ DEFAULT_TRACKING_URI = "http://localhost:5000"
 # ends up hosting it.
 ARTIFACT_FILE = "artifact.bin"
 
-# MLflow provisions this experiment for every backend it initializes (file-based or
-# database-backed), so it always exists. `save()` uses it to host a throwaway run when the
-# caller has no run of its own to attach the artifact to -- see `save`'s `run_id` parameter.
-_SCRATCH_EXPERIMENT_ID = "0"
+# I2: every payload used to be logged as bare `artifact.bin` at its host run's artifact
+# root, so a second `save()` into the *same* run_id (`run_ssl_pretrain`'s `registry.
+# save(..., run_id=...)` -- reachable today, latent only because exactly one save
+# happens per run) overwrote the first version's bytes in place: `load` of the earlier
+# version then raised `RegistryIntegrityError` on a digest mismatch it could no longer
+# explain, because the bytes it needed were already gone. Content-addressing the upload
+# path with the payload's own digest makes two different payloads land at two different
+# paths -- collision-free -- and makes saving the *same* payload twice a no-op re-upload
+# to the same path, not a destructive one. See `_artifact_subdir`.
+_ARTIFACT_PREFIX = "dsio-models"
+
+# `save()` without a `run_id` needs somewhere to host a throwaway run -- MLflow's model
+# registry has no notion of a run-less version, so something has to hold one. This used
+# to be MLflow's built-in Default experiment (id `"0"`, provisioned once at database
+# init). I3: that id is not safe to trust -- its `artifact_location` on any stack created
+# before `49cad22` is a bare, non-proxied path (`/artifacts`), which raises
+# `PermissionError` the moment a client tries to write to it, and the Default experiment
+# can never be recreated to pick up a later compose fix. A registry-owned, by-name
+# experiment is created lazily instead (`_ensure_scratch_experiment`): as easy to
+# recreate as any other experiment, and never inherits whatever the Default experiment's
+# artifact_location happens to be.
+_SCRATCH_EXPERIMENT_NAME = "dsio-model-registry-scratch"
 
 # Tag keys the registry writes on every model version it creates. `dsio.` prefixed so they
 # read unambiguously next to whatever tags MLflow itself or another tool adds.
@@ -224,14 +242,20 @@ class ModelRegistry:
         scratch_run = owning_run_id is None
         if scratch_run:
             owning_run_id = self.client.create_run(
-                experiment_id=_SCRATCH_EXPERIMENT_ID
+                experiment_id=self._ensure_scratch_experiment()
             ).info.run_id
         assert owning_run_id is not None, "either run_id was given, or a scratch run was just made"
 
+        # I2: content-addressed, not a bare filename at the run's artifact root -- see
+        # `_ARTIFACT_PREFIX`'s comment. Two different payloads land at two different
+        # paths inside the same run; the same payload saved twice re-uploads to the same
+        # path, which MLflow's artifact store already treats as an idempotent overwrite
+        # of identical bytes, not data loss.
+        artifact_subdir = f"{_ARTIFACT_PREFIX}/{name}/{digest[:16]}"
         with TemporaryDirectory() as scratch_dir, _no_progress_bar():
             local_path = Path(scratch_dir) / ARTIFACT_FILE
             local_path.write_bytes(payload)
-            self.client.log_artifact(owning_run_id, str(local_path))
+            self.client.log_artifact(owning_run_id, str(local_path), artifact_path=artifact_subdir)
 
         if scratch_run:
             # Only a container for the bytes just logged; nothing about it should look
@@ -254,7 +278,7 @@ class ModelRegistry:
         if metrics:
             tags[_METRICS_TAG] = json.dumps(metrics, sort_keys=True)
 
-        source = f"runs:/{owning_run_id}/{ARTIFACT_FILE}"
+        source = f"runs:/{owning_run_id}/{artifact_subdir}/{ARTIFACT_FILE}"
         model_version = self.client.create_model_version(
             name, source, run_id=owning_run_id, tags=tags
         )
@@ -322,6 +346,28 @@ class ModelRegistry:
         except MlflowException as error:
             if error.error_code != "RESOURCE_ALREADY_EXISTS":
                 raise
+
+    def _ensure_scratch_experiment(self) -> str:
+        """Return the id of this registry's own scratch experiment, creating it once.
+
+        I3: replaces trusting MLflow's built-in Default experiment (id ``"0"``) -- see
+        ``_SCRATCH_EXPERIMENT_NAME``'s module-level comment for why that id is not safe
+        on a stack whose Default experiment predates a ``--default-artifact-root`` fix.
+        Looked up by name, not cached on ``self``, so a registry instance stays correct
+        even if the experiment does not exist yet on first use.
+        """
+        experiment = self.client.get_experiment_by_name(_SCRATCH_EXPERIMENT_NAME)
+        if experiment is not None:
+            return experiment.experiment_id
+        try:
+            return self.client.create_experiment(_SCRATCH_EXPERIMENT_NAME)
+        except MlflowException as error:
+            if error.error_code != "RESOURCE_ALREADY_EXISTS":
+                raise
+            # Lost a create race to another process; it exists under this name now.
+            experiment = self.client.get_experiment_by_name(_SCRATCH_EXPERIMENT_NAME)
+            assert experiment is not None, "just failed to create it because it exists"
+            return experiment.experiment_id
 
     def _to_model_version(self, model_version: Any) -> ModelVersion:
         tags: dict[str, str] = model_version.tags or {}
