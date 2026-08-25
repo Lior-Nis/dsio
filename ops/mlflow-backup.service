@@ -1,0 +1,31 @@
+# User-level systemd unit for ops/backup-mlflow.sh (Backup section of
+# docs/superpowers/specs/2026-08-20-dsio-lean-design.md). Triggered nightly by
+# mlflow-backup.timer -- not intended to be started directly except for manual testing.
+#
+# Not installed or enabled by anything in this repository. To install (as the same user
+# who runs `docker compose up` for this project, so it can reach the running containers):
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/mlflow-backup.service ops/mlflow-backup.timer ~/.config/systemd/user/
+#   # Edit the WorkingDirectory= below to this checkout's absolute path first.
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now mlflow-backup.timer
+#
+# Check it landed:
+#   systemctl --user list-timers mlflow-backup.timer
+#   systemctl --user status mlflow-backup.service   # after it has run at least once
+#
+# Run it once by hand without waiting for the timer:
+#   systemctl --user start mlflow-backup.service
+#
+# `systemctl --user` units only run while the user has an active session (or lingering
+# enabled: `loginctl enable-linger <user>`) -- enable lingering if this backup must run on
+# an unattended machine.
+[Unit]
+Description=Nightly backup of the MLflow source of truth (Postgres dump + mlartifacts) to Drive
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/CHANGE-ME-to-this-checkout-path
+ExecStart=/CHANGE-ME-to-this-checkout-path/ops/backup-mlflow.sh

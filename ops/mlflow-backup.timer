@@ -1,0 +1,12 @@
+# Nightly trigger for mlflow-backup.service. See that file for installation commands.
+# Not installed or enabled by anything in this repository.
+[Unit]
+Description=Run the MLflow backup nightly
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target
