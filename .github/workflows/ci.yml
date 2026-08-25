@@ -18,6 +18,16 @@ jobs:
         with:
           enable-cache: true
 
+      # I4: tests/ops/test_backup.py's two functional tests -- the only executing
+      # evidence for the backup's append-only property (`rclone copy`, never `sync`),
+      # whose failure mode is unrecoverable data loss -- skip themselves whenever
+      # `shutil.which("rclone")` finds nothing, and CI installed only `uv`. That left
+      # zero executing coverage here even though `test_script_uses_copy_not_sync`'s
+      # static grep alone cannot catch every regression (see that test's own docstring
+      # and this step's sibling comment in tests/ops/test_backup.py).
+      - name: Install rclone
+        run: sudo apt-get update && sudo apt-get install -y rclone
+
       - name: Install
         run: uv sync --locked --extra cpu
 
