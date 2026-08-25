@@ -19,7 +19,7 @@ pytest.importorskip("torch")
 pytest.importorskip("lightning")
 pytest.importorskip("sklearn")
 
-from dsio.artifacts.store import REGISTRY_ROOT_ENV, ModelRegistry  # noqa: E402
+from dsio.artifacts.store import ModelRegistry  # noqa: E402
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
@@ -43,7 +43,6 @@ from dsio.train.tracking import MlflowUnavailableError, resolve_tracking_uri  # 
 @pytest.fixture
 def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "stores"))
-    monkeypatch.setenv(REGISTRY_ROOT_ENV, str(tmp_path / "models"))
     rng = np.random.default_rng(0)
     with SignalStore.builder(tmp_path / "stores" / "tone", channels=2) as builder:
         for group in range(9):

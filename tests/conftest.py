@@ -1,24 +1,27 @@
 """Shared fixtures.
 
-Every test that touches a run's local scratch directory, the model registry or the data
-store is pointed at a tmp_path root. `DSIO_RUNS_ROOT` (`dsio.runs.record.RUNS_ROOT_ENV`)
-no longer points at a ledger -- there is not one any more, per decision 7 of the lean
-design -- but it still matters: unset, a run's scratch directory (`Run.dir`, holding the
-resolved config, the reproduce script and whatever a runner writes before it becomes an
-MLflow artifact) lands under the OS temp directory, not a tmp_path pytest cleans up on
-its own. Pointing it here keeps that scratch space contained the same way `stores/`
-already needs to be.
+Every test that touches a run's local scratch directory or the data store is pointed at a
+tmp_path root. `DSIO_RUNS_ROOT` (`dsio.runs.record.RUNS_ROOT_ENV`) no longer points at a
+ledger -- there is not one any more, per decision 7 of the lean design -- but it still
+matters: unset, a run's scratch directory (`Run.dir`, holding the resolved config, the
+reproduce script and whatever a runner writes before it becomes an MLflow artifact) lands
+under the OS temp directory, not a tmp_path pytest cleans up on its own. Pointing it here
+keeps that scratch space contained the same way `stores/` already needs to be.
 
-The same isolation now covers MLflow. `dsio.train.tracking.require_mlflow` (Task 2 of
-plan 3b) makes every torch/ssl_pretrain run fail immediately if MLflow is unreachable, and
-`uv run --extra cpu pytest` must still pass on a machine with nothing running (the plan's
-"the suite must not need Docker" constraint) — so every test, by default, is pointed at a
-`file:` tracking URI under its own `tmp_path` rather than the compose stack's
-`localhost:5000`. That makes the *default* suite exercise the real MLflow client against a
-local backend (a "fake-backed" test, in the plan's own vocabulary), not a mock, and not a
-live server. `MLFLOW_ALLOW_FILE_STORE` opts back into the file store, which recent MLflow
-versions otherwise refuse with a "migrate to a database backend" error. Tests that need the
-live compose stack override `MLFLOW_TRACKING_URI` themselves and are marked `live`.
+The same isolation now covers MLflow, and with it the model registry (`dsio.artifacts.
+store.ModelRegistry`, Task 4 of plan 3b): storage is MLflow's now, so pointing
+`MLFLOW_TRACKING_URI` at a tmp_path is what isolates a saved model between tests, the same
+job `DSIO_REGISTRY_ROOT` used to do for the deleted local filesystem registry.
+`dsio.train.tracking.require_mlflow` (Task 2 of plan 3b) makes every torch/ssl_pretrain run
+fail immediately if MLflow is unreachable, and `uv run --extra cpu pytest` must still pass
+on a machine with nothing running (the plan's "the suite must not need Docker"
+constraint) -- so every test, by default, is pointed at a `file:` tracking URI under its
+own `tmp_path` rather than the compose stack's `localhost:5000`. That makes the *default*
+suite exercise the real MLflow client against a local backend (a "fake-backed" test, in the
+plan's own vocabulary), not a mock, and not a live server. `MLFLOW_ALLOW_FILE_STORE` opts
+back into the file store, which recent MLflow versions otherwise refuse with a "migrate to
+a database backend" error. Tests that need the live compose stack override
+`MLFLOW_TRACKING_URI` themselves and are marked `live`.
 """
 
 from __future__ import annotations
@@ -30,7 +33,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.artifacts.store import REGISTRY_ROOT_ENV
 from dsio.config import RunConfig
 from dsio.data.store import DATA_ROOT_ENV
 from dsio.runs.record import RUNS_ROOT_ENV
@@ -39,7 +41,6 @@ from dsio.runs.record import RUNS_ROOT_ENV
 @pytest.fixture(autouse=True)
 def _isolated_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(RUNS_ROOT_ENV, str(tmp_path / "runs"))
-    monkeypatch.setenv(REGISTRY_ROOT_ENV, str(tmp_path / "models"))
     monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "stores"))
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"file:{tmp_path / 'mlruns'}")
     monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
