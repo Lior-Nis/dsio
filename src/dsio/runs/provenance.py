@@ -118,6 +118,14 @@ class EnvState(DsioModel):
     cuda: str | None = None
     cudnn: str | None = None
     gpu: str | None = None
+    #: Which of `pyproject.toml`'s conflicting `cpu`/`gpu` extras (`dsio.runs.record`'s
+    #: module docstring, "torch and lightning only in the cpu/gpu extras") this run's
+    #: environment was installed with -- ``None`` when that cannot be determined (no
+    #: torch, or a torch build this heuristic does not recognize). Captured here, at run
+    #: time, rather than re-derived later by whatever `reproduce.sh` finds installed on
+    #: a possibly different machine: this is the one machine that is *known* to have
+    #: produced the run's metrics, so this is the only trustworthy place to read it from.
+    extra: str | None = None
 
 
 def _torch_versions() -> tuple[str | None, str | None, str | None, str | None]:
@@ -137,6 +145,28 @@ def _torch_versions() -> tuple[str | None, str | None, str | None, str | None]:
     return torch.__version__, cuda_version, cudnn_version, gpu
 
 
+def _detect_extra(torch_version: str | None) -> str | None:
+    """Which `cpu`/`gpu` extra installed this ``torch``, from its local version suffix.
+
+    `pyproject.toml`'s `[tool.uv.sources]` pins the `cpu` extra to the `pytorch-cpu`
+    index, whose wheels carry a `+cpu` local version (e.g. `2.13.0+cpu`); the `gpu`
+    extra takes the default PyPI wheel instead, which is CUDA-enabled and carries a
+    `+cu...` local version (e.g. `2.13.0+cu130`) -- see that file's "No index is
+    declared for the gpu extra" comment. `cpu` and `gpu` are declared `conflicts` in
+    `pyproject.toml`, so at most one is ever installed; anything else (no local version
+    segment at all, as on a platform with no separate accelerator wheel) is honestly
+    unrecognized rather than guessed at.
+    """
+    if torch_version is None:
+        return None
+    local = torch_version.split("+", 1)[1] if "+" in torch_version else ""
+    if local == "cpu":
+        return "cpu"
+    if local.startswith("cu"):
+        return "gpu"
+    return None
+
+
 def capture_env(lock_path: Path | None = None) -> EnvState:
     """Capture the interpreter, platform, and dependency lock identity."""
     lock = lock_path if lock_path is not None else Path("uv.lock")
@@ -151,4 +181,5 @@ def capture_env(lock_path: Path | None = None) -> EnvState:
         cuda=cuda,
         cudnn=cudnn,
         gpu=gpu,
+        extra=_detect_extra(torch_version),
     )

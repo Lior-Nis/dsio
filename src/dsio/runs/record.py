@@ -276,7 +276,23 @@ def _reproduce_script(record: RunRecord) -> str:
     else:
         lines.append('echo "WARNING: no git provenance was captured for this run" >&2')
 
-    lines += ["", "uv sync --locked", ""]
+    if record.env.extra:
+        # `torch`/`lightning`/`mlflow-skinny` live only in the `cpu`/`gpu` extras
+        # (`pyproject.toml`), not in `dependencies` -- a bare `uv sync --locked` would
+        # *remove* them (they are not in the base dependency set at all) and every line
+        # after it would crash with `ModuleNotFoundError` before rerunning anything. The
+        # extra this run actually used was captured once, at run time, by
+        # `dsio.runs.provenance.capture_env` (see `EnvState.extra`); replaying with the
+        # same extra is what makes this script self-contained on a fresh clone.
+        lines += ["", f"uv sync --locked --extra {record.env.extra}", ""]
+    else:
+        lines += [
+            "",
+            'echo "WARNING: could not determine which cpu/gpu extra this run used;'
+            ' pass one explicitly, e.g. uv sync --locked --extra cpu" >&2',
+            "uv sync --locked",
+            "",
+        ]
     if record.command:
         lines.append(" ".join(_quote(part) for part in record.command))
     else:

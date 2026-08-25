@@ -281,10 +281,68 @@ def test_reproduce_script_pins_the_commit(git_repo: Path, config: RunConfig) -> 
     assert "dsio run x" in script
 
 
+def test_reproduce_script_syncs_the_extra_that_produced_this_run(
+    git_repo: Path, config: RunConfig
+) -> None:
+    """Bug 2: a bare ``uv sync --locked`` uninstalls its own dependencies. ``torch``,
+    ``lightning`` and ``mlflow-skinny`` live only in the ``cpu``/``gpu`` extras
+    (``pyproject.toml``), never in the base ``dependencies`` set, so a bare sync
+    *removes* them and the very next line of the script crashes with
+    ``ModuleNotFoundError`` before rerunning anything. This test suite runs under
+    ``uv run --extra cpu``, so the environment that captured this run's provenance really
+    does have the ``cpu`` extra installed (``dsio.runs.provenance.capture_env`` detects
+    it from ``torch.__version__``'s ``+cpu`` local segment) -- the script must sync that
+    same extra, not a bare, dependency-stripping sync.
+    """
+    run = _start(config, repo_root=git_repo, command=("dsio", "run", "x"))
+    assert run.record.env.extra == "cpu"
+    script = (run.dir / REPRODUCE_FILE).read_text()
+    assert "uv sync --locked --extra cpu" in script
+    # And never the bare, dependency-stripping form on its own line.
+    assert "\nuv sync --locked\n" not in script
+
+
+def test_reproduce_script_falls_back_to_a_bare_sync_with_a_warning_when_the_extra_is_unknown(
+    git_repo: Path, config: RunConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal-adjacent half of the pair above: when the extra genuinely cannot be
+    determined (no torch, or a torch build this heuristic does not recognize --
+    ``dsio.runs.provenance._detect_extra`` returns ``None`` rather than guessing), the
+    script must not silently emit a wrong ``--extra`` and must not pretend it knows --
+    it falls back to the old bare sync, with a warning a reader (or a script) can see,
+    rather than a confident-but-wrong flag.
+    """
+    import dsio.runs.record as record
+
+    monkeypatch.setattr(
+        record, "capture_env", lambda: capture_env().model_copy(update={"extra": None})
+    )
+    run = _start(config, repo_root=git_repo, command=("dsio", "run", "x"))
+    assert run.record.env.extra is None
+    script = (run.dir / REPRODUCE_FILE).read_text()
+    assert "\nuv sync --locked\n" in script
+    assert "WARNING: could not determine which cpu/gpu extra" in script
+
+
 def test_env_capture_records_the_lockfile() -> None:
     env = capture_env(lock_path=Path("uv.lock"))
     assert env.python
     assert env.lock_sha256 is not None, "uv.lock should be hashed for reproducibility"
+
+
+def test_detect_extra_reads_the_torch_local_version_segment() -> None:
+    """Unit-level pin on the heuristic itself (``dsio.runs.provenance._detect_extra``):
+    the ``cpu`` extra's wheel carries a ``+cpu`` local version, the ``gpu`` extra's
+    carries a ``+cu...`` one (``pyproject.toml``'s ``[tool.uv.sources]``/index comments),
+    and anything else is honestly unrecognized rather than guessed at.
+    """
+    from dsio.runs.provenance import _detect_extra
+
+    assert _detect_extra("2.13.0+cpu") == "cpu"
+    assert _detect_extra("2.13.0+cu130") == "gpu"
+    assert _detect_extra("2.13.0+cu121") == "gpu"
+    assert _detect_extra("2.13.0") is None
+    assert _detect_extra(None) is None
 
 
 # --- determinism (unchanged by decision 7) -----------------------------------------------
