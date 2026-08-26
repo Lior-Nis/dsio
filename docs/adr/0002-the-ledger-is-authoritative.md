@@ -2,9 +2,17 @@
 
 Status: accepted (2026-08-15)
 Superseded (2026-08-20): `tracking/` and its `ExperimentTracker` sinks are deleted, and
-`dsio runs list`/`compare` no longer exist. Plan 3 makes MLflow the source of truth for
-run data, superseding this ADR's core claim that the run ledger is authoritative.
-See ADR 0016, which makes MLflow the source of truth and replaces this decision's core claim.
+`dsio runs list`/`compare` no longer exist. Decision 7 of the lean design supersedes this
+ADR's core claim — the run ledger is authoritative, trackers are sinks — on the grounds
+that *a component a run cannot write to is not a sink — it is a broken dependency*. See
+ADR 0016, implemented by Plan 3b: MLflow is now the source of truth, and a run fails
+without it.
+
+What survived: `runs/` (`dsio.runs.record`) is no longer a ledger but is still the
+**provenance stamper** — git revision, the dirty-diff capture, the reproduce script and
+the seed recorder (`dsio.runs.seeding`). Everything below that this ADR said MLflow could
+not hold — the working-tree diff, `reproduce.sh`, the full nested config — is logged as an
+MLflow **artifact** rather than a param (`config_hash` becomes a searchable tag instead).
 
 ## Context
 

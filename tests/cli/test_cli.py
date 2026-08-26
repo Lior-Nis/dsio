@@ -222,15 +222,19 @@ def test_the_run_record_stamps_which_fold_ran(
 ) -> None:
     """`dsio run` never sees `fold` by name -- `run_cmd.py` reaches for it off the
     resolved task generically (`getattr(config.task, "fold", None)`) -- so this proves
-    the wiring end to end, not just that `RunLedger.start` can accept the field."""
-    from dsio.runs.record import RunLedger
+    the wiring end to end, via the MLflow tag `stamp_provenance` sets
+    (`dsio.train.tracking`), not just that a local record can carry the field."""
+    from mlflow.tracking import MlflowClient
+
+    from dsio.train.tracking import resolve_tracking_uri
 
     runs_root = workdir / "runs"
     env = {**preset_env, "DSIO_RUNS_ROOT": str(runs_root)}
     code, payload = dsio("run", "project_preset", "--summary", cwd=workdir, env_extra=env)
     assert code == 0, payload
-    record = RunLedger(runs_root).load(payload["run_id"]).record
-    assert record.fold == 0
+    client = MlflowClient(resolve_tracking_uri())
+    tags = client.get_run(payload["mlflow_run_id"]).data.tags
+    assert tags["fold"] == "0"
 
 
 def test_summary_projection_omits_the_config(
@@ -245,3 +249,38 @@ def test_summary_projection_omits_the_config(
     assert "config" in full
     assert "config" not in brief
     assert full["config_hash"] == brief["config_hash"]
+
+
+# --- live: the real compose stack -------------------------------------------------------
+
+
+@pytest.mark.live
+def test_live_run_writes_stdout_that_is_valid_json(
+    workdir: Path, preset_env: dict[str, str]
+) -> None:
+    """I7: MLflow prints a "🏃 View run"/"🧪 View experiment" banner straight to stdout
+    the instant a run is created (`mlflow.tracking._tracking_service.client.
+    MlflowTrackingServiceClient._log_url`, called from `create_run`) -- but only when
+    the tracking store is a real REST-backed one (`isinstance(self.store, RestStore)`),
+    never the `file:` backend every other CLI test in this suite runs against. So this
+    is the one test in the suite that can actually reproduce -- or catch a regression of
+    -- `dsio run ... > out.json` producing a file `json.load` cannot parse. Needs
+    `docker compose up -d` (compose.yaml); excluded by default, run with
+    `uv run --extra cpu pytest -m live`.
+    """
+    import os
+
+    env = {**os.environ, **preset_env, "MLFLOW_TRACKING_URI": "http://localhost:5000"}
+    completed = subprocess.run(
+        [sys.executable, "-m", "dsio.cli.main", "run", "project_preset", "--summary"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "View run" not in completed.stdout, (
+        "MLflow's banner reached stdout -- json.load on this output would fail"
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True

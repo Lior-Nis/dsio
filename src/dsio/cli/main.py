@@ -6,10 +6,24 @@ happens where Python is already available, in a repo you own. That leaves ``run`
 
 from __future__ import annotations
 
+import os
+
 import typer
 
 from dsio.cli import run_cmd
 from dsio.cli.envelope import emit, failure
+
+# I7: MLflow prints a "View run"/"View experiment" banner straight to stdout the moment a
+# run is created (`mlflow.tracking._tracking_service.client.MlflowTrackingServiceClient.
+# _log_url`, called from `create_run`), interleaving with `cli/envelope.py`'s one JSON
+# object -- `dsio run ... > out.json` then produces a file `json.load` cannot parse.
+# `cli/envelope.py` exists specifically to make stdout machine-readable (decision 6 makes
+# "a shell loop or an agent" the mandated cross-validation workflow), so this is a hard
+# guarantee, not a preference: set unconditionally, ahead of any ambient environment
+# variable, rather than `setdefault`. Set at CLI import time, not inside `dsio.train.
+# tracking`, so a library caller of `run_torch`/`run_ssl_pretrain` directly (a notebook, a
+# script) still gets MLflow's normal banner -- only the CLI's stdout is a contract.
+os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] = "true"
 
 app = typer.Typer(
     name="dsio",

@@ -2,7 +2,21 @@
 
 Status: accepted (2026-08-20)
 Supersedes: ADR 0002 ("The run ledger is authoritative; trackers are sinks").
-Implemented: no. This is Plan 3.
+Implemented: yes, by Plan 3b. `compose.yaml` (Postgres 16 + MLflow, per the backend-store
+decision below) and `docker/mlflow/Dockerfile` (psycopg2 baked in, since the official
+image ships without it) stand up the stack. `dsio.train.tracking.require_mlflow` is the
+"a run fails without it" guard: it is called from both the CLI preflight (`check_torch`/
+`check_ssl` in `train/torch_task.py`/`train/ssl_task.py`) and again at the top of the
+runner itself (`run_torch`/`run_ssl_pretrain`), before the store, a module or a `Trainer`
+exist. `build_mlflow_logger` (`dsio.train.tracking`) wires `MLFlowLogger(log_model=False)`
+into both runners — model logging stays `dsio.artifacts.store.ModelRegistry`'s job, which
+has the fail-closed policy MLflow's own model logging does not. `runs/` (`dsio.runs.
+record`) is reduced to the provenance stamper; `artifacts/` (`dsio.artifacts.store`) is
+reduced to digest-on-save, verify-on-load and fail-closed-on-mismatch over MLflow's Model
+Registry. The nightly backup (`ops/backup-mlflow.sh`, `ops/mlflow-backup.service`, `ops/
+mlflow-backup.timer`) is push-only (`rclone copy`, never `sync`) and captures both halves —
+the Postgres dump and the `mlartifacts` volume — since Postgres holds artifact URIs and
+restoring the database alone yields an index pointing at files that no longer exist.
 
 ## Context
 
@@ -55,6 +69,34 @@ ours.
 The backend store is Postgres, not SQLite, because the fold-as-process decision (ADR 0017)
 makes concurrent runs normal and the intended workload is several agents launching experiments
 in parallel. SQLite is single-writer and the MLflow server's own workers contend on it.
+
+## What building this surfaced
+
+**"The run fails" is only meaningful because the probe is bounded.** MLflow's own client
+defaults to a 120-second timeout and 7 retries with exponential backoff
+(`mlflow.environment_variables`), which turns "the stack is down" into a multi-minute hang
+before a run ever reports the failure it exists to report early. `require_mlflow`
+(`dsio.train.tracking`) shrinks that budget to 5 seconds and zero retries for the probe
+call only, then restores it immediately so a run that does reach MLflow still gets the
+generous retry behaviour for real logging. Measured against a closed port, the probe now
+fails in roughly 0.004 seconds — `test_an_unreachable_server_fails_in_bounded_time`
+(`tests/train/test_tracking.py`) pins this at a generous `< 15s` rather than an exact
+figure, to tolerate a loaded CI box without hiding a regression back toward the unbounded
+default. Someone will eventually look at `_bounded_probe_timeout` and be tempted to
+simplify it away; without it, this ADR's whole "fails without it" claim degrades back into
+a several-minute hang.
+
+**Lightning marks the MLflow run FINISHED before the runner's own failure guards run.**
+`trainer.predict()` finalizes Lightning's `MLFlowLogger` run the instant it returns, which
+is *before* `run_torch`/`run_ssl_pretrain` (`dsio.train.torch_task`/`dsio.train.ssl_task`)
+run their own post-predict guards — ADR 0017's guards 1 and 4, carried over from the
+deleted `cross_validate`: predictions that do not line up with the fold they came from,
+and a fold whose metric fails to compute. Left alone, a run that failed one of those checks
+would show as FINISHED
+in MLflow: the exact "the record lies" failure decision 7 exists to prevent, just moved one
+layer down. Both runners now wrap the code after provenance is stamped in `try`/`except BaseException`
+and call `mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")` on any
+failure before re-raising, so a late failure is recorded as one.
 
 ## Consequences
 

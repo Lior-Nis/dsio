@@ -47,7 +47,14 @@ from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TR
 from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
-from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional
+from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional, build_callbacks
+from dsio.train.tracking import (
+    build_mlflow_logger,
+    finite_metrics,
+    log_run_artifacts,
+    require_mlflow,
+    stamp_provenance,
+)
 
 if TYPE_CHECKING:
     from dsio.config.schema import RunConfig
@@ -120,7 +127,13 @@ class SslPretrainTask(TaskConfig):
 
 @preflight("ssl_pretrain")
 def check_ssl(config: RunConfig) -> None:
-    """Resolve every name, including the ones only the probe needs."""
+    """Resolve every name, including the ones only the probe needs.
+
+    ``require_mlflow`` runs first, ahead of every registry lookup below: decision 7 makes
+    MLflow a run's hard dependency, and a run that cannot write to it should not spend even
+    a typo-check's worth of time before saying so.
+    """
+    require_mlflow()
     task = config.task
     assert isinstance(task, SslPretrainTask)
     BACKBONES.get(task.backbone.name)
@@ -274,111 +287,169 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     import torch
     from lightning import Trainer
 
-    task = config.task
-    assert isinstance(task, SslPretrainTask)
-
     # Fails before the store, module or trainer exist -- the same guarantee `check_ssl`
     # gives the CLI's pre-flight path, reasserted here for any caller (every test in this
     # module, and any future caller) that reaches `execute()` without going through it.
-    require_fold(task.splits_root, task.split, task.fold)
+    # MLflow first, per decision 7: a run that cannot write to it should not even resolve
+    # a fold first.
+    tracking_uri = require_mlflow()
 
-    store = SignalStore(data_root() / task.store)
-    row_labels = None if task.labels is None else np.asarray(LABELS.get(task.labels)(store))
-    index = load_or_build(store, task.window, labels=row_labels)
-    examples = SignalExamples(store, index)
-    folds = load_folds(examples, split_path(task.splits_root, task.split))
-    # `require_fold` above already guarantees `task.fold` is declared, so this lookup
-    # cannot fail on a live split file; kept as an assertion rather than silently trusting
-    # it, so a TOCTOU (the file changing between the two reads) still fails loudly.
-    fold = next((f for f in folds if f.index == task.fold), None)
-    assert fold is not None, f"require_fold guaranteed fold {task.fold} exists in {task.split!r}"
+    task = config.task
+    assert isinstance(task, SslPretrainTask)
 
-    module, feature_dim = build_module(task, channels=store.channels, length=task.window.length)
-    train_loader, val_loader = build_loaders(task, store, index, fold, config.seed)
+    # Created as early as `require_mlflow` allows -- see `run_torch`'s own comment
+    # (`torch_task.py`) for why everything below, *including* `stamp_provenance` itself,
+    # is wrapped in `try`/`except`: this pretraining run has no `trainer.predict` step,
+    # but registering the encoder and stamping its lineage still happen after
+    # `trainer.fit` returns and Lightning has already finalized the logger to "success"
+    # -- and a crash while `stamp_provenance` is itself talking to MLflow (a network
+    # call, just like everything after it) must not leave the run stuck RUNNING forever
+    # instead of flipping to FAILED. `run.mlflow_run_id` is only set once
+    # `stamp_provenance`'s own run-creation call has actually succeeded, so the `except`
+    # below uses it -- not a bare `mlflow_logger.run_id` re-access, which would itself
+    # attempt to lazily create a *second* run if creating the first one is what failed --
+    # to decide whether there is a run to terminate at all.
+    mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
 
-    callbacks: list[Any] = []
-    probe: OnlineProbe | None = None
-    if val_loader is not None and row_labels is not None:
-        probe = OnlineProbe(
-            # Embeddings for the probe must come from an unmasked, uncollated view
-            # regardless of the pretext objective, so this always reaches for val_dataset,
-            # never train_dataset and never TwoViewCollate.
-            make_loader(
-                val_dataset(store, index, fold.train),
-                batch_size=task.batch_size,
-                num_workers=task.num_workers,
-                seed=config.seed,
-            ),
-            make_loader(
-                val_dataset(store, index, fold.test),
-                batch_size=task.batch_size,
-                num_workers=task.num_workers,
-                seed=config.seed,
-            ),
-            every_n_epochs=task.probe_every_n_epochs,
-            metrics=task.probe_metrics,
+    try:
+        stamp_provenance(run, mlflow_logger)
+
+        require_fold(task.splits_root, task.split, task.fold)
+
+        store = SignalStore(data_root() / task.store)
+        row_labels = None if task.labels is None else np.asarray(LABELS.get(task.labels)(store))
+        index = load_or_build(store, task.window, labels=row_labels)
+        examples = SignalExamples(store, index)
+        folds = load_folds(examples, split_path(task.splits_root, task.split))
+        # `require_fold` above already guarantees `task.fold` is declared, so this lookup
+        # cannot fail on a live split file; kept as an assertion rather than silently
+        # trusting it, so a TOCTOU (the file changing between the two reads) still fails
+        # loudly.
+        fold = next((f for f in folds if f.index == task.fold), None)
+        assert fold is not None, (
+            f"require_fold guaranteed fold {task.fold} exists in {task.split!r}"
         )
-        callbacks.append(probe)
-    elif val_loader is not None:
-        callbacks.append(RankMeMonitor(val_loader, every_n_epochs=task.probe_every_n_epochs))
 
-    trainer = Trainer(
-        max_epochs=task.trainer.max_epochs,
-        accelerator=task.trainer.accelerator,
-        devices=task.trainer.devices,
-        precision=task.trainer.precision,  # type: ignore[arg-type]
-        gradient_clip_val=task.trainer.gradient_clip_val,
-        accumulate_grad_batches=task.trainer.accumulate_grad_batches,
-        log_every_n_steps=task.trainer.log_every_n_steps,
-        enable_progress_bar=task.trainer.enable_progress_bar,
-        enable_model_summary=False,
-        deterministic="warn" if task.trainer.deterministic else False,
-        default_root_dir=run.artifacts_dir,
-        logger=False,
-        callbacks=callbacks,
-    )
-    trainer.fit(module, train_loader, val_loader)
+        module, feature_dim = build_module(
+            task, channels=store.channels, length=task.window.length
+        )
+        train_loader, val_loader = build_loaders(task, store, index, fold, config.seed)
 
-    buffer = io.BytesIO()
-    torch.save(
-        {
-            "state_dict": export_encoder(module),
-            "backbone": task.backbone.model_dump(mode="json"),
-            "transform": None if task.transform is None else task.transform.model_dump(mode="json"),
-            "feature_dim": feature_dim,
-            "channels": store.channels,
-            "length": task.window.length,
-        },
-        buffer,
-    )
-    payload = buffer.getvalue()
+        callbacks: list[Any] = []
+        probe: OnlineProbe | None = None
+        if val_loader is not None and row_labels is not None:
+            probe = OnlineProbe(
+                # Embeddings for the probe must come from an unmasked, uncollated view
+                # regardless of the pretext objective, so this always reaches for
+                # val_dataset, never train_dataset and never TwoViewCollate.
+                make_loader(
+                    val_dataset(store, index, fold.train),
+                    batch_size=task.batch_size,
+                    num_workers=task.num_workers,
+                    seed=config.seed,
+                ),
+                make_loader(
+                    val_dataset(store, index, fold.test),
+                    batch_size=task.batch_size,
+                    num_workers=task.num_workers,
+                    seed=config.seed,
+                ),
+                every_n_epochs=task.probe_every_n_epochs,
+                metrics=task.probe_metrics,
+            )
+            callbacks.append(probe)
+        elif val_loader is not None:
+            callbacks.append(
+                RankMeMonitor(val_loader, every_n_epochs=task.probe_every_n_epochs)
+            )
 
-    version = ModelRegistry().save(
-        task.register_as,
-        payload,
-        run_id=run.run_id,
-        config_hash=config.config_hash,
-        code_hash=run.record.git.code_hash,
-        data_snapshot_ids=(store.manifest().signal_sha256,),
-        seed=config.seed,
-    )
-    (run.artifacts_dir / "encoder.json").write_text(
-        json.dumps(version.ref.model_dump(mode="json"), indent=2, sort_keys=True)
-    )
+        # I1/"the rule": `task.trainer` is a full `TrainerConfig` here too, including a
+        # deliberate `monitor="val/loss"` default (this class's own field default,
+        # above) -- but until now nothing in this function ever read `checkpoint`,
+        # `early_stopping_patience`, `monitor` or `monitor_mode`, so `early_stopping_
+        # patience=5` on a 500-epoch pretrain silently ran the full 500. Reusing
+        # `build_callbacks` -- the same construction `run_torch` uses -- wires all four
+        # for pretraining too, rather than leaving them honoured nowhere.
+        callbacks += build_callbacks(
+            task.trainer, run.artifacts_dir, has_validation=val_loader is not None
+        )
 
-    metrics: dict[str, float] = {
-        "train_windows": float(fold.train.size),
-        "feature_dim": float(feature_dim),
-        "encoder_version": float(version.version),
-    }
-    logged = trainer.logged_metrics
-    for name in ("train/loss_epoch", "train/loss", "val/loss"):
-        if name in logged:
-            metrics[name.replace("/", "_")] = float(logged[name])
-    if probe is not None and probe.history:
-        for name, value in probe.history[-1].items():
-            metrics[f"probe_{name}"] = float(value)
-    run.log_metrics(metrics)
+        trainer = Trainer(
+            max_epochs=task.trainer.max_epochs,
+            accelerator=task.trainer.accelerator,
+            devices=task.trainer.devices,
+            precision=task.trainer.precision,  # type: ignore[arg-type]
+            gradient_clip_val=task.trainer.gradient_clip_val,
+            accumulate_grad_batches=task.trainer.accumulate_grad_batches,
+            log_every_n_steps=task.trainer.log_every_n_steps,
+            enable_progress_bar=task.trainer.enable_progress_bar,
+            enable_model_summary=False,
+            deterministic="warn" if task.trainer.deterministic else False,
+            default_root_dir=run.artifacts_dir,
+            logger=mlflow_logger,
+            # I1: same fix as `run_torch` -- without this, Lightning installs its own
+            # default `ModelCheckpoint` regardless of `task.trainer.checkpoint`.
+            enable_checkpointing=task.trainer.checkpoint,
+            callbacks=callbacks,
+        )
+        trainer.fit(module, train_loader, val_loader)
+
+        buffer = io.BytesIO()
+        torch.save(
+            {
+                "state_dict": export_encoder(module),
+                "backbone": task.backbone.model_dump(mode="json"),
+                "transform": (
+                    None if task.transform is None else task.transform.model_dump(mode="json")
+                ),
+                "feature_dim": feature_dim,
+                "channels": store.channels,
+                "length": task.window.length,
+            },
+            buffer,
+        )
+        payload = buffer.getvalue()
+
+        # `run_id` cites MLflow's own run id, not dsio's human-readable label
+        # (`run.run_id`): decision 7 makes MLflow's the real, collision-free identity
+        # (see `dsio.runs.record`'s module docstring), and this manifest row is exactly
+        # the kind of place a stale or colliding label would be misleading.
+        version = ModelRegistry().save(
+            task.register_as,
+            payload,
+            run_id=run.mlflow_run_id,
+            config_hash=config.config_hash,
+            code_hash=run.record.git.code_hash,
+            data_snapshot_ids=(store.manifest().signal_sha256,),
+            seed=config.seed,
+        )
+        (run.artifacts_dir / "encoder.json").write_text(
+            json.dumps(version.ref.model_dump(mode="json"), indent=2, sort_keys=True)
+        )
+
+        metrics: dict[str, float] = {
+            "train_windows": float(fold.train.size),
+            "feature_dim": float(feature_dim),
+            "encoder_version": float(version.version),
+        }
+        logged = trainer.logged_metrics
+        for name in ("train/loss_epoch", "train/loss", "val/loss"):
+            if name in logged:
+                metrics[name.replace("/", "_")] = float(logged[name])
+        if probe is not None and probe.history:
+            for name, value in probe.history[-1].items():
+                metrics[f"probe_{name}"] = float(value)
+        # `train_windows`, `feature_dim` and `encoder_version` are computed here, not
+        # inside a `*_step` hook, so nothing during training's own `self.log(...)` calls
+        # captured them -- logged explicitly, through the same logger the Trainer
+        # streamed epoch metrics to, so they land in the same MLflow run as everything
+        # else this pretraining fold produced.
+        mlflow_logger.log_metrics(finite_metrics(metrics))
+        log_run_artifacts(run, mlflow_logger)
+    except BaseException:
+        if run.mlflow_run_id is not None:
+            mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
+        raise
     return metrics
 
 

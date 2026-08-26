@@ -23,9 +23,16 @@ lockfile hash, all seeds, and the environment. `code_hash` is either the SHA or
 When git is unavailable, `code_hash` is `None` — never a guess. A confident-but-wrong
 provenance value is worse than a missing one, because it looks trustworthy.
 
-The gate lives at model-registry promotion. `promotion_blockers()` refuses a run with a
-dirty tree or missing provenance, and `dsio registry promote` surfaces that as
-`{"code": "blocked"}`.
+The gate lives at model-registry promotion. `promotion_blockers()` (`dsio.artifacts.store`,
+survived Plan 3b's Task 4 migration to MLflow's registry unchanged) refuses a run with a
+dirty tree or missing provenance, reading `git`/`env` off whatever record it is given —
+`RunRecord.git`/`RunRecord.env` (`dsio.runs.record`), captured by `dsio.runs.provenance`'s
+`capture_git`/`capture_env`. It exists today as a policy function with its own tests
+(`tests/artifacts/test_registry.py`); no CLI command calls it yet — `dsio run` is
+presently the CLI's only command (`dsio.cli.main`) — so `dsio registry promote` is
+aspirational rather than current. The envelope shape it would need is already in place:
+`BlockedError` and `ErrorCode.BLOCKED = "blocked"` (`dsio.cli.envelope`) exist, unused,
+waiting for a caller.
 
 ## Consequences
 

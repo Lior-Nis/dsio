@@ -1,4 +1,12 @@
-"""Ledger, provenance and determinism invariants."""
+"""The provenance stamper, MLflow's status guarantee, and determinism invariants.
+
+This file used to be titled "Ledger, provenance and determinism invariants" and tested
+``RunLedger``: a run's directory allocation, its persisted ``run.json``, its ``status``
+field. Decision 7 of the lean design deletes all three -- MLflow is the source of truth
+for run identity and status now (`dsio.runs.record`'s own module docstring has the full
+argument). Tests of that deleted behaviour are gone with it; each one below that replaces
+one says explicitly what happened to the property it used to check.
+"""
 
 from __future__ import annotations
 
@@ -9,18 +17,22 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from mlflow.entities import RunStatus
+from mlflow.tracking import MlflowClient
 
 from dsio.config import RunConfig
 from dsio.contracts import NonCanonicalValueError, sha256_of
+from dsio.eval.metrics import MetricError
 from dsio.runs.provenance import capture_env, capture_git
-from dsio.runs.record import CONFIG_FILE, PATCH_FILE, REPRODUCE_FILE, RUN_FILE, RunLedger, RunStatus
+from dsio.runs.record import CONFIG_FILE, PATCH_FILE, REPRODUCE_FILE, Run, start_run
 from dsio.runs.seeding import seed_everything
 from dsio.train import load_runners
 from dsio.train.runner import execute
+from dsio.train.tracking import resolve_tracking_uri
 
 
-def _start(ledger: RunLedger, config: RunConfig, **kwargs: object) -> object:
-    return ledger.start(
+def _start(config: RunConfig, **kwargs: object) -> Run:
+    return start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -29,50 +41,243 @@ def _start(ledger: RunLedger, config: RunConfig, **kwargs: object) -> object:
     )
 
 
-def test_record_is_written_before_any_work(ledger: RunLedger, config: RunConfig) -> None:
-    """A run that crashes immediately must still have an identity on disk."""
-    run = _start(ledger, config)
-    assert (run.dir / RUN_FILE).is_file()
+# --- what `start_run` still writes locally, before any work begins ---------------------
+
+
+def test_provenance_is_written_before_any_work(config: RunConfig) -> None:
+    """A run that crashes immediately must still have provenance captured.
+
+    There is no ``run.json`` any more (removed test: ``test_record_is_written_before_
+    any_work`` used to also check one existed here) -- there is nothing left to persist
+    locally once ``status``/``metrics``/``error`` are gone (MLflow owns them), and a
+    ``RunRecord`` that carries only git/env/config identity has no reason to be written
+    to disk before a runner exists to log it anywhere. What "before any work begins"
+    still guarantees is that the two files a reproduction needs are already on disk the
+    moment ``start_run`` returns.
+    """
+    run = _start(config)
     assert (run.dir / CONFIG_FILE).is_file()
     assert (run.dir / REPRODUCE_FILE).is_file()
 
 
-def test_fold_is_stamped_on_the_run_record(ledger: RunLedger, config: RunConfig) -> None:
+def test_fold_is_stamped_on_the_run_record(config: RunConfig) -> None:
     """Under fold-as-process (decision 6), fold is part of what identifies a run, so it
     is hoisted to a top-level record field the same way `seed` already is, rather than
-    left only inside the nested `config` dict."""
-    run = _start(ledger, config, fold=config.task.fold)  # type: ignore[attr-defined]
+    left only inside the nested `config` dict.
+
+    The old second half of this test (``ledger.load(run.run_id).record.fold ==
+    ...`` -- reloading the record from disk) is gone with ``RunLedger.load``: there is no
+    on-disk record to reload. The property it was really checking -- that the fold
+    survives past construction and is *searchable*, not just held in memory -- now lives
+    in MLflow as the ``fold`` tag ``dsio.train.tracking.stamp_provenance`` sets;
+    ``tests/cli/test_cli.py::test_the_run_record_stamps_which_fold_ran`` proves that end
+    to end.
+    """
+    run = _start(config, fold=config.task.fold)  # type: ignore[attr-defined]
     assert run.record.fold == config.task.fold  # type: ignore[union-attr,attr-defined]
-    assert ledger.load(run.run_id).record.fold == config.task.fold  # type: ignore[union-attr,attr-defined]
 
 
-def test_fold_is_none_when_the_task_kind_carries_none(ledger: RunLedger, config: RunConfig) -> None:
+def test_fold_is_none_when_the_task_kind_carries_none(config: RunConfig) -> None:
     """A caller that never passes `fold` -- any task kind with no notion of one -- gets
     `None`, not a stamped value it never claimed."""
-    run = _start(ledger, config)
-    assert run.record.fold is None  # type: ignore[union-attr]
+    run = _start(config)
+    assert run.record.fold is None
 
 
-def test_identical_configs_get_distinct_run_ids(ledger: RunLedger, config: RunConfig) -> None:
-    """Run ids carry a one-second timestamp, so a fast rerun must not collide."""
-    ids = {_start(ledger, config).run_id for _ in range(3)}  # type: ignore[attr-defined]
-    assert len(ids) == 3
+def test_two_starts_always_get_distinct_scratch_directories(config: RunConfig) -> None:
+    """Replaces ``test_identical_configs_get_distinct_run_ids``, which used to assert
+    ``run_id``s were distinct: ``RunLedger._allocate_run_dir`` retried an ``os.mkdir``
+    until it claimed a collision-free slot, so a fast rerun's *directory name*
+    (``run_id``) could not collide. There is no slot to claim any more --
+    ``start_run``'s scratch directory is ``tempfile.mkdtemp()`` -- so this checks the
+    property that actually needs to hold: two starts never share a scratch directory,
+    which ``tempfile.mkdtemp()`` guarantees on its own, without a retry loop.
+    """
+    directories = {_start(config).dir for _ in range(5)}
+    assert len(directories) == 5
 
 
-def test_failed_run_is_recorded_not_lost(ledger: RunLedger, config: RunConfig) -> None:
-    with pytest.raises(RuntimeError), _start(ledger, config) as run:
+def test_run_id_is_a_label_not_a_claimed_identity(config: RunConfig) -> None:
+    """The other half of what ``test_identical_configs_get_distinct_run_ids`` used to
+    prove, made explicit rather than silently dropped: ``run_id`` is a human-readable
+    label now (timestamp plus config-hash prefix), used only as MLflow's
+    ``mlflow.runName`` tag (``dsio.train.tracking.build_mlflow_logger``) -- which MLflow
+    does not require to be unique -- not a claimed, collision-free identity. Two starts
+    in the same second *can* carry the same ``run_id``; what actually distinguishes them
+    is MLflow's own run id, allocated when a runner builds its ``MLFlowLogger`` and
+    recorded onto ``Run.mlflow_run_id``.
+    ``tests/train/test_torch_runner.py::test_two_folds_of_one_config_land_in_one_mlflow_
+    experiment`` proves that real distinctness end to end, with two actual training runs.
+    """
+    run = _start(config)
+    assert run.run_id.endswith(config.config_hash[:12])
+    assert run.mlflow_run_id is None, "Run itself never talks to MLflow -- see its docstring"
+
+
+# --- run status: MLflow's job now, not `Run.__exit__`'s ---------------------------------
+
+
+def test_run_exit_no_longer_records_anything(config: RunConfig) -> None:
+    """Replaces ``test_failed_run_is_recorded_not_lost``, which used to assert
+    ``ledger.load(run.run_id).record.status is RunStatus.FAILED`` after an exception
+    propagated out of ``with ledger.start(...) as run: raise ...``. ``Run.__exit__`` is a
+    no-op now (see its docstring): there is no local status field to flip, and MLflow is
+    what is authoritative for status, so recording a failure is not this module's job at
+    all any more -- it belongs to whichever runner built the MLflow run in the first
+    place. The two tests below prove *that* property holds, against a real MLflow run
+    reached through ``execute()``, which is the only path that can ever produce one.
+    """
+    with pytest.raises(RuntimeError), _start(config) as run:
         raise RuntimeError("boom")
-    assert ledger.load(run.run_id).record.status is RunStatus.FAILED
-    assert "boom" in (ledger.load(run.run_id).record.error or "")
+    assert run.mlflow_run_id is None
 
 
-def test_non_finite_metrics_are_not_written(ledger: RunLedger, config: RunConfig) -> None:
-    """A NaN in the stream breaks every downstream comparison."""
-    run = _start(ledger, config)
-    run.log_metrics({"good": 1.0, "bad": float("nan"), "worse": float("inf")})
-    rows = run.read_metrics()
-    assert rows and "good" in rows[0]
-    assert "bad" not in rows[0] and "worse" not in rows[0]
+def test_a_successful_run_is_recorded_finished_in_mlflow(config: RunConfig) -> None:
+    """The acceptance half of the pair below: a run that completes normally must not be
+    left looking like it is still running, or like nothing happened."""
+    load_runners()
+    run = _start(config)
+    execute(config, run)
+
+    assert run.mlflow_run_id is not None
+    status = MlflowClient(resolve_tracking_uri()).get_run(run.mlflow_run_id).info.status
+    assert status == RunStatus.to_string(RunStatus.FINISHED)
+
+
+def test_a_failure_after_predict_still_marks_the_mlflow_run_failed(
+    config: RunConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal half: the property ``test_failed_run_is_recorded_not_lost`` used to
+    check -- a crash leaves a *recorded* failure, not a silently successful-looking run
+    -- moved to ``run_torch``'s own ``try``/``except`` around the MLflow run
+    (``dsio.train.torch_task``). That guard exists specifically because Lightning's own
+    ``Trainer`` already marks the MLflow run FINISHED the instant ``trainer.predict``
+    *returns* -- before the scoring guards below it run -- so a failure there would look
+    like a completed run in MLflow without it. This monkeypatches ``compute`` to fail
+    exactly there, after Lightning's own finalize has already fired, and checks the
+    status itself rather than merely that the exception propagates: a refusal-only
+    version of this test could not tell a run correctly marked FAILED apart from one left
+    stuck at FINISHED with an exception merely raised on top.
+    """
+    import dsio.train.torch_task as torch_task
+
+    def explode(*args: object, **kwargs: object) -> dict[str, float]:
+        raise MetricError("boom")
+
+    monkeypatch.setattr(torch_task, "compute", explode)
+    load_runners()
+
+    run = _start(config)
+    with pytest.raises(Exception, match="check stratification"):
+        execute(config, run)
+
+    assert run.mlflow_run_id is not None
+    status = MlflowClient(resolve_tracking_uri()).get_run(run.mlflow_run_id).info.status
+    assert status == RunStatus.to_string(RunStatus.FAILED)
+
+
+# --- metrics filtering moved out of this module entirely --------------------------------
+
+# ``test_non_finite_metrics_are_not_written`` used to live here, against ``Run.
+# log_metrics``/``Run.read_metrics`` -- both deleted, along with every other metrics- or
+# status-carrying field ``RunRecord`` used to have (see this module's docstring: MLflow is
+# authoritative for metrics now). The NaN/inf-filtering property itself was not dropped,
+# just rehomed: ``dsio.train.tracking.finite_metrics`` does the identical filtering,
+# called from ``run_torch``/``run_ssl_pretrain`` right before the held-out metrics reach
+# ``mlflow_logger.log_metrics`` -- ``tests/train/test_tracking.py::
+# test_finite_metrics_drops_non_finite_values`` is its test now.
+
+
+# --- provenance actually lands in MLflow, byte-identical --------------------------------
+
+
+def test_provenance_lands_in_mlflow_byte_identical(config: RunConfig, git_repo: Path) -> None:
+    """Task 3's own fake-backed verification: a run's diff, resolved config and
+    reproduce script are logged into MLflow as artifacts before training starts
+    (``dsio.train.tracking.stamp_provenance``, called first thing inside ``run_torch``),
+    and read back exactly the bytes ``start_run`` wrote to local scratch. The tree is
+    made dirty here so the patch -- the artifact ADR 0002 said MLflow could not hold at
+    all -- is exercised too, not just the two files that always exist.
+    """
+    (git_repo / "tracked.txt").write_text("dirty for this test\n")
+    load_runners()
+
+    run = _start(config, repo_root=git_repo)
+    execute(config, run)
+    assert run.mlflow_run_id is not None
+
+    client = MlflowClient(resolve_tracking_uri())
+    tags = client.get_run(run.mlflow_run_id).data.tags
+    assert tags["config_hash"] == config.config_hash
+
+    for filename in (CONFIG_FILE, REPRODUCE_FILE, PATCH_FILE):
+        local = (run.dir / filename).read_bytes()
+        downloaded = Path(client.download_artifacts(run.mlflow_run_id, filename))
+        assert downloaded.read_bytes() == local
+
+
+def test_dirty_patch_actually_applies_with_real_git_apply(
+    git_repo: Path, config: RunConfig, tmp_path: Path
+) -> None:
+    """C1: the test above only proves dsio's downloaded patch matches dsio's own local
+    write -- dsio's output compared to dsio's output, which a corrupt patch would pass
+    just as easily. This proves the thing that actually matters: a fresh clone can
+    ``git checkout`` the recorded commit, ``git apply`` the downloaded ``git.patch``, and
+    land on file content identical to the dirty tree that produced the run -- the literal
+    steps ``reproduce.sh`` itself runs.
+
+    The edit lands on the *last* statement of ``foo``, with three blank lines separating
+    it from ``bar``, so the trailing context of its diff hunk is three blank-context
+    lines (a unified diff's blank context line is a single space, not an empty line) and
+    never reaches ``bar``'s code. That is what used to break: ``_git``'s ``str.strip()``
+    ate the trailing blank context, shortening the final hunk by one line relative to its
+    own ``@@ -1,5 +1,5 @@`` header, and ``git apply`` rejected it with "corrupt patch". A
+    dirty edit that instead landed mid-function -- trailing context a code line -- would
+    have passed this test by the same luck the earlier fix wave shipped with.
+    """
+    source = "def foo():\n    return 1\n\n\n\ndef bar():\n    return 2\n"
+    (git_repo / "module.py").write_text(source)
+    subprocess.run(["git", "add", "module.py"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add module.py"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    edited = source.replace("return 1", "return 100")
+    (git_repo / "module.py").write_text(edited)
+
+    load_runners()
+    run = _start(config, repo_root=git_repo)
+    execute(config, run)
+    assert run.mlflow_run_id is not None
+
+    client = MlflowClient(resolve_tracking_uri())
+    downloaded_patch = Path(
+        client.download_artifacts(run.mlflow_run_id, PATCH_FILE)
+    ).read_bytes()
+    assert downloaded_patch == (run.dir / PATCH_FILE).read_bytes()
+
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(git_repo), str(clone)], check=True, capture_output=True
+    )
+    subprocess.run(["git", "checkout", "-q", sha], cwd=clone, check=True, capture_output=True)
+    patch_path = clone / "downloaded.patch"
+    patch_path.write_bytes(downloaded_patch)
+
+    applied = subprocess.run(
+        ["git", "apply", str(patch_path)], cwd=clone, capture_output=True, text=True
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert (clone / "module.py").read_text() == edited
+
+
+# --- git and environment capture (unchanged by decision 7) ------------------------------
 
 
 def test_non_finite_values_cannot_be_hashed() -> None:
@@ -100,6 +305,24 @@ def test_dirty_tree_is_allowed_and_still_reconstructible(git_repo: Path) -> None
     assert state.patch_sha256 is not None
 
 
+def test_untracked_file_content_is_captured_not_just_a_comment(git_repo: Path) -> None:
+    """I6: ``git diff --no-index`` exits ``1`` whenever the two sides differ, which for a
+    brand-new file diffed against ``/dev/null`` is *always* -- so the old code, which
+    treated any non-zero exit as failure, could never see the diff and always fell
+    through to the ``# untracked binary ... sha256=...`` stand-in, contradicting this
+    module's own docstring promise that "the patch alone is sufficient to rebuild the
+    tree state". A text file's actual content must appear in the patch, not just its
+    digest.
+    """
+    from dsio.runs.provenance import working_tree_patch
+
+    (git_repo / "untracked.txt").write_text("hello from an untracked file\n")
+
+    patch = working_tree_patch(cwd=git_repo).decode("utf-8")
+    assert "hello from an untracked file" in patch
+    assert "untracked binary" not in patch
+
+
 def test_dirty_hash_tracks_content_not_just_filenames(git_repo: Path) -> None:
     """Editing a file's contents must change the code hash, not only touching it."""
     (git_repo / "tracked.txt").write_text("first change\n")
@@ -119,19 +342,15 @@ def test_missing_git_yields_none_not_a_wrong_stamp(tmp_path: Path) -> None:
     assert state.available is False
 
 
-def test_patch_file_is_written_for_dirty_runs(
-    git_repo: Path, config: RunConfig, ledger: RunLedger
-) -> None:
+def test_patch_file_is_written_for_dirty_runs(git_repo: Path, config: RunConfig) -> None:
     (git_repo / "tracked.txt").write_text("dirty\n")
-    run = _start(ledger, config, repo_root=git_repo)
+    run = _start(config, repo_root=git_repo)
     assert (run.dir / PATCH_FILE).is_file()
     assert b"dirty" in (run.dir / PATCH_FILE).read_bytes()
 
 
-def test_reproduce_script_pins_the_commit(
-    git_repo: Path, config: RunConfig, ledger: RunLedger
-) -> None:
-    run = _start(ledger, config, repo_root=git_repo, command=("dsio", "run", "x"))
+def test_reproduce_script_pins_the_commit(git_repo: Path, config: RunConfig) -> None:
+    run = _start(config, repo_root=git_repo, command=("dsio", "run", "x"))
     script = (run.dir / REPRODUCE_FILE).read_text()
     sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, capture_output=True, text=True, check=True
@@ -141,10 +360,75 @@ def test_reproduce_script_pins_the_commit(
     assert "dsio run x" in script
 
 
+def test_reproduce_script_syncs_the_extra_that_produced_this_run(
+    git_repo: Path, config: RunConfig
+) -> None:
+    """Bug 2: a bare ``uv sync --locked`` uninstalls its own dependencies. ``torch``,
+    ``lightning`` and ``mlflow-skinny`` live only in the ``cpu``/``gpu`` extras
+    (``pyproject.toml``), never in the base ``dependencies`` set, so a bare sync
+    *removes* them and the very next line of the script crashes with
+    ``ModuleNotFoundError`` before rerunning anything. This test suite runs under
+    ``uv run --extra cpu``, so the environment that captured this run's provenance really
+    does have the ``cpu`` extra installed (``dsio.runs.provenance.capture_env`` detects
+    it from ``torch.__version__``'s ``+cpu`` local segment) -- the script must sync that
+    same extra, not a bare, dependency-stripping sync.
+    """
+    run = _start(config, repo_root=git_repo, command=("dsio", "run", "x"))
+    assert run.record.env.extra == "cpu"
+    script = (run.dir / REPRODUCE_FILE).read_text()
+    assert "uv sync --locked --extra cpu" in script
+    # No second assertion for "and never the bare form" here: `_reproduce_script`
+    # (`dsio.runs.record`) emits one or the other from a single `if record.env.extra: ...
+    # else: ...`, never both, so that property cannot fail independently of the assertion
+    # above -- it is already the other half of the pair `test_reproduce_script_falls_
+    # back_to_a_bare_sync_with_a_warning_when_the_extra_is_unknown` below proves on its
+    # own, against the `else` branch this test never takes.
+
+
+def test_reproduce_script_falls_back_to_a_bare_sync_with_a_warning_when_the_extra_is_unknown(
+    git_repo: Path, config: RunConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal-adjacent half of the pair above: when the extra genuinely cannot be
+    determined (no torch, or a torch build this heuristic does not recognize --
+    ``dsio.runs.provenance._detect_extra`` returns ``None`` rather than guessing), the
+    script must not silently emit a wrong ``--extra`` and must not pretend it knows --
+    it falls back to the old bare sync, with a warning a reader (or a script) can see,
+    rather than a confident-but-wrong flag.
+    """
+    import dsio.runs.record as record
+
+    monkeypatch.setattr(
+        record, "capture_env", lambda: capture_env().model_copy(update={"extra": None})
+    )
+    run = _start(config, repo_root=git_repo, command=("dsio", "run", "x"))
+    assert run.record.env.extra is None
+    script = (run.dir / REPRODUCE_FILE).read_text()
+    assert "\nuv sync --locked\n" in script
+    assert "WARNING: could not determine which cpu/gpu extra" in script
+
+
 def test_env_capture_records_the_lockfile() -> None:
     env = capture_env(lock_path=Path("uv.lock"))
     assert env.python
     assert env.lock_sha256 is not None, "uv.lock should be hashed for reproducibility"
+
+
+def test_detect_extra_reads_the_torch_local_version_segment() -> None:
+    """Unit-level pin on the heuristic itself (``dsio.runs.provenance._detect_extra``):
+    the ``cpu`` extra's wheel carries a ``+cpu`` local version, the ``gpu`` extra's
+    carries a ``+cu...`` one (``pyproject.toml``'s ``[tool.uv.sources]``/index comments),
+    and anything else is honestly unrecognized rather than guessed at.
+    """
+    from dsio.runs.provenance import _detect_extra
+
+    assert _detect_extra("2.13.0+cpu") == "cpu"
+    assert _detect_extra("2.13.0+cu130") == "gpu"
+    assert _detect_extra("2.13.0+cu121") == "gpu"
+    assert _detect_extra("2.13.0") is None
+    assert _detect_extra(None) is None
+
+
+# --- determinism (unchanged by decision 7) -----------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -184,7 +468,7 @@ def _with_seed_sensitive_metrics(config: RunConfig) -> RunConfig:
     )
 
 
-def test_same_seed_gives_identical_metrics(ledger: RunLedger, config: RunConfig) -> None:
+def test_same_seed_gives_identical_metrics(config: RunConfig) -> None:
     """Same config, same seed, twice -- through ``execute()`` alone, with no external
     ``seed_everything`` call to lean on. A freshly constructed backbone draws its initial
     weights from torch's global RNG, so a match here can only come from ``execute()``
@@ -198,13 +482,13 @@ def test_same_seed_gives_identical_metrics(ledger: RunLedger, config: RunConfig)
         if i == 1:
             torch.rand(97)
             np.random.random(97)
-        with _start(ledger, seed_config) as run:
+        with _start(seed_config) as run:
             results.append(execute(seed_config, run))
     assert results[0] == results[1]
 
 
 def test_different_seed_gives_different_metrics(
-    ledger: RunLedger, config: RunConfig, monkeypatch: pytest.MonkeyPatch
+    config: RunConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Guards against a seed that is recorded but never actually wired through.
 
@@ -231,7 +515,7 @@ def test_different_seed_gives_different_metrics(
     for seed in (1, 999):
         variant = _with_seed_sensitive_metrics(config.model_copy(update={"seed": seed}))
         _reseed_ambient()
-        with _start(ledger, variant) as run:
+        with _start(variant) as run:
             outcomes.append(execute(variant, run))
     assert outcomes[0] != outcomes[1]
 

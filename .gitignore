@@ -6,11 +6,27 @@
 /stores/*/*
 !/stores/*/manifest.yaml
 !/stores/*/entities.jsonl
+# `spine_starter` is `spine_baseline`'s auto-staged synthetic demo corpus
+# (`dsio.presets`'s `_stage_if_default`), regenerated from a fixed seed on first use --
+# not a real, content-addressed store worth describing in git the way the negations
+# above exist for. Left un-ignored, its manifest.yaml/entities.jsonl (and splits/
+# below, which is not un-ignored at all) showed up as untracked-and-unignored the
+# moment any `dsio run` staged it, making the very next run record itself `dirty: true`
+# from the previous run's own bookkeeping rather than any real code change.
+/stores/spine_starter/
+/splits/
 /views/
 /cache/
 /runs/
 /models/
 /data/
+
+# MLflow. The compose stack (compose.yaml) keeps the backend store in Postgres and
+# artifacts in the named `mlartifacts` volume, never in the source tree — these entries
+# are a backstop against `mlflow` writing its bare-filesystem defaults if ever run
+# without the tracking URI pointed at the server.
+/mlruns/
+/mlartifacts/
 
 # Python
 __pycache__/

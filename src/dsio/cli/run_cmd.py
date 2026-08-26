@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from typing import Annotated, Any
 
@@ -17,7 +18,7 @@ from dsio.config.presets import (
 )
 from dsio.config.registry import UnknownComponentError
 from dsio.config.schema import RunConfig
-from dsio.runs.record import RunLedger, RunStatus
+from dsio.runs.record import start_run
 from dsio.runs.seeding import seed_everything
 from dsio.splits.models import SplitError
 from dsio.train import load_runners
@@ -49,7 +50,7 @@ def run(
         bool, typer.Option("--summary", help="Omit the resolved config from the output.")
     ] = False,
 ) -> dict[str, Any]:
-    """Resolve ``preset``, apply ``overrides``, and run it under the ledger.
+    """Resolve ``preset``, apply ``overrides``, and run it, tracked in MLflow.
 
     Called bare, with no preset, it lists every registered preset and the arguments it
     accepts instead of running anything.
@@ -99,8 +100,7 @@ def run(
     _preflight(config)
 
     seeds = seed_everything(config.seed)
-    ledger = RunLedger()
-    with ledger.start(
+    run = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
@@ -111,22 +111,30 @@ def run(
         # Not every task kind carries a fold (`TaskConfig` itself does not), so this
         # reaches for it defensively rather than assuming `config.task.fold` exists.
         fold=getattr(config.task, "fold", None),
-    ) as active:
-        metrics = execute(config, active)
-        active.finish(RunStatus.COMPLETED, metrics=metrics)
+    )
+    try:
+        metrics = execute(config, run)
+    finally:
+        # `run.dir` is local scratch space (`dsio.runs.record`'s module docstring), and
+        # by the time `execute()` returns or raises, the runner has already logged
+        # everything in it to MLflow (`stamp_provenance`, `log_run_artifacts`) or set the
+        # MLflow run FAILED. Nothing downstream needs it any more, and this is the one
+        # caller for which leaving it behind would actually accumulate: `dsio run` is
+        # what a shell loop over folds invokes N times.
+        shutil.rmtree(run.dir, ignore_errors=True)
 
-    record = active.record
+    record = run.record
     payload: dict[str, Any] = {
         "run_id": record.run_id,
-        "status": str(record.status),
+        "mlflow_run_id": run.mlflow_run_id,
+        "status": "completed",
         "config_hash": record.config_hash,
-        "metrics": record.metrics,
+        "metrics": metrics,
         "dirty": record.git.dirty,
         "reproducible": record.reproducible,
     }
     if not summary:
         payload["config"] = config.to_dict()
-        payload["run_dir"] = str(active.dir)
     return payload
 
 

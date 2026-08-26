@@ -20,7 +20,8 @@ inside the format field became a path separator.
 
 **Checkpoints close over their lineage.** A checkpoint that reloads its encoder from a
 hardcoded path fails on a fresh clone. An encoder here is named by run id and digest,
-resolved through the ledger, and verified on load.
+resolved through the model registry (``dsio.artifacts.store.ModelRegistry``), and
+verified on load.
 """
 
 from __future__ import annotations
@@ -52,6 +53,13 @@ from dsio.model.registry import (
 )
 from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.runner import preflight, runner
+from dsio.train.tracking import (
+    build_mlflow_logger,
+    finite_metrics,
+    log_run_artifacts,
+    require_mlflow,
+    stamp_provenance,
+)
 
 if TYPE_CHECKING:
     from dsio.config.schema import RunConfig
@@ -180,7 +188,6 @@ class TorchTask(TaskConfig):
     trainer: TrainerConfig = TrainerConfig()
 
     metrics: tuple[str, ...] = ("accuracy", "f1_macro")
-    keep_checkpoints: bool = True
 
     predict: Literal["prediction", "embedding"] = Field(
         default="prediction",
@@ -226,7 +233,12 @@ def check_torch(config: RunConfig) -> None:
     A schema that accepts unknown keys, or a component named by a bare string resolved at
     instantiation time, surfaces a typo only after the data has loaded. On a large corpus
     that is the difference between a typo costing microseconds and costing twenty minutes.
+
+    ``require_mlflow`` runs first, ahead of every registry lookup below: decision 7 makes
+    MLflow a run's hard dependency, and a run that cannot write to it should not spend even
+    a typo-check's worth of time before saying so.
     """
+    require_mlflow()
     task = config.task
     assert isinstance(task, TorchTask)
 
@@ -371,35 +383,69 @@ def sanitise_metric(name: str) -> str:
     return name.replace("/", "_").replace("\\", "_").replace("=", "-")
 
 
-def build_callbacks(task: TorchTask, directory: Path) -> list[Any]:
-    """Construct the callbacks a fold needs, letting any failure propagate.
+def build_callbacks(
+    trainer: TrainerConfig, directory: Path, *, has_validation: bool
+) -> list[Any]:
+    """Construct the checkpoint/early-stopping callbacks a fold needs, letting any
+    construction failure propagate.
 
     Wrapping this in a bare ``except`` that logs a warning means a ModelCheckpoint which
     fails to construct silently disables checkpointing for a multi-hour run, and the loss of
     the weights is discovered days later. A misconfigured callback is a configuration bug and
     must stop the run.
+
+    Takes a bare :class:`TrainerConfig`, not a task, so both runners that read one --
+    ``run_torch``'s ``TorchTask`` and ``run_ssl_pretrain``'s ``SslPretrainTask`` -- can
+    share this one construction (I1: pretraining used to read none of
+    ``checkpoint``/``early_stopping_patience``/``monitor``/``monitor_mode`` at all, so
+    ``SslPretrainTask``'s own deliberate ``TrainerConfig(monitor="val/loss")`` default did
+    nothing).
+
+    ``has_validation`` gates anything that monitors ``trainer.monitor``: with no
+    validation loader, that metric is never logged (``DsioModule._common_step`` only logs
+    under its own ``stage``), so ``EarlyStopping`` would raise on the metric it can never
+    find, and a metric-ranked ``ModelCheckpoint`` would silently save nothing every
+    epoch. ``checkpoint=True`` still gets a real ``ModelCheckpoint`` in that case -- it
+    just keeps the most recent epoch instead of ranking by a metric that does not exist --
+    rather than being dropped to an empty list the way a fold with no validation set used
+    to be: an empty callback list combined with Lightning's own ``enable_checkpointing``
+    default (``True`` unless a caller says otherwise) is exactly how Lightning ended up
+    installing its *own* default ``ModelCheckpoint`` regardless of what
+    ``checkpoint=False`` asked for.
     """
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
     callbacks: list[Any] = []
-    if task.trainer.checkpoint:
-        monitor = task.trainer.monitor
-        callbacks.append(
-            ModelCheckpoint(
-                dirpath=directory,
-                filename="epoch{epoch:02d}-" + sanitise_metric(monitor) + "{" + monitor + ":.4f}",
-                monitor=monitor,
-                mode=task.trainer.monitor_mode,
-                save_top_k=1,
-                auto_insert_metric_name=False,
+    if trainer.checkpoint:
+        if has_validation:
+            monitor = trainer.monitor
+            callbacks.append(
+                ModelCheckpoint(
+                    dirpath=directory,
+                    filename=(
+                        "epoch{epoch:02d}-" + sanitise_metric(monitor) + "{" + monitor + ":.4f}"
+                    ),
+                    monitor=monitor,
+                    mode=trainer.monitor_mode,
+                    save_top_k=1,
+                    auto_insert_metric_name=False,
+                )
             )
-        )
-    if task.trainer.early_stopping_patience is not None:
+        else:
+            callbacks.append(
+                ModelCheckpoint(
+                    dirpath=directory,
+                    filename="epoch{epoch:02d}",
+                    save_top_k=1,
+                    auto_insert_metric_name=False,
+                )
+            )
+    if has_validation and trainer.early_stopping_patience is not None:
         callbacks.append(
             EarlyStopping(
-                monitor=task.trainer.monitor,
-                mode=task.trainer.monitor_mode,
-                patience=task.trainer.early_stopping_patience,
+                monitor=trainer.monitor,
+                mode=trainer.monitor_mode,
+                patience=trainer.early_stopping_patience,
             )
         )
     return callbacks
@@ -418,139 +464,193 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
     """
     from lightning import Trainer
 
-    task = config.task
-    assert isinstance(task, TorchTask)
-
     # Fails before the store, module or trainer exist -- the same guarantee `check_torch`
     # gives the CLI's pre-flight path, reasserted here for any caller (every test in this
     # module, and any future caller) that reaches `execute()` without going through it.
-    require_fold(task.splits_root, task.split, task.fold)
+    # MLflow first, per decision 7: a run that cannot write to it should not even resolve
+    # a fold first.
+    tracking_uri = require_mlflow()
 
-    store = SignalStore(data_root() / task.store)
-    row_labels = np.asarray(LABELS.get(task.labels)(store))
-    if row_labels.size != store.n_rows:
-        raise ValueError(
-            f"label provider {task.labels!r} returned {row_labels.size} values for "
-            f"{store.n_rows} rows; labels must be per-row over the whole store"
+    task = config.task
+    assert isinstance(task, TorchTask)
+
+    # The MLflow run is created here, as early as `require_mlflow` allows -- before the
+    # store, a module or a `Trainer` exist -- and its provenance (the resolved config,
+    # the reproduce script, the dirty-tree diff, the `config_hash` tag) is logged
+    # immediately. This is decision 7's replacement for `RunLedger.start`'s "the record
+    # is written before any work begins": there, the write was to a local `run.json`;
+    # here, it is to MLflow, which is now the thing whose absence makes a run unrecorded.
+    mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
+
+    # Everything from here on is wrapped so that any failure -- not just one Lightning's
+    # own `Trainer` catches internally (`trainer.fit`/`trainer.predict` already finalize
+    # the logger to "failed" on an exception raised during either call), but also a crash
+    # during `stamp_provenance` itself (`client.log_artifact`/`set_tag` are network
+    # calls, and MLflow can go away mid-run just as easily as before it) -- leaves the
+    # MLflow run visibly FAILED rather than either FINISHED or orphaned RUNNING forever.
+    # Lightning's own teardown marks the run FINISHED the moment `trainer.predict`
+    # *returns*, before the guards below and `compute()` have even run; without the
+    # `except` below, a fold that fails to assemble or score would look like a completed
+    # run in MLflow, and a fold that fails *while being stamped* would look like one
+    # still in progress, forever -- neither is the "a crash does not leave a run looking
+    # successful" guarantee decision 7 asks for. `stamp_provenance` is what actually
+    # creates the MLflow run (`mlflow_logger.experiment`'s lazy `create_run`, on first
+    # access); `run.mlflow_run_id` is only set once that access has succeeded, so the
+    # `except` below uses it -- not a bare re-access of `mlflow_logger.run_id`, which
+    # would itself attempt to lazily create a *second* run if the first creation is what
+    # failed -- to decide whether there is a run to terminate at all.
+    try:
+        stamp_provenance(run, mlflow_logger)
+
+        require_fold(task.splits_root, task.split, task.fold)
+
+        store = SignalStore(data_root() / task.store)
+        row_labels = np.asarray(LABELS.get(task.labels)(store))
+        if row_labels.size != store.n_rows:
+            raise ValueError(
+                f"label provider {task.labels!r} returned {row_labels.size} values for "
+                f"{store.n_rows} rows; labels must be per-row over the whole store"
+            )
+
+        index = load_or_build(store, task.window, labels=row_labels)
+        examples = SignalExamples(store, index)
+        folds = load_folds(examples, split_path(task.splits_root, task.split))
+        # `require_fold` above already guarantees `task.fold` is declared, so this lookup
+        # cannot fail on a live split file; kept as an assertion rather than silently
+        # trusting it, so a TOCTOU (the file changing between the two reads) still fails
+        # loudly. Same pattern as `run_ssl` in `ssl_task.py`.
+        fold = next((candidate for candidate in folds if candidate.index == task.fold), None)
+        assert fold is not None, (
+            f"require_fold guaranteed fold {task.fold} exists in {task.split!r}"
         )
 
-    index = load_or_build(store, task.window, labels=row_labels)
-    examples = SignalExamples(store, index)
-    folds = load_folds(examples, split_path(task.splits_root, task.split))
-    # `require_fold` above already guarantees `task.fold` is declared, so this lookup
-    # cannot fail on a live split file; kept as an assertion rather than silently trusting
-    # it, so a TOCTOU (the file changing between the two reads) still fails loudly. Same
-    # pattern as `run_ssl` in `ssl_task.py`.
-    fold = next((candidate for candidate in folds if candidate.index == task.fold), None)
-    assert fold is not None, f"require_fold guaranteed fold {task.fold} exists in {task.split!r}"
+        window_labels = index.labels
+        if window_labels is None:
+            raise ValueError("the window index carries no labels; check the label policy")
 
-    window_labels = index.labels
-    if window_labels is None:
-        raise ValueError("the window index carries no labels; check the label policy")
+        module = build_module(task, channels=store.channels, length=task.window.length)
+        directory = run.artifacts_dir
 
-    module = build_module(task, channels=store.channels, length=task.window.length)
-    directory = run.artifacts_dir
+        train_loader = make_loader(
+            WindowDataset(store, index, fold.train),
+            batch_size=task.batch_size,
+            shuffle=True,
+            num_workers=task.num_workers,
+            seed=config.seed + fold.index,
+        )
+        validation = fold.val if fold.val is not None and fold.val.size else None
+        val_loader = (
+            None
+            if validation is None
+            else make_loader(
+                WindowDataset(store, index, validation),
+                batch_size=task.batch_size,
+                num_workers=task.num_workers,
+                seed=config.seed,
+            )
+        )
 
-    train_loader = make_loader(
-        WindowDataset(store, index, fold.train),
-        batch_size=task.batch_size,
-        shuffle=True,
-        num_workers=task.num_workers,
-        seed=config.seed + fold.index,
-    )
-    validation = fold.val if fold.val is not None and fold.val.size else None
-    val_loader = (
-        None
-        if validation is None
-        else make_loader(
-            WindowDataset(store, index, validation),
+        trainer = Trainer(
+            max_epochs=task.trainer.max_epochs,
+            accelerator=task.trainer.accelerator,
+            devices=task.trainer.devices,
+            precision=task.trainer.precision,  # type: ignore[arg-type]
+            gradient_clip_val=task.trainer.gradient_clip_val,
+            accumulate_grad_batches=task.trainer.accumulate_grad_batches,
+            log_every_n_steps=task.trainer.log_every_n_steps,
+            enable_progress_bar=task.trainer.enable_progress_bar,
+            enable_model_summary=False,
+            # "warn" rather than True: several ATen kernels have no deterministic
+            # variant, and a hard failure would make whole model families unrunnable.
+            # The warning is the signal that this run's numbers will not reproduce
+            # bit-for-bit.
+            deterministic="warn" if task.trainer.deterministic else False,
+            default_root_dir=directory,
+            logger=mlflow_logger,
+            # I1: without this, Lightning installs its *own* default `ModelCheckpoint`
+            # regardless of `task.trainer.checkpoint` -- `checkpoint=False` (e.g.
+            # `spine_baseline`) silently got a checkpoint anyway, doubly-nested under
+            # this run's own artifact directory, which then reached MLflow through
+            # `log_run_artifacts`'s bulk upload even though `log_model=False`
+            # (`build_mlflow_logger`) exists specifically to keep an undigested model out.
+            enable_checkpointing=task.trainer.checkpoint,
+            callbacks=build_callbacks(
+                task.trainer, directory, has_validation=validation is not None
+            ),
+        )
+        trainer.fit(module, train_loader, val_loader)
+
+        predict_loader = make_loader(
+            WindowDataset(store, index, fold.test),
             batch_size=task.batch_size,
             num_workers=task.num_workers,
             seed=config.seed,
         )
-    )
+        batches = trainer.predict(module, predict_loader)
+        result = _assemble(batches, fold, window_labels)
 
-    trainer = Trainer(
-        max_epochs=task.trainer.max_epochs,
-        accelerator=task.trainer.accelerator,
-        devices=task.trainer.devices,
-        precision=task.trainer.precision,  # type: ignore[arg-type]
-        gradient_clip_val=task.trainer.gradient_clip_val,
-        accumulate_grad_batches=task.trainer.accumulate_grad_batches,
-        log_every_n_steps=task.trainer.log_every_n_steps,
-        enable_progress_bar=task.trainer.enable_progress_bar,
-        enable_model_summary=False,
-        # "warn" rather than True: several ATen kernels have no deterministic variant,
-        # and a hard failure would make whole model families unrunnable. The warning is
-        # the signal that this run's numbers will not reproduce bit-for-bit.
-        deterministic="warn" if task.trainer.deterministic else False,
-        default_root_dir=directory,
-        logger=False,
-        callbacks=build_callbacks(task, directory) if validation is not None else [],
-    )
-    trainer.fit(module, train_loader, val_loader)
+        # Guard 1, carried over from the deleted `cross_validate`: predictions that do
+        # not line up with the fold they came from. `_assemble` above already checks the
+        # stronger property -- that the predicted rows are *exactly* the fold's test
+        # positions -- but this is the guard the fold loop's docstring named, and its
+        # message is worth keeping verbatim: a silent off-by-one in a runner would
+        # otherwise score row i's prediction against row j's label and produce a number
+        # that looks merely disappointing rather than wrong.
+        if len(result.y_true) != fold.test.size:
+            raise EvalError(
+                f"{fold.name}: fit_predict returned {len(result.y_true)} predictions for "
+                f"{fold.test.size} test rows; the runner and the fold disagree about what "
+                "was held out"
+            )
 
-    predict_loader = make_loader(
-        WindowDataset(store, index, fold.test),
-        batch_size=task.batch_size,
-        num_workers=task.num_workers,
-        seed=config.seed,
-    )
-    batches = trainer.predict(module, predict_loader)
-    result = _assemble(batches, fold, window_labels)
+        # Guard 4, also carried over from the deleted `cross_validate`: a fold that
+        # cannot be scored is a split problem before it is a metric problem, and the
+        # message says so rather than surfacing whatever bare exception the metric
+        # implementation happened to raise.
+        try:
+            values = compute(task.metrics, result.y_true, result.y_pred, result.y_score)
+        except MetricError as error:
+            raise EvalError(
+                f"{fold.name}: {error}. A fold that cannot be scored is a split problem "
+                "before it is a metric problem — check stratification."
+            ) from error
 
-    # Guard 1, carried over from the deleted `cross_validate`: predictions that do not line
-    # up with the fold they came from. `_assemble` above already checks the stronger
-    # property -- that the predicted rows are *exactly* the fold's test positions -- but
-    # this is the guard the fold loop's docstring named, and its message is worth keeping
-    # verbatim: a silent off-by-one in a runner would otherwise score row i's prediction
-    # against row j's label and produce a number that looks merely disappointing rather
-    # than wrong.
-    if len(result.y_true) != fold.test.size:
-        raise EvalError(
-            f"{fold.name}: fit_predict returned {len(result.y_true)} predictions for "
-            f"{fold.test.size} test rows; the runner and the fold disagree about what "
-            "was held out"
+        store_digest = store.manifest().signal_sha256
+        _write_predictions(
+            run.artifacts_dir,
+            fold=fold,
+            result=result,
+            split=task.split,
+            split_digest=store_digest,
+            window_digest=task.window.digest,
+            config_identity=_fold_invariant_config_hash(config),
+        )
+        (run.artifacts_dir / "windows.json").write_text(
+            json.dumps(
+                {
+                    "store": store.path.name,
+                    "store_sha256": store_digest,
+                    "window_digest": task.window.digest,
+                    "windows": len(index),
+                    "split": task.split,
+                    "fold": task.fold,
+                },
+                indent=2,
+                sort_keys=True,
+            )
         )
 
-    # Guard 4, also carried over from the deleted `cross_validate`: a fold that cannot be
-    # scored is a split problem before it is a metric problem, and the message says so
-    # rather than surfacing whatever bare exception the metric implementation happened to
-    # raise.
-    try:
-        values = compute(task.metrics, result.y_true, result.y_pred, result.y_score)
-    except MetricError as error:
-        raise EvalError(
-            f"{fold.name}: {error}. A fold that cannot be scored is a split problem "
-            "before it is a metric problem — check stratification."
-        ) from error
-
-    store_digest = store.manifest().signal_sha256
-    _write_predictions(
-        run.artifacts_dir,
-        fold=fold,
-        result=result,
-        split=task.split,
-        split_digest=store_digest,
-        window_digest=task.window.digest,
-        config_identity=_fold_invariant_config_hash(config),
-    )
-    (run.artifacts_dir / "windows.json").write_text(
-        json.dumps(
-            {
-                "store": store.path.name,
-                "store_sha256": store_digest,
-                "window_digest": task.window.digest,
-                "windows": len(index),
-                "split": task.split,
-                "fold": task.fold,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-    )
-
-    run.log_metrics(values)
+        # The held-out metrics above are computed after `trainer.predict`, from a plain
+        # numpy comparison -- not from inside a `*_step` hook, so nothing during
+        # training's own `self.log(...)` calls captures them. Logged explicitly, through
+        # the same logger the Trainer streamed epoch metrics to, so the held-out numbers
+        # land in the same MLflow run as everything else this fold produced.
+        mlflow_logger.log_metrics(finite_metrics(dict(values)))
+        log_run_artifacts(run, mlflow_logger)
+    except BaseException:
+        if run.mlflow_run_id is not None:
+            mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
+        raise
     return dict(values)
 
 

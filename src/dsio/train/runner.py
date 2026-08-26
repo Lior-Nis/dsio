@@ -54,13 +54,13 @@ def check(config: RunConfig) -> None:
 def execute(config: RunConfig, run: Run) -> dict[str, float]:
     """Seed every RNG a runner can touch, then dispatch ``config`` to its runner.
 
-    ``dsio run`` (``src/dsio/cli/run_cmd.py``) also calls ``seed_everything`` up front, to
-    capture the seeds actually applied for the run record before the ledger opens — that
-    call stays, since ``execute`` returns only metrics and has nowhere to hand the seeds
-    dict back. Seeding here as well is what makes a *direct* call to ``execute`` (every
-    test, and any caller that is not going through the CLI) reproducible: same config and
-    seed now produce identical metrics regardless of caller. ``seed_everything`` is
-    idempotent, so the CLI path's second call is harmless.
+    ``dsio run`` (``src/dsio/cli/run_cmd.py``) also calls ``seed_everything`` up front,
+    before ``start_run`` captures provenance, to capture the seeds actually applied for
+    the run record -- that call stays, since ``execute`` returns only metrics and has
+    nowhere to hand the seeds dict back. Seeding here as well is what makes a *direct*
+    call to ``execute`` (every test, and any caller that is not going through the CLI)
+    reproducible: same config and seed now produce identical metrics regardless of
+    caller. ``seed_everything`` is idempotent, so the CLI path's second call is harmless.
     """
     seed_everything(config.seed)
     return RUNNERS.get(config.task.kind)(config, run)

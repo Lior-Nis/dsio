@@ -35,8 +35,22 @@ data = ["pyarrow>=18"]
 # nor the dev group, leaves a torch-needing import unresolved: a bare `uv run` with
 # no extra selected must fail loudly on a missing import, not silently fall back to
 # downloading a multi-gigabyte default wheel.
-cpu = ["torch>=2.7", "lightning>=2.5"]
-gpu = ["torch>=2.7", "lightning>=2.5"]
+#
+# `mlflow-skinny` lives here too, not in `dependencies`: decision 7 makes MLflow a
+# run's hard dependency, but the only code that ever imports it is `dsio.train.tracking`
+# and the two runner modules (`torch_task.py`, `ssl_task.py`), which already require
+# torch and lightning at module import time -- so a clone with neither extra selected was
+# never going to be able to run a training job anyway. Bundling it here, rather than in
+# `dependencies`, is what keeps a bare `uv sync` and `tests/data/` torch-free (and now
+# MLflow-free) exactly as before; `dsio.train.load_runners()` already tolerates a runner
+# module failing to import, so an environment missing this extra just skips registering
+# these runners, same as it does today for missing torch. `-skinny` over the full
+# `mlflow` package: only the tracking client is needed locally (the server itself runs
+# from the official image in `docker/mlflow`, which already bundles full `mlflow`), and
+# skinny drops the server/UI/flask/sqlalchemy/gunicorn dependency chain that a training
+# process never touches.
+cpu = ["torch>=2.7", "lightning>=2.5", "mlflow-skinny>=2.19"]
+gpu = ["torch>=2.7", "lightning>=2.5", "mlflow-skinny>=2.19"]
 
 [project.scripts]
 dsio = "dsio.cli.main:main"
@@ -104,6 +118,14 @@ packages = ["src/dsio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `live` tests need the compose stack (`docker compose up -d`; compose.yaml) and are
+# excluded by default so `uv run --extra cpu pytest` keeps passing on a machine with
+# nothing running -- the plan's "the suite must not need Docker" constraint. Run them
+# explicitly with `uv run --extra cpu pytest -m live`.
+markers = [
+    "live: needs the local MLflow/Postgres compose stack; excluded by default",
+]
+addopts = "-m 'not live'"
 
 # ---------------------------------------------------------------------------
 # The spine is held to a stricter bar than project code. See docs/adr/.

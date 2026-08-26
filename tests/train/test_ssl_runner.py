@@ -19,14 +19,14 @@ pytest.importorskip("torch")
 pytest.importorskip("lightning")
 pytest.importorskip("sklearn")
 
-from dsio.artifacts.store import REGISTRY_ROOT_ENV, ModelRegistry  # noqa: E402
+from dsio.artifacts.store import ModelRegistry  # noqa: E402
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
-from dsio.runs.record import RunLedger  # noqa: E402
+from dsio.runs.record import start_run  # noqa: E402
 from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
@@ -37,12 +37,12 @@ from dsio.train.torch_task import (  # noqa: E402
     TrainerConfig,
     load_encoder,
 )
+from dsio.train.tracking import MlflowUnavailableError, resolve_tracking_uri  # noqa: E402
 
 
 @pytest.fixture
 def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "stores"))
-    monkeypatch.setenv(REGISTRY_ROOT_ENV, str(tmp_path / "models"))
     rng = np.random.default_rng(0)
     with SignalStore.builder(tmp_path / "stores" / "tone", channels=2) as builder:
         for group in range(9):
@@ -132,12 +132,12 @@ def pretrain_task(root: Path, method: str = "mae", **overrides) -> SslPretrainTa
 
 
 def run(config: RunConfig, root: Path):  # type: ignore[no-untyped-def]
-    ledger = RunLedger(root / "runs")
-    active = ledger.start(
+    active = start_run(
         name=config.name,
         config=config.to_dict(),
         config_hash=config.config_hash,
         seed=config.seed,
+        root=root / "runs",
     )
     with active:
         metrics = execute(config, active)
@@ -192,7 +192,9 @@ def test_every_method_pretrains_and_registers_an_encoder(method: str, corpus: Pa
     assert metrics["feature_dim"] == 16.0
     assert metrics["train_windows"] > 0
     version = ModelRegistry().versions(f"enc_{method}")[-1]
-    assert version.run_id == active.run_id
+    # `run_id` cites MLflow's own run id, not dsio's human-readable label -- see
+    # `run_ssl_pretrain`'s comment on the same field in `dsio.train.ssl_task`.
+    assert version.run_id == active.mlflow_run_id
     assert version.size_bytes > 0
 
 
@@ -308,6 +310,165 @@ def test_a_bad_fold_fails_before_the_store_even_opens(corpus: Path) -> None:
     )
     with pytest.raises(ValueError, match=r"split 'k3' has no fold 7; it defines folds"):
         run(config, corpus)
+
+
+# --- MLflow: decision 7's "a run fails without MLflow" -------------------------------
+
+
+def test_preflight_fails_when_mlflow_is_unreachable(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        check(config)
+
+
+def test_mlflow_unreachable_fails_the_same_way_even_without_preflight(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        run(config, corpus)
+
+
+def test_mlflow_unreachable_fails_before_the_store_even_opens(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves the guard runs before any data loading -- and before `require_fold` --
+    not merely that it eventually fires: a nonexistent store on a bad fold would raise a
+    fold or store error first if the MLflow check ran any later than the very top of
+    `run_ssl_pretrain`."""
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
+    config = RunConfig(
+        name="pre", seed=0, task=pretrain_task(corpus, fold=7, store="does-not-exist")
+    )
+    with pytest.raises(MlflowUnavailableError, match="localhost:59999"):
+        run(config, corpus)
+
+
+def test_a_completed_pretrain_run_logs_its_metrics_to_mlflow(corpus: Path) -> None:
+    """A refusal-only suite proves half the guard. With MLflow reachable -- the `file:`
+    backend every test in this suite already uses, per `tests/conftest.py` -- a run must
+    not merely be *allowed* to proceed: its metrics must actually land in MLflow, through
+    the same `MLFlowLogger` the Trainer streams `self.log(...)` calls through."""
+    config = RunConfig(name="pre-mlflow-logs", seed=0, task=pretrain_task(corpus))
+    _, metrics = run(config, corpus)
+
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(resolve_tracking_uri())
+    experiment = client.get_experiment_by_name(config.name)
+    assert experiment is not None
+    mlflow_runs = client.search_runs([experiment.experiment_id])
+    assert len(mlflow_runs) == 1
+    logged = mlflow_runs[0].data.metrics
+    for name, value in metrics.items():
+        assert logged[name] == pytest.approx(value)
+    # `val/loss` is never in `metrics` (`run_ssl_pretrain`'s own returned dict) -- it only
+    # ever reaches MLflow if the Trainer's own `self.log(...)` calls were actually streamed
+    # through `mlflow_logger`, i.e. only if `Trainer(..., logger=mlflow_logger)` really
+    # wired the two together, not merely if the final `log_metrics` call happened to fire.
+    assert "val/loss" in logged
+
+
+def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug 3, `run_ssl_pretrain`'s half of it: `stamp_provenance` used to run outside the
+    `try`/`except BaseException` that flips a crashed run to MLflow's `FAILED` status. It
+    is what actually creates the MLflow run (`mlflow_logger.experiment`'s lazy
+    `create_run`), so a crash anywhere in the rest of its own work left a run that
+    unambiguously exists, sitting in `RUNNING` forever. See the identical test in
+    `test_torch_runner.py` for `run_torch`'s half of the same bug."""
+    import dsio.train.ssl_task as ssl_task
+
+    def fake_stamp_provenance(active: object, mlflow_logger: object) -> None:
+        mlflow_run_id = mlflow_logger.run_id  # type: ignore[attr-defined]
+        active.mlflow_run_id = mlflow_run_id  # type: ignore[attr-defined]
+        raise RuntimeError("boom: crash mid-provenance-stamp, after the run was created")
+
+    monkeypatch.setattr(ssl_task, "stamp_provenance", fake_stamp_provenance)
+
+    config = RunConfig(name="pre-prov-crash", seed=0, task=pretrain_task(corpus))
+    active = start_run(
+        name=config.name,
+        config=config.to_dict(),
+        config_hash=config.config_hash,
+        seed=config.seed,
+        root=corpus / "runs",
+    )
+    with pytest.raises(RuntimeError, match="boom: crash mid-provenance-stamp"):
+        execute(config, active)
+
+    assert active.mlflow_run_id is not None
+
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(resolve_tracking_uri())
+    mlflow_run = client.get_run(active.mlflow_run_id)
+    assert mlflow_run.info.status == "FAILED"
+
+
+# --- I1: checkpointing must do what `TrainerConfig.checkpoint` says, here too --------
+
+
+def test_checkpoint_false_writes_no_checkpoint_file_anywhere(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """I1: `run_ssl_pretrain` used to read none of `TrainerConfig.checkpoint`,
+    `early_stopping_patience`, `monitor` or `monitor_mode` at all, even though
+    `SslPretrainTask`'s own field default (`trainer: TrainerConfig =
+    TrainerConfig(monitor="val/loss")`) is a deliberate choice for this exact runner. Its
+    `Trainer(...)` also never set `enable_checkpointing`, so Lightning installed its own
+    default `ModelCheckpoint` regardless of `checkpoint=False` -- the same leak `run_torch`
+    had, reproduced here on fold 1, which this fixture's own split family declares with no
+    `val` part at all (`corpus`'s `folds` list, this file), so this also exercises the
+    no-validation branch of `build_callbacks`.
+    """
+    config = RunConfig(
+        name="ssl-no-checkpoint",
+        seed=0,
+        task=pretrain_task(corpus, fold=1, trainer=TrainerConfig(max_epochs=1, checkpoint=False)),
+    )
+    active, _ = run(config, corpus)
+
+    # See `test_torch_runner.py`'s identical checks for why this searches `tmp_path`,
+    # not `active.dir`: Lightning's own default checkpoint resolves its `dirpath` from
+    # the logger's save directory, a sibling of the run's own scratch directory, not a
+    # descendant of it.
+    ckpt_files = list(tmp_path.rglob("*.ckpt"))
+    assert ckpt_files == [], f"checkpoint=False leaked: {ckpt_files}"
+
+
+def test_checkpoint_true_writes_exactly_one_dsio_named_checkpoint(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """The acceptance half: `checkpoint=True`, on the same no-validation fold, must
+    still produce exactly one checkpoint -- previously `checkpoint=True` did nothing at
+    all here, so pretraining got either Lightning's uncontrolled default or (with
+    `enable_checkpointing` now wired) silently nothing, depending on which half of I1
+    shipped without the other. Reusing `build_callbacks` (the same construction
+    `run_torch` uses) is what makes `checkpoint=True` actually checkpoint pretraining.
+    """
+    config = RunConfig(
+        name="ssl-with-checkpoint",
+        seed=0,
+        task=pretrain_task(corpus, fold=1, trainer=TrainerConfig(max_epochs=1, checkpoint=True)),
+    )
+    active, _ = run(config, corpus)
+
+    own_checkpoints = list(active.artifacts_dir.glob("*.ckpt"))
+    assert len(own_checkpoints) == 1, f"expected exactly one checkpoint, found: {own_checkpoints}"
+    checkpoint = own_checkpoints[0]
+    assert checkpoint.name.startswith("epoch")
+    assert "=" not in checkpoint.name, "Lightning's own default filename, not dsio's"
+
+    assert not any(tmp_path.rglob("checkpoints")), (
+        "a Lightning-created 'checkpoints/' subdirectory means Lightning's own default "
+        "ModelCheckpoint ran alongside dsio's"
+    )
 
 
 # --- the handoff --------------------------------------------------------------------
