@@ -22,16 +22,19 @@ from torch import nn  # noqa: E402
 from dsio.dataset.dataset import TwoViewCollate  # noqa: E402
 from dsio.model.components import (  # noqa: E402
     Conv1dEncoder,
+    CrossEntropy,
+    EmbeddingEncoder,
     Jitter,
     MaskedMSE,
     NTXent,
     VICReg,
+    linear_head,
     mae_decoder_head,
     simclr_projector_head,
     vicreg_projector_head,
 )
 from dsio.model.module import DsioModule  # noqa: E402
-from dsio.model.registry import AUGMENTORS, HEADS, LOSSES  # noqa: E402
+from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
 
 CHANNELS, LENGTH, DIM = 2, 128, 16
 
@@ -326,3 +329,74 @@ def test_contrastive_heads_and_losses_are_registered() -> None:
 
 def test_augmentors_are_registered() -> None:
     assert {"jitter", "random_scale", "none"} <= set(AUGMENTORS.names())
+
+
+# --- the embedding backbone ----------------------------------------------------------
+#
+# The one component a token-id corpus needed that signal did not. Everything else in the
+# chain already composes with it, which is the point of these tests: it is an ordinary
+# registered backbone that happens to consume ids instead of amplitudes.
+
+
+def test_embedding_encoder_pools_to_the_configured_dimension() -> None:
+    ids = torch.randint(0, 50, (4, 1, 32))
+    assert EmbeddingEncoder(vocab_size=50, embed_dim=8, out_dim=DIM)(ids).shape == (4, DIM)
+
+
+def test_embedding_encoder_pools_over_length_like_every_other_backbone() -> None:
+    """A backbone whose parameter count depends on the window length forces a retrain for
+    every change to a view. The same weights must accept a longer context window."""
+    encoder = EmbeddingEncoder(vocab_size=50, embed_dim=8, out_dim=DIM)
+    assert encoder(torch.randint(0, 50, (4, 1, 32))).shape == (4, DIM)
+    assert encoder(torch.randint(0, 50, (4, 1, 96))).shape == (4, DIM)
+
+
+def test_embedding_encoder_distinguishes_two_token_sequences() -> None:
+    """Conv1d over float token ids ran and produced numbers; they just meant nothing.
+    The minimum bar for this backbone is that two different sequences do not collapse."""
+    encoder = EmbeddingEncoder(vocab_size=50, embed_dim=8, out_dim=DIM)
+    a = encoder(torch.full((1, 1, 16), 3))
+    b = encoder(torch.full((1, 1, 16), 41))
+    assert not torch.allclose(a, b)
+
+
+def test_embedding_encoder_accepts_the_float_default_payload() -> None:
+    """``WindowDataset``'s float path is the default, so a caller who forgets
+    ``payload_dtype`` must still get ids, not a dtype error at the embedding lookup."""
+    ids = torch.randint(0, 50, (4, 1, 32))
+    encoder = EmbeddingEncoder(vocab_size=50, embed_dim=8, out_dim=DIM)
+    assert torch.equal(encoder(ids.float()), encoder(ids))
+
+
+def test_embedding_encoder_rejects_an_id_outside_the_vocabulary() -> None:
+    """``vocab_size`` is a config number and the tokenizer's is the truth; when they
+    disagree the raw lookup raises an IndexError naming neither, and on CUDA it is a
+    device-side assert that takes the process with it."""
+    encoder = EmbeddingEncoder(vocab_size=50, embed_dim=8, out_dim=DIM)
+    with pytest.raises(ValueError, match="vocab_size"):
+        encoder(torch.tensor([[[0, 1, 50]]]))
+
+
+def test_embedding_encoder_is_shape_checked_like_every_other_component() -> None:
+    with pytest.raises(ValueError, match=r"\[batch, channels, time\]"):
+        EmbeddingEncoder(vocab_size=50)(torch.randint(0, 50, (4, 32)))
+
+
+def test_embedding_backbone_is_registered() -> None:
+    assert BACKBONES.get("embedding") is EmbeddingEncoder
+
+
+def test_embedding_encoder_trains_through_the_generic_step() -> None:
+    """It composes with an existing head and an existing loss through the shared step --
+    no token-specific module, no override."""
+    torch.manual_seed(0)
+    ids = torch.randint(0, 50, (4, 1, 32))
+    backbone = EmbeddingEncoder(vocab_size=50, embed_dim=8, out_dim=DIM)
+    module = DsioModule(backbone=backbone, head=linear_head(DIM, 2), loss=CrossEntropy())
+    loss = module._common_step(
+        {"x": ids, "y": torch.tensor([0, 1, 1, 0]), "row": torch.arange(4)}, "train"
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert backbone.embedding.weight.grad is not None
+    assert backbone.embedding.weight.grad.abs().sum() > 0
