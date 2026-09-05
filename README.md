@@ -111,9 +111,15 @@ chain: 16 images in, 16 windows out, one per entity, every pixel row covered exa
 and the right pixels at the right coordinates after the reshape.
 
 **Fixed-size only.** `WindowSpec.length` is a single int for the whole store, so a corpus of
-differently-sized images has no length that means "one item": at `length=64` a 12×12 image
-becomes two windows that are not images and drops its last 16 rows, with nothing said. Resize
-at ingest, or give each size its own store.
+differently-sized images has no length that means "one item". The two ways that goes wrong are
+not equally visible. An item *smaller* than `length` yields no window at all, and `build_index`
+refuses that by default — a whole image absent from the index is loss nothing downstream can
+see. An item *larger* than `length` is the quiet one: at `length=64` a 12×12 image becomes two
+windows that are not images and loses its last 16 rows. That is reported by
+`dsio.data.views.window_discards` and not refused, because it is indistinguishable from a
+waveform being windowed exactly as intended — so the one-window-per-item correspondence this
+section rests on is yours to keep, not the index's to enforce. Resize at ingest, or give each
+size its own store.
 
 ## Developing
 
