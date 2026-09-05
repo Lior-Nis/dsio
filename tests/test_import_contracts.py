@@ -5,7 +5,7 @@
 suite reads ``[tool.importlinter]``, so a careless edit that deletes a contract block
 (or renames one enough to break a downstream reference) makes CI's "Import contracts"
 step keep passing while the leakage wall it was guarding is gone. This asserts the
-three contracts by name, which is the thing a careless edit removes.
+declared contracts by name, which is the thing a careless edit removes.
 """
 
 from __future__ import annotations
@@ -25,4 +25,5 @@ def test_all_declared_contracts_are_present():
         "Foundation modules import no other dsio module",
         "Evaluation depends on no pipeline layer",
         "The data layer never imports splits",
+        "The spine never imports its own contract suites",
     }

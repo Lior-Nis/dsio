@@ -186,3 +186,25 @@ name = "The data layer never imports splits"
 type = "forbidden"
 source_modules = ["dsio.data", "dsio.dataset"]
 forbidden_modules = ["dsio.splits"]
+
+[[tool.importlinter.contracts]]
+# dsio.testing exists to be imported by a *project's* test suite, not by dsio. If the
+# spine imports it, test-only helpers acquire production consumers — and the contract
+# suites, which deliberately spawn processes and pickle payloads to prove a bug, end up
+# reachable from a training run.
+name = "The spine never imports its own contract suites"
+type = "forbidden"
+source_modules = [
+    "dsio.config",
+    "dsio.contracts",
+    "dsio.data",
+    "dsio.dataset",
+    "dsio.splits",
+    "dsio.eval",
+    "dsio.model",
+    "dsio.train",
+    "dsio.runs",
+    "dsio.artifacts",
+    "dsio.cli",
+]
+forbidden_modules = ["dsio.testing"]
