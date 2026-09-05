@@ -173,3 +173,67 @@ def test_an_empty_report_is_falsy_and_a_lossy_one_is_not(tmp_path: Path) -> None
     spec = WindowSpec(length=64, stride=64)
     assert not window_discards(_store(tmp_path, (128,), name="whole"), spec)
     assert window_discards(_store(tmp_path, (100,), name="part"), spec)
+
+
+# --- metric floors: countable when asked, never refused ---------------------------------
+
+
+def _graded_store(tmp_path: Path) -> tuple[SignalStore, np.ndarray]:
+    """Two 64-row entities, one of which every window's purity floor will reject."""
+    path = tmp_path / "graded"
+    with SignalStore.builder(path, channels=1) as builder:
+        for name in ("clean", "dirty"):
+            builder.add(name, np.zeros((64, 1), "float32"), group=name)
+    purity = np.concatenate([np.ones(64), np.zeros(64)])
+    return SignalStore(path), purity
+
+
+def test_a_metric_floor_that_empties_an_entity_is_counted_when_asked(
+    tmp_path: Path,
+) -> None:
+    """The same loss as a too-short recording, by a different route.
+
+    A caller writes ``min_metrics={'purity': 0.9}``; they do not write "and remove this
+    subject from the study". The filter is deliberate, that consequence is not, and the
+    damage is identical -- a group absent from every fold while every check passes. The
+    spec digest records the filter, so this is reported rather than refused, but it must
+    be *reportable*: before this, ``window_discards`` could not see it at all.
+    """
+    store, purity = _graded_store(tmp_path)
+    spec = WindowSpec(length=64, stride=64, min_metrics={"purity": 0.9})
+
+    report = window_discards(store, spec, row_metrics={"purity": purity})
+
+    assert [e.entity_id for e in report.dropped] == ["dirty"]
+    assert report.discarded_rows == 64
+
+
+def test_metric_floors_are_invisible_without_the_metrics(tmp_path: Path) -> None:
+    """``window_discards`` is a function of the store and the spec, and stays one.
+
+    Without ``row_metrics`` it reports the geometry only, exactly as before -- the caller
+    who has not supplied the metrics is not told about a filter that needs them.
+    """
+    store, _ = _graded_store(tmp_path)
+    spec = WindowSpec(length=64, stride=64, min_metrics={"purity": 0.9})
+
+    report = window_discards(store, spec)
+
+    assert not report.dropped
+    assert report.discarded_rows == 0
+
+
+def test_a_metric_floor_never_refuses_a_build(tmp_path: Path) -> None:
+    """Reporting, not refusing: the caller asked for the filter.
+
+    Refusing would be a guess about how aggressively a project filters, and filtering a
+    recording to nothing may be exactly what a purity floor is for. Reporting cannot be
+    wrong in the way refusing can.
+    """
+    store, purity = _graded_store(tmp_path)
+    spec = WindowSpec(length=64, stride=64, min_metrics={"purity": 0.9})
+
+    index = build_index(store, spec, row_metrics={"purity": purity})
+
+    assert len(index) == 1
+    assert set(index.entity_ids) == {"clean"}
