@@ -121,6 +121,9 @@ class EmbeddingEncoder(nn.Module):
         if vocab_size < 1:
             raise ValueError(f"vocab_size must be at least 1, got {vocab_size}")
         self.vocab_size = vocab_size
+        # Plain attribute, not a buffer: it is a fact about this process having already
+        # looked, not model state, and it has no business in a checkpoint.
+        self._range_checked = False
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.project = nn.Linear(embed_dim, out_dim)
         self.out_dim = out_dim
@@ -128,18 +131,34 @@ class EmbeddingEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         _check_3d(x, "EmbeddingEncoder")
         ids = x.long()
-        # One reduction and one device sync per batch, deliberately. nn.Embedding's own
-        # complaint about an out-of-range id is "index out of range in self" on CPU and a
-        # device-side assert that takes the process down on CUDA -- neither names the knob
-        # that is wrong, and a tokenizer whose vocabulary disagrees with the configured
-        # vocab_size is by far the most likely way to arrive here.
-        if int(ids.max()) >= self.vocab_size or int(ids.min()) < 0:
-            raise ValueError(
-                f"token ids run [{int(ids.min())}, {int(ids.max())}] but vocab_size is "
-                f"{self.vocab_size}; the configured vocabulary does not match the corpus"
-            )
+        if not self._range_checked:
+            self._check_range(ids)
+            self._range_checked = True
         pooled = self.embedding(ids).mean(dim=(1, 2))
         return self.project(pooled)
+
+    def _check_range(self, ids: torch.Tensor) -> None:
+        """Name a vocabulary mismatch, once per process rather than once per step.
+
+        Worth doing, because ``nn.Embedding``'s own complaint is "index out of range in
+        self" on CPU and a device-side assert that takes the process down on CUDA --
+        neither names the knob that is wrong, and a tokenizer whose vocabulary disagrees
+        with the configured ``vocab_size`` is by far the most likely way to arrive here.
+
+        Worth doing *once*, because ``int(ids.max())`` pulls a Python number off the
+        device, which blocks the caller until the queue drains. Per step that is a
+        synchronisation on every training iteration, which is the cost
+        :func:`~dsio.splits.resolve.assert_no_row_overlap` keeps out of the training path
+        for the same reason. A vocabulary mismatch is a configuration error: it is wrong
+        on the first batch or it is not wrong, since no later batch can hold an id the
+        corpus does not contain. The first batch is the whole of what checking buys.
+        """
+        low, high = int(ids.min()), int(ids.max())
+        if high >= self.vocab_size or low < 0:
+            raise ValueError(
+                f"token ids run [{low}, {high}] but vocab_size is {self.vocab_size}; "
+                "the configured vocabulary does not match the corpus"
+            )
 
 
 # --- heads --------------------------------------------------------------------------
