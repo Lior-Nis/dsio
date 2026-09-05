@@ -22,9 +22,35 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from dsio.contracts import sha256_of_bytes
+
+ROOT_DERIVATION = "root"
+"""The derivation of a whole corpus: everything that was there, nothing filtered away."""
+
 
 class ExamplesError(ValueError):
     """Raised when a dataset cannot answer something the split layer needs."""
+
+
+def derive(parent: str, mask: np.ndarray) -> str:
+    """The derivation of ``parent`` restricted by ``mask``.
+
+    Deterministic and order-dependent: the same mask over the same parent always yields
+    the same string, so a split committed in one session resolves in the next, and two
+    different routes to the same rows stay distinguishable — which population a split was
+    computed against is exactly what a derivation records.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    if bool(mask.all()):
+        # A derivation identifies a *population*, not the number of calls made to reach
+        # it. `resolve` produces an all-True mask whenever a part covers every group, and
+        # moving off the parent's derivation there would refuse a split against rows
+        # identical to the ones it was computed on.
+        return parent
+    payload = b"|".join(
+        (parent.encode(), str(mask.size).encode(), np.packbits(mask).tobytes())
+    )
+    return sha256_of_bytes(payload)[:16]
 
 
 @runtime_checkable
@@ -39,6 +65,23 @@ class Examples(Protocol):
     @property
     def digest(self) -> str:
         """Content identity. A split computed against a different digest is refused."""
+        ...
+
+    @property
+    def derivation(self) -> str:
+        """Which *result* this is: :data:`ROOT_DERIVATION`, or a hash of how it was cut.
+
+        ``digest`` names the corpus and is deliberately stable across views of it, so that
+        re-indexing at a different window length does not invalidate a committed split.
+        That stability is what makes it unable to tell a *subset* apart from the whole: a
+        split computed on a filtered subpopulation carries the corpus digest, so resolving
+        it against the corpus is accepted and silently scores a split computed on a
+        different population.
+
+        Two questions, two fields. This is the second one, and it is required for the same
+        reason ``groups`` is: a dataset that claims to be a whole corpus should say so,
+        rather than say nothing.
+        """
         ...
 
     def __len__(self) -> int: ...
@@ -125,6 +168,7 @@ def check(examples: object) -> Examples:
         for member in (
             "name",
             "digest",
+            "derivation",
             "groups",
             "attribute_names",
             "attribute",

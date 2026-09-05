@@ -16,8 +16,10 @@ produces imbalanced ones.
 **A split is provenance.** A result has to state which groups were held out. A YAML file in
 git is that statement, diffable and reviewable.
 
-The file binds itself to a store by manifest digest, so a split cannot be silently applied
-to a corpus it was not computed for.
+The file binds itself to a store by manifest digest and to a population by derivation, so a
+split cannot be silently applied to a corpus it was not computed for — nor to a different
+subset of the corpus it *was* computed for, which the digest alone cannot detect because a
+subset legitimately carries its parent's digest. See `dsio.data.examples.Examples.derivation`.
 
 One file holds a whole split **family**: every fold, in one committed, diffable place.
 ``SplitFold.index`` — not the fold's position in the list — is what a fold *means*; running
@@ -137,6 +139,11 @@ class SplitFile(DsioModel):
     schema_version: str = SCHEMA
     store: str
     store_manifest_sha256: str | None = None
+    examples_derivation: str | None = Field(
+        default=None,
+        description="The `Examples.derivation` this split was computed against. `None` in "
+        "files written before the field existed, which resolve unchecked.",
+    )
     group_key: str = "group"
     name: str
     notes: str | None = None

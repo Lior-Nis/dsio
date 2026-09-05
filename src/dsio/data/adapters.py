@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from dsio.contracts import sha256_of_bytes
-from dsio.data.examples import ExamplesError
+from dsio.data.examples import ROOT_DERIVATION, ExamplesError, derive
 from dsio.data.views import assert_index_matches_store, window_times
 
 
@@ -35,6 +35,7 @@ class TableExamples:
         attributes: Mapping[str, Sequence[Any] | np.ndarray] | None = None,
         times: tuple[np.ndarray, np.ndarray] | None = None,
         digest: str | None = None,
+        derivation: str = ROOT_DERIVATION,
     ) -> None:
         self._name = name
         self._groups = np.asarray(groups)
@@ -43,6 +44,7 @@ class TableExamples:
         }
         self._times = times
         self._digest = digest or self._derive_digest()
+        self._derivation = derivation
 
     def _derive_digest(self) -> str:
         """Identity from the grouping and attributes, not from the features.
@@ -65,6 +67,10 @@ class TableExamples:
     @property
     def digest(self) -> str:
         return self._digest
+
+    @property
+    def derivation(self) -> str:
+        return self._derivation
 
     def __len__(self) -> int:
         return int(self._groups.size)
@@ -96,6 +102,7 @@ class TableExamples:
             attributes={key: value[mask] for key, value in self._attributes.items()},
             times=None if self._times is None else (self._times[0][mask], self._times[1][mask]),
             digest=self._digest,
+            derivation=derive(self._derivation, mask),
         )
 
     def __repr__(self) -> str:
@@ -107,11 +114,18 @@ class SignalExamples:
     """Windows over a memory-mapped signal corpus — one adapter, not the abstraction.
 
     Everything time-series-specific lives on this side of the protocol: the window index,
-    the entity boundaries, the sample rate. The split layer sees the same seven members it
+    the entity boundaries, the sample rate. The split layer sees the same eight members it
     sees for a table, so nothing above knows this modality exists.
     """
 
-    def __init__(self, store: Any, index: Any, *, time_unit: str = "row") -> None:
+    def __init__(
+        self,
+        store: Any,
+        index: Any,
+        *,
+        time_unit: str = "row",
+        derivation: str = ROOT_DERIVATION,
+    ) -> None:
         try:
             assert_index_matches_store(store, index)
         except ValueError as exc:
@@ -119,6 +133,7 @@ class SignalExamples:
         self.store = store
         self.index = index
         self.time_unit = time_unit
+        self._derivation = derivation
 
     @property
     def name(self) -> str:
@@ -142,6 +157,17 @@ class SignalExamples:
             return str(self.store.manifest().signal_sha256[:16])
         except Exception:  # noqa: BLE001 - a store without a manifest is still splittable
             return "nomanifest"
+
+    @property
+    def derivation(self) -> str:
+        """A view is not a subset.
+
+        Re-indexing the same corpus at a different window length or stride produces a
+        different *view*, and every view of a whole corpus is still the whole corpus — so
+        a fresh index derives as root, and only :meth:`subset` moves off it. That is what
+        keeps the property ``digest`` documents above: splits outlive views.
+        """
+        return self._derivation
 
     def __len__(self) -> int:
         return len(self.index)
@@ -184,7 +210,12 @@ class SignalExamples:
         return window_times(self.store, self.index, unit=self.time_unit)  # type: ignore[arg-type]
 
     def subset(self, mask: np.ndarray) -> SignalExamples:
-        return SignalExamples(self.store, self.index.subset(mask), time_unit=self.time_unit)
+        return SignalExamples(
+            self.store,
+            self.index.subset(mask),
+            time_unit=self.time_unit,
+            derivation=derive(self._derivation, mask),
+        )
 
     def covered_rows(self) -> np.ndarray:
         """Every raw row these windows touch — the signal-specific overlap proof.

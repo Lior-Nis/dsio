@@ -74,6 +74,19 @@ def resolve_masks(
                 f"{split.store_manifest_sha256[:12]}, but {examples.name!r} is now "
                 f"{actual[:12]}; regenerate the split or restore the data"
             )
+    # The digest check above cannot catch this one. A subset carries its parent's digest --
+    # correctly, since it is the same corpus -- so a split computed on a filtered
+    # subpopulation passes every check above and then scores a population it was never
+    # computed for. `derivation` is the field that distinguishes them.
+    if split.examples_derivation is not None:
+        actual_derivation = examples.derivation
+        if actual_derivation != split.examples_derivation:
+            raise SplitError(
+                f"split {split.name!r} was computed against derivation "
+                f"{split.examples_derivation}, but {examples.name!r} is "
+                f"{actual_derivation}; one of them is a subset of the other, so the "
+                "groups this split assigns were chosen over a different population"
+            )
 
     present = {str(g) for g in examples.groups}
     named = fold.all_groups

@@ -12,7 +12,7 @@ complete is worse than a missing one, because the next run reuses it.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -30,10 +30,22 @@ def stage(
     build: Callable[[Path], None],
     *,
     root: Path | None = None,
+    identity_fields: Sequence[str] | None = None,
 ) -> Path:
-    """Return the path to a staged artifact, building it if it is not there."""
+    """Return the path to a staged artifact, building it if it is not there.
+
+    ``identity_fields`` names the subset of ``config`` that decides *which artifact this
+    is*. Everything else is tuning — a worker count, a prefetch depth, a chunk size —
+    which changes how the build runs but not what it produces. Hashing those too means a
+    bumped worker count rebuilds a byte-identical artifact, and on a large corpus that is
+    hours of invisible cost: the stage does not report itself as stale, it simply appears
+    to be missing.
+
+    Opt-in. The default hashes the whole config, which is the safe direction to be wrong
+    in: it rebuilds when it need not, rather than reusing an artifact it should not.
+    """
     base = Path(root) if root is not None else Path("stores")
-    key = sha256(canonical_json(config).encode()).hexdigest()[:16]
+    key = sha256(canonical_json(_identity_of(config, identity_fields)).encode()).hexdigest()[:16]
     target = base / name / key
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
@@ -47,6 +59,28 @@ def stage(
         raise StagingError(f"stage {name!r} failed to build: {exc}") from exc
     partial.replace(target)
     return target
+
+
+def _identity_of(
+    config: dict[str, Any], identity_fields: Sequence[str] | None
+) -> dict[str, Any]:
+    """The identity-bearing part of ``config``, or all of it when none is named.
+
+    A named field absent from the config is refused rather than skipped. Skipping would
+    *narrow* the key -- a typo'd ``"stide"`` silently drops stride from the identity, and
+    two genuinely different configs then collide onto one stage, which is the worst thing
+    a cache key can do.
+    """
+    if identity_fields is None:
+        return config
+    missing = [field for field in identity_fields if field not in config]
+    if missing:
+        raise StagingError(
+            f"identity_fields names {', '.join(sorted(missing))}, absent from the config "
+            f"(which has {', '.join(sorted(config)) or 'no keys'}); an identity field that "
+            "is not there would silently narrow the cache key"
+        )
+    return {field: config[field] for field in identity_fields}
 
 
 def _cleanup_partial(partial: Path) -> None:
