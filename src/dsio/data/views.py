@@ -12,12 +12,21 @@ these parameters or is rebuilt — the same rule a run's ``config_hash`` uses fo
 that straddle a split boundary put near-identical rows in train and test simultaneously —
 Kapoor & Narayanan's L1.4 and L3.2, and the most common fatal bug in sensor ML. It is
 invisible if the index is only offsets, so the index refuses to be only offsets.
+
+**An index also says nothing about what it left behind.** Windowing discards rows by
+construction — a recording shorter than one window contributes nothing, and
+``drop_last_partial`` truncates every trailing remainder — and an index of offsets has no
+place to record either. A store of 8 entities under a 64-row window kept 320 of 634 rows,
+three recordings absent entirely, and the examples contract, the store/index binding check,
+the dataset and the loader all passed without a word. :func:`window_discards` is where that
+arithmetic lives, and :func:`build_index` refuses the unambiguous half of it by default.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,12 +35,29 @@ from pydantic import Field, model_validator
 
 from dsio.contracts import DsioModel, short_digest
 from dsio.contracts.hashing import DIGEST_PREFIX_LEN, sha256_of_bytes
-from dsio.data.store import SignalStore, StoreError
+from dsio.data.store import Entity, SignalStore, StoreError
 
 VIEWS_DIRNAME = "views"
 
 LabelPolicy = Literal["any", "majority", "ratio", "none"]
 TimeUnit = Literal["row", "epoch_s"]
+
+DroppedEntityPolicy = Literal["raise", "drop"]
+"""What :func:`build_index` does about entities too short to hold a single window."""
+
+MAX_NAMED_ENTITIES = 5
+"""How many lost entities a refusal lists by name before summarising the rest."""
+
+
+class ViewError(ValueError):
+    """Raised when a view cannot be built as asked, or would quietly not be what it claims.
+
+    A subclass of ``ValueError`` because that is what this module raised before it had a
+    type of its own, and :class:`~dsio.data.adapters.SignalExamples` catches ``ValueError``
+    to re-raise as ``ExamplesError``. Callers that want to distinguish "this store and this
+    spec do not fit each other" from any other bad argument now can.
+    """
+
 
 T_START_ATTR = "t_start"
 SAMPLE_RATE_ATTR = "sample_rate"
@@ -108,9 +134,9 @@ class WindowIndex:
         self.labels = labels
         self.metrics = dict(metrics or {})
         if self.starts.size != self.entity_codes.size:
-            raise ValueError("starts and entity_codes must be the same length")
+            raise ViewError("starts and entity_codes must be the same length")
         if len(self.entity_names) != len(self.entity_groups):
-            raise ValueError("entity_names and entity_groups must be the same length")
+            raise ViewError("entity_names and entity_groups must be the same length")
 
     def __len__(self) -> int:
         return int(self.starts.size)
@@ -219,7 +245,7 @@ def assert_index_matches_store(store: SignalStore, index: WindowIndex) -> None:
     call it instead of repeating the comparison.
     """
     if index.store_name != store.path.name:
-        raise ValueError(
+        raise ViewError(
             f"index was built for store {index.store_name!r}, not {store.path.name!r}"
         )
 
@@ -265,6 +291,196 @@ def window_times(
     return absolute, absolute + float(index.spec.length) / rate[index.entity_codes]
 
 
+@dataclass(frozen=True)
+class EntityDiscard:
+    """How many of one entity's rows no window of a view covers.
+
+    ``covered_rows`` counts each row once however many windows read it: a stride below the
+    window length re-reads rows, and summing window lengths instead would let a view that
+    truncates a recording report covering more rows than the recording has.
+    """
+
+    entity_id: str
+    group: str
+    n_rows: int
+    covered_rows: int
+
+    @property
+    def discarded_rows(self) -> int:
+        return self.n_rows - self.covered_rows
+
+    @property
+    def is_dropped(self) -> bool:
+        """True when the entity contributes no window at all, not merely a short one."""
+        return self.covered_rows == 0
+
+
+@dataclass(frozen=True)
+class WindowDiscards:
+    """What a ``(store, spec)`` pair leaves out of the index it would build.
+
+    Kept apart from :class:`WindowIndex` rather than attached to it, because an index is
+    content-addressed and cached: :func:`load_or_build` returns one that was built now and
+    one that was read from disk interchangeably, and a field populated on the first and
+    empty on the second would be exactly the sort of quiet inconsistency this accounting
+    exists to remove. It is a function of the store and the spec, so any caller can ask for
+    it at any time, before or after building.
+
+    The two kinds of loss are not equally serious and are reported separately.
+    ``truncated`` is ``drop_last_partial`` doing its job -- a partial trailing window is
+    meaningless on a waveform -- and is reported, never refused. ``dropped`` is a whole
+    recording missing from the index, which no downstream check can see, and is what
+    :func:`build_index` refuses by default.
+    """
+
+    store: str
+    length: int
+    entities: tuple[EntityDiscard, ...]
+    n_rows: int
+    covered_rows: int
+
+    @property
+    def discarded_rows(self) -> int:
+        return self.n_rows - self.covered_rows
+
+    @property
+    def dropped(self) -> tuple[EntityDiscard, ...]:
+        """Entities contributing no window at all, in store order."""
+        return tuple(entity for entity in self.entities if entity.is_dropped)
+
+    @property
+    def truncated(self) -> tuple[EntityDiscard, ...]:
+        """Entities that yield windows but lose a remainder to ``drop_last_partial``."""
+        return tuple(entity for entity in self.entities if not entity.is_dropped)
+
+    def __bool__(self) -> bool:
+        """Truthy when the view costs rows, so ``if window_discards(...)`` reads plainly."""
+        return self.discarded_rows > 0
+
+    def describe(self) -> str:
+        """One line: how much of the corpus the view keeps, and what it cost."""
+        share = 100.0 * self.covered_rows / self.n_rows if self.n_rows else 100.0
+        return (
+            f"{self.covered_rows:,}/{self.n_rows:,} rows ({share:.0f}%) covered by windows "
+            f"of length {self.length}; {len(self.dropped)} entity(s) dropped entirely, "
+            f"{len(self.truncated)} truncated"
+        )
+
+
+def _entity_offsets(
+    entity: Entity, spec: WindowSpec, dense_mask: np.ndarray | None
+) -> list[int]:
+    """Sorted window starts for one entity, or ``[]`` if it cannot hold one window.
+
+    The single enumeration both :func:`build_index` and :func:`window_discards` read, so
+    the accounting is of the windows that would actually be built rather than of a
+    plausible re-derivation of them -- a dense stride adds windows the plain stride does
+    not, and a report computed from the stride alone would overstate the loss.
+    """
+    span = entity.n_rows - spec.length
+    if span < 0:
+        return []  # recording shorter than one window
+    last = entity.start_row + span
+
+    offsets = set(range(entity.start_row, last + 1, spec.stride))
+    if not spec.drop_last_partial and last not in offsets:
+        offsets.add(last)
+
+    if dense_mask is not None and spec.dense_stride is not None:
+        region = dense_mask[entity.start_row : entity.end_row]
+        for pos in range(0, span + 1, spec.dense_stride):
+            if region[pos : pos + spec.length].any():
+                offsets.add(entity.start_row + pos)
+
+    return sorted(offsets)
+
+
+def _covered_rows(offsets: Sequence[int], length: int) -> int:
+    """Size of the union of ``[offset, offset + length)`` over sorted ``offsets``."""
+    covered = 0
+    reached = 0
+    for offset in offsets:
+        end = offset + length
+        covered += end - max(offset, reached)
+        reached = end
+    return covered
+
+
+def window_discards(
+    store: SignalStore, spec: WindowSpec, *, dense_mask: np.ndarray | None = None
+) -> WindowDiscards:
+    """Account for every row of ``store`` that ``spec`` would leave out of an index.
+
+    Windowing is lossy by construction and the index cannot say so: it holds offsets, and
+    an offset that was never emitted leaves no trace. This is the only place the corpus and
+    the view are compared, so it is the only place a caller can learn that a 64-row window
+    kept half a store.
+
+    Metric floors (``min_metrics`` / ``max_metrics``) are deliberately not counted here.
+    They are applied to built windows, not to the store's geometry, and discarding part of
+    a view is precisely what a caller asks for by putting a purity floor in the spec -- the
+    spec digest already records that choice, reproducibly. What this reports is the loss
+    nobody asked for and nobody can see.
+    """
+    entities: list[EntityDiscard] = []
+    total_rows = 0
+    total_covered = 0
+    for entity in store.entities:
+        covered = _covered_rows(_entity_offsets(entity, spec, dense_mask), spec.length)
+        total_rows += entity.n_rows
+        total_covered += covered
+        if covered < entity.n_rows:
+            entities.append(
+                EntityDiscard(
+                    entity_id=entity.entity_id,
+                    group=entity.group,
+                    n_rows=entity.n_rows,
+                    covered_rows=covered,
+                )
+            )
+    return WindowDiscards(
+        store=store.path.name,
+        length=spec.length,
+        entities=tuple(entities),
+        n_rows=total_rows,
+        covered_rows=total_covered,
+    )
+
+
+def _refuse_dropped_entities(
+    store: SignalStore, spec: WindowSpec, policy: DroppedEntityPolicy
+) -> None:
+    """Refuse a view that would omit whole recordings, unless the caller asked for that.
+
+    An entity yields no window exactly when it is shorter than one window, so this costs a
+    pass over the entity table and never enumerates offsets -- cheap enough to run on
+    :func:`load_or_build`'s cache-hit path too, where the loss is otherwise laundered by a
+    file an earlier caller left behind.
+    """
+    if policy == "drop":
+        return
+    lost = [entity for entity in store.entities if entity.n_rows < spec.length]
+    if not lost:
+        return
+
+    named = ", ".join(f"{e.entity_id} ({e.n_rows:,} rows)" for e in lost[:MAX_NAMED_ENTITIES])
+    if len(lost) > MAX_NAMED_ENTITIES:
+        named += f", and {len(lost) - MAX_NAMED_ENTITIES:,} more"
+    rows = sum(entity.n_rows for entity in lost)
+    longest = max(entity.n_rows for entity in lost)
+    raise ViewError(
+        f"{len(lost)} of {len(store.entities)} entities in {store.path.name!r} are shorter "
+        f"than one {spec.length}-row window and would contribute no windows at all: "
+        f"{named}. That is {rows:,} of {store.n_rows:,} rows absent from the index, and an "
+        "index of offsets cannot say what it does not contain -- the split, the dataset and "
+        "the loader would all pass over a corpus missing these recordings entirely. Lower "
+        f"length to {longest:,} or below to keep them, or pass "
+        "on_dropped_entities='drop' to state that recordings shorter than a window are "
+        "meant to go. Rows lost to drop_last_partial are a separate, smaller matter: "
+        "window_discards(store, spec) reports those without refusing them."
+    )
+
+
 def build_index(
     store: SignalStore,
     spec: WindowSpec,
@@ -272,6 +488,7 @@ def build_index(
     dense_mask: np.ndarray | None = None,
     labels: np.ndarray | None = None,
     row_metrics: dict[str, np.ndarray] | None = None,
+    on_dropped_entities: DroppedEntityPolicy = "raise",
 ) -> WindowIndex:
     """Enumerate window starts for every entity in ``store``.
 
@@ -287,29 +504,30 @@ def build_index(
     belongs in the spec rather than applied afterwards so it is part of the index digest:
     two indices differing only in a purity floor are different indices, and must not share
     a cache entry, which is what lets a quality floor discard part of a view reproducibly.
+
+    ``on_dropped_entities`` decides what happens to a recording shorter than one window.
+    Such a recording cannot be windowed — that much is arithmetic — but it also vanishes
+    without trace: the index names only entities it holds windows for, so a store whose
+    every short session was silently omitted produces a perfectly consistent index over a
+    corpus that is not the one on disk. Refusing by default is the same stance
+    :mod:`dsio.eval.pool` takes toward a fold that never ran. ``"drop"`` is the explicit
+    opt-out, because deciding that short recordings do not belong in a view is a legitimate
+    choice — it just has to be a choice.
+
+    A trailing remainder truncated by ``drop_last_partial`` is *not* refused: a partial
+    window is meaningless on a waveform, and discarding one is what the flag is for. It is
+    still a cost, and :func:`window_discards` is where a caller reads it — for either kind
+    of loss, and without having to opt in to anything.
     """
+    _refuse_dropped_entities(store, spec, on_dropped_entities)
+
     starts: list[int] = []
     codes: list[int] = []
     entity_names = [entity.entity_id for entity in store.entities]
     entity_groups = [entity.group for entity in store.entities]
 
     for code, entity in enumerate(store.entities):
-        span = entity.n_rows - spec.length
-        if span < 0:
-            continue  # recording shorter than one window
-        last = entity.start_row + span
-
-        offsets = set(range(entity.start_row, last + 1, spec.stride))
-        if not spec.drop_last_partial and last not in offsets:
-            offsets.add(last)
-
-        if dense_mask is not None and spec.dense_stride is not None:
-            region = dense_mask[entity.start_row : entity.end_row]
-            for pos in range(0, span + 1, spec.dense_stride):
-                if region[pos : pos + spec.length].any():
-                    offsets.add(entity.start_row + pos)
-
-        for offset in sorted(offsets):
+        for offset in _entity_offsets(entity, spec, dense_mask):
             starts.append(offset)
             codes.append(code)
 
@@ -328,14 +546,14 @@ def build_index(
     keep = np.ones(start_array.size, dtype=bool)
     for name, floor in spec.min_metrics.items():
         if name not in window_metrics:
-            raise ValueError(
+            raise ViewError(
                 f"spec filters on metric {name!r}, but it was not supplied in row_metrics; "
                 f"available: {', '.join(sorted(window_metrics)) or 'none'}"
             )
         keep &= window_metrics[name] >= floor
     for name, ceiling in spec.max_metrics.items():
         if name not in window_metrics:
-            raise ValueError(
+            raise ViewError(
                 f"spec filters on metric {name!r}, but it was not supplied in row_metrics; "
                 f"available: {', '.join(sorted(window_metrics)) or 'none'}"
             )
@@ -425,13 +643,28 @@ def load_or_build(
     labels: np.ndarray | None = None,
     row_metrics: dict[str, np.ndarray] | None = None,
     root: Path | None = None,
+    on_dropped_entities: DroppedEntityPolicy = "raise",
 ) -> WindowIndex:
-    """Return the index for ``spec``, building and caching it if absent."""
+    """Return the index for ``spec``, building and caching it if absent.
+
+    ``on_dropped_entities`` is checked on the cache-hit path as well as the build path, and
+    deliberately does not enter the cache key. The key binds an index to committed splits
+    and staged runs, so adding a caller's policy to it would invalidate every one of them;
+    but a caller who did not opt in to losing recordings must still be refused when an
+    earlier caller who did opt in already left the index on disk, or the cache launders the
+    loss. The check is a pass over the entity table, not over the windows.
+    """
     path = index_path(store, spec, root, labels=labels)
     if path.is_file():
+        _refuse_dropped_entities(store, spec, on_dropped_entities)
         return WindowIndex.load(path)
     index = build_index(
-        store, spec, dense_mask=dense_mask, labels=labels, row_metrics=row_metrics
+        store,
+        spec,
+        dense_mask=dense_mask,
+        labels=labels,
+        row_metrics=row_metrics,
+        on_dropped_entities=on_dropped_entities,
     )
     index.save(path)
     return index
