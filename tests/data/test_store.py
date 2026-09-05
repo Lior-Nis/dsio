@@ -336,10 +336,24 @@ def test_subset_keeps_arrays_aligned(store: SignalStore) -> None:
     assert np.array_equal(subset.starts, index.starts[mask])
 
 
-def test_windows_shorter_than_an_entity_are_skipped(tmp_path: Path) -> None:
+def test_windows_shorter_than_an_entity_are_skipped_only_when_asked(tmp_path: Path) -> None:
+    """This test used to assert the skip alone, which is how the silence got in.
+
+    A recording too short for one window genuinely cannot be windowed, so ``tiny`` is
+    absent from the index either way -- but the index cannot say so, and asserting only
+    that ``big`` survived is agreeing not to ask. The behaviour is unchanged under the
+    explicit opt-out; what changed is that it has to be asked for. The refusal and the
+    accounting are covered in tests/data/test_discards.py.
+    """
     path = tmp_path / "short"
     with SignalStore.builder(path, channels=1) as builder:
         builder.add("tiny", np.zeros((10, 1), "float32"), group="g")
         builder.add("big", np.zeros((1000, 1), "float32"), group="g")
-    index = build_index(SignalStore(path), WindowSpec(length=500, stride=500))
+    store = SignalStore(path)
+    spec = WindowSpec(length=500, stride=500)
+
+    with pytest.raises(ValueError, match="tiny"):
+        build_index(store, spec)
+
+    index = build_index(store, spec, on_dropped_entities="drop")
     assert set(index.entity_ids.tolist()) == {"big"}
