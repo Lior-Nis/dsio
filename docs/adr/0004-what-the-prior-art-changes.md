@@ -260,3 +260,9 @@ Two structural suggestions worth deciding before Phase 2, not adopted here:
   rather than an import-linter contract. Note that `src/<framework>/` + `src/<project>/` in
   one repo is otherwise not a pattern anyone in the survey uses; MosaicML's equivalent is
   two repos (`composer` and `llm-foundry`).
+
+Resolved (2026-08-20) by ADR 0018. Both were adopted, and both were then reversed together —
+they were never really two questions. The workspace split existed *because* the template
+renamed the package: `src/{{ module_name }}/` cannot share a distribution with a fixed-name
+spine. Removing the rename removed the reason for both, and returned the answer this section
+framed them as alternatives to: `git fetch upstream && git merge`.
