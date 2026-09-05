@@ -136,6 +136,80 @@ def test_groups_are_reachable_for_leak_checking(store: SignalStore, index) -> No
     assert not (set(train.groups) & set(test.groups))
 
 
+# --- payload dtype ---------------------------------------------------------------------
+#
+# A token-id corpus is an ordinary store: int32, one channel, one document per entity. What
+# it cannot survive is the unconditional .float() this dataset used to apply, which turned
+# every id into a float32 that nn.Embedding refuses and a conv1d backbone silently accepts.
+
+
+@pytest.fixture
+def token_store(tmp_path: Path) -> SignalStore:
+    """Three documents of int32 token ids, of different lengths — a tokenized corpus."""
+    path = tmp_path / "corpus"
+    rng = np.random.default_rng(0)
+    with SignalStore.builder(path, channels=1, dtype="int32") as builder:
+        for doc, length in enumerate((300, 240, 180)):
+            ids = rng.integers(0, 64, size=(length, 1), dtype=np.int32)
+            builder.add(f"doc{doc}", ids, group=f"doc{doc}")
+    return SignalStore(path)
+
+
+@pytest.fixture
+def token_index(token_store: SignalStore):
+    return build_index(token_store, WindowSpec(length=32, stride=16))
+
+
+def test_the_payload_is_float32_by_default(token_store: SignalStore, token_index) -> None:
+    """The default is unchanged even over an int32 store: every existing caller is a signal
+    caller, and a signal payload is float whatever the bytes on disk happen to be."""
+    assert WindowDataset(token_store, token_index)[0]["x"].dtype is torch.float32
+
+
+def test_an_integer_payload_dtype_survives_to_the_item(
+    token_store: SignalStore, token_index
+) -> None:
+    """The blocker: token ids reached the model as floats, so nn.Embedding rejected them."""
+    item = WindowDataset(token_store, token_index, payload_dtype=torch.long)[0]
+    assert item["x"].dtype is torch.int64
+    original = token_store.read(int(token_index.starts[0]), 32).T
+    assert np.array_equal(item["x"].numpy(), original)
+
+
+def test_an_integer_payload_survives_a_loader(token_store: SignalStore, token_index) -> None:
+    """Collation is where a dtype quietly goes missing; it does not here."""
+    dataset = WindowDataset(token_store, token_index, payload_dtype=torch.long)
+    batch = next(iter(make_loader(dataset, batch_size=4)))
+    assert batch["x"].dtype is torch.int64
+    assert batch["x"].shape == (4, 1, 32)
+
+
+def test_an_integer_payload_dtype_is_refused_alongside_a_mask(
+    token_store: SignalStore, token_index
+) -> None:
+    """The NaN sentinel has nowhere to live in an integer tensor, and the per-window
+    standardisation that builds the target is float arithmetic. Both fail late and
+    confusingly — one as a silent cast of NaN to a real integer, the other as a torch
+    dtype error deep inside __getitem__ — so the combination is refused at construction."""
+    with pytest.raises(ValueError, match="payload_dtype"):
+        train_dataset(
+            token_store,
+            token_index,
+            payload_dtype=torch.long,
+            mask=SpanMask(ratio=0.2, span=4),
+        )
+
+
+def test_the_builders_pass_the_payload_dtype_through(
+    token_store: SignalStore, token_index
+) -> None:
+    """Both builders, because a token corpus needs a train loader and a val loader."""
+    train = train_dataset(token_store, token_index, payload_dtype=torch.long)
+    val = val_dataset(token_store, token_index, payload_dtype=torch.long)
+    assert train[0]["x"].dtype is torch.int64
+    assert val[0]["x"].dtype is torch.int64
+
+
 # --- pretext masking -------------------------------------------------------------------
 
 

@@ -93,6 +93,31 @@ class WindowDataset(Dataset[dict[str, Any]]):
     ``MaskedReconstruction.step()`` used to apply; it moved here because the target it
     normalises is now built here.
 
+    ``payload_dtype`` is what lets a token-id corpus reach a model as ids rather than as
+    numbers. Left ``None`` — the default — the window is cast to float32 exactly as it
+    always was, whatever the store holds; set to an integer dtype it is cast to that
+    instead, which is the whole difference between ``nn.Embedding`` working and refusing
+    the batch outright. The unconditional ``.float()`` this used to do was worse than it
+    sounds: ``nn.Embedding`` at least fails loudly on float indices, while the ``conv1d``
+    backbone happily convolves token ids into plausible-looking numbers and trains.
+
+    **It is opted into, not inferred from the store's dtype.** Inference would be more
+    convenient and it is the wrong call, because the dtype on disk answers "how are these
+    bytes packed", not "are these numbers or symbols". :class:`~dsio.data.format.DTypeCode`
+    carries ``INT16``/``INT8`` precisely so a corpus can be stored as quantised ADC
+    counts — those are signal, they want the float path, and inference would start handing
+    them to a model as integers, where ``InstanceStandardize`` does integer division and a
+    convolution trains on something subtly wrong. The same int32 bytes are token ids in one
+    store and sensor counts in another; only the caller knows which, so the caller says so.
+
+    An integer ``payload_dtype`` may not be combined with ``mask``, and the constructor
+    refuses it rather than letting ``__getitem__`` fail per item. The reconstruction target
+    is a NaN sentinel written into a copy of the window, and NaN has no representation in
+    an integer tensor: it would be cast to some real integer, ``MaskedMSE`` would read
+    every position as unmasked, and the loss would quietly score nothing. Masked
+    reconstruction over token ids is a different objective (MLM's ``-100``, a
+    cross-entropy over a vocabulary) and needs a target this class does not build.
+
     ``mask_seed`` (only meaningful alongside ``mask``), when given, makes the mask a
     function of the item rather than of call order: each ``__getitem__`` builds a fresh
     ``torch.Generator`` seeded from ``mask_seed ^ position`` and hands it to ``mask``, so
@@ -114,12 +139,19 @@ class WindowDataset(Dataset[dict[str, Any]]):
         labels: np.ndarray | None = None,
         *,
         channels_first: bool = True,
+        payload_dtype: torch.dtype | None = None,
         mask: MaskStrategy | None = None,
         target_key: str = "y",
         normalize_target: bool = True,
         mask_seed: int | None = None,
     ) -> None:
         assert_index_matches_store(store, index)
+        if mask is not None and payload_dtype is not None and not payload_dtype.is_floating_point:
+            raise ValueError(
+                f"payload_dtype {payload_dtype} is an integer dtype, which cannot carry the "
+                "NaN sentinel a masked target is made of; masked reconstruction over token "
+                "ids is a different objective and needs a target this class does not build"
+            )
         self.store = store
         self.index = index
         self.positions = (
@@ -135,6 +167,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
                 "be aligned with the whole index, not with this fold"
             )
         self.channels_first = channels_first
+        self.payload_dtype = payload_dtype
         self.mask = mask
         self.target_key = target_key
         self.normalize_target = normalize_target
@@ -151,7 +184,10 @@ class WindowDataset(Dataset[dict[str, Any]]):
         # is required because the mmap slice is a view, and a view handed to a worker
         # process outlives the read it came from.
         array = np.ascontiguousarray(window.T if self.channels_first else window)
-        x = torch.from_numpy(array).float()
+        # float32 unless the caller asked for something else: a signal payload is float
+        # regardless of how its bytes are packed, and a token id is not a number at all.
+        raw = torch.from_numpy(array)
+        x = raw.float() if self.payload_dtype is None else raw.to(self.payload_dtype)
         # row is carried regardless of which branch below runs: predictions are aligned to
         # folds by this identity, not by trusting the order a DataLoader hands batches back.
         item: dict[str, Any] = {"row": position}
@@ -201,6 +237,7 @@ def train_dataset(
     *,
     labels: np.ndarray | None = None,
     channels_first: bool = True,
+    payload_dtype: torch.dtype | None = None,
     mask: MaskStrategy | None = None,
     target_key: str = "y",
     normalize_target: bool = True,
@@ -229,6 +266,7 @@ def train_dataset(
         positions,
         labels=labels,
         channels_first=channels_first,
+        payload_dtype=payload_dtype,
         mask=mask,
         target_key=target_key,
         normalize_target=normalize_target,
@@ -243,6 +281,7 @@ def val_dataset(
     *,
     labels: np.ndarray | None = None,
     channels_first: bool = True,
+    payload_dtype: torch.dtype | None = None,
     target_key: str = "y",
 ) -> WindowDataset:
     """Build a dataset that can never be masked, because there is no ``mask=`` keyword to
@@ -263,6 +302,7 @@ def val_dataset(
         positions,
         labels=labels,
         channels_first=channels_first,
+        payload_dtype=payload_dtype,
         target_key=target_key,
     )
 

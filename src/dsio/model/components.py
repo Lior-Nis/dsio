@@ -91,6 +91,57 @@ class Conv1dEncoder(nn.Module):
         return self.project(pooled)
 
 
+@backbone("embedding")
+class EmbeddingEncoder(nn.Module):
+    """Token ids to a pooled representation. The baseline any sequence model over text
+    must beat, and the reason a token corpus needs a backbone of its own at all.
+
+    ``conv1d`` over token ids runs and produces numbers. That is the failure this exists to
+    remove: an id is a symbol, not a magnitude, so convolving 39 against 41 as though they
+    were neighbouring amplitudes trains a model that converges to something meaningless
+    rather than erroring. A lookup table is the smallest thing that treats them as symbols.
+
+    Pools over time (and over channels, so a store of several parallel id streams works
+    unchanged) instead of flattening, exactly as :class:`Conv1dEncoder` does and for the
+    same reason: a backbone whose parameter count depends on the context length forces a
+    retrain for every change to a view, which is the coupling the index layer removed.
+
+    A float payload is accepted as well as an integer one, because
+    :class:`~dsio.dataset.dataset.WindowDataset`'s float path is the default and a caller
+    who has not set ``payload_dtype=torch.long`` should get a working model rather than a
+    dtype error. The cast back is lossless only up to 2**24 (16,777,216) — the largest
+    integer float32 represents without gaps — so above that vocabulary size two adjacent
+    ids collide on one float and the wrong row is embedded, silently. Setting
+    ``payload_dtype`` makes the cast a no-op and the bound irrelevant, which is why it is
+    the preferred path rather than a convenience.
+    """
+
+    def __init__(self, vocab_size: int, embed_dim: int = 64, out_dim: int = 64) -> None:
+        super().__init__()
+        if vocab_size < 1:
+            raise ValueError(f"vocab_size must be at least 1, got {vocab_size}")
+        self.vocab_size = vocab_size
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.project = nn.Linear(embed_dim, out_dim)
+        self.out_dim = out_dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _check_3d(x, "EmbeddingEncoder")
+        ids = x.long()
+        # One reduction and one device sync per batch, deliberately. nn.Embedding's own
+        # complaint about an out-of-range id is "index out of range in self" on CPU and a
+        # device-side assert that takes the process down on CUDA -- neither names the knob
+        # that is wrong, and a tokenizer whose vocabulary disagrees with the configured
+        # vocab_size is by far the most likely way to arrive here.
+        if int(ids.max()) >= self.vocab_size or int(ids.min()) < 0:
+            raise ValueError(
+                f"token ids run [{int(ids.min())}, {int(ids.max())}] but vocab_size is "
+                f"{self.vocab_size}; the configured vocabulary does not match the corpus"
+            )
+        pooled = self.embedding(ids).mean(dim=(1, 2))
+        return self.project(pooled)
+
+
 # --- heads --------------------------------------------------------------------------
 
 
