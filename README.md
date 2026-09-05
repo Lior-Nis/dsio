@@ -78,6 +78,43 @@ enforces it today as a policy function with its own tests, ahead of the CLI comm
 **Correctness is structural.** Leakage walls are import-linter contracts, not review
 conventions.
 
+## Images and other fixed-size items
+
+Whole-item access is degenerate windowing — "store once, index many" with an index of one
+window per entity — so a fixed-size vision corpus needs no code that does not already exist.
+Store an image of H×W with C channels as an entity of `H*W` rows and `C` channels, index it
+with `WindowSpec(length=H*W, stride=H*W)`, and every entity yields exactly one window: the
+image. There is no separate item-store concept to add, because an item *is* a window of
+exactly entity length.
+
+```python
+with SignalStore.builder("stores/scans", channels=3, dtype="uint8") as builder:
+    for name, image, patient in scans():          # image is (8, 8, 3)
+        builder.add(name, image.reshape(64, 3), group=patient)
+
+store = SignalStore("stores/scans")
+index = build_index(store, WindowSpec(length=64, stride=64))    # 16 images -> 16 windows
+batch = next(iter(make_loader(WindowDataset(store, index), batch_size=4)))
+batch["x"].reshape(4, 3, 8, 8)                                  # (B, C, H*W) -> (B, C, H, W)
+```
+
+`WindowDataset` is `channels_first=True` by default, so a batch arrives as `(B, C, H*W)` and
+reshapes to `(B, C, H, W)`. The flattening is row-major and nothing else; the reshape is its
+exact inverse.
+
+What this buys over a directory of image files is `group=`. Split by patient, site or camera
+and `dsio.splits.resolve.assert_no_row_overlap` proves *at the pixel row* that no image landed
+in two parts — the discipline medical and scientific imaging needs and a per-file split
+quietly skips, since two scans of one patient are near-identical and a model scored across
+them is scored on data it trained on. `tests/dataset/test_fixed_size_items.py` pins the whole
+chain: 16 images in, 16 windows out, one per entity, every pixel row covered exactly once,
+and the right pixels at the right coordinates after the reshape.
+
+**Fixed-size only.** `WindowSpec.length` is a single int for the whole store, so a corpus of
+differently-sized images has no length that means "one item": at `length=64` a 12×12 image
+becomes two windows that are not images and drops its last 16 rows, with nothing said. Resize
+at ingest, or give each size its own store.
+
 ## Developing
 
 ```bash
