@@ -62,6 +62,8 @@ from dsio.train.tracking import (
 )
 
 if TYPE_CHECKING:
+    import torch
+
     from dsio.config.schema import RunConfig
     from dsio.runs.record import Run
 
@@ -187,6 +189,12 @@ class TorchTask(TaskConfig):
     num_workers: int = Field(default=0, ge=0)
     trainer: TrainerConfig = TrainerConfig()
 
+    payload_dtype: Literal["long"] | None = Field(
+        default=None,
+        description="Payload dtype the model receives. None (the default) is float32, "
+        "which is what a signal wants whatever its bytes are packed as. 'long' hands the "
+        "values through as integers, which is what an embedding lookup needs.",
+    )
     metrics: tuple[str, ...] = ("accuracy", "f1_macro")
 
     predict: Literal["prediction", "embedding"] = Field(
@@ -373,6 +381,25 @@ def load_encoder(
     return {"loaded_tensors": loaded, "frozen_parameters": frozen}
 
 
+def payload_dtype_of(task: TorchTask) -> torch.dtype | None:
+    """Resolve the config's payload dtype name to the dtype the dataset wants.
+
+    A string is what crosses the config boundary, not a ``torch.dtype``: a config is
+    hashed through :func:`~dsio.contracts.hashing.canonical_json`, which encodes
+    primitives only, and a run record has to stay readable by something that has never
+    imported torch. One name is accepted, deliberately -- a second belongs here when a
+    second has a caller, not before.
+
+    torch is imported inside the function, as everywhere else in this module, so that
+    importing it costs nothing for a caller only inspecting a config.
+    """
+    if task.payload_dtype is None:
+        return None
+    import torch
+
+    return {"long": torch.long}[task.payload_dtype]
+
+
 def sanitise_metric(name: str) -> str:
     """Make a metric name safe inside a checkpoint filename template.
 
@@ -530,9 +557,10 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
 
         module = build_module(task, channels=store.channels, length=task.window.length)
         directory = run.artifacts_dir
+        payload_dtype = payload_dtype_of(task)
 
         train_loader = make_loader(
-            WindowDataset(store, index, fold.train),
+            WindowDataset(store, index, fold.train, payload_dtype=payload_dtype),
             batch_size=task.batch_size,
             shuffle=True,
             num_workers=task.num_workers,
@@ -543,7 +571,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
             None
             if validation is None
             else make_loader(
-                WindowDataset(store, index, validation),
+                WindowDataset(store, index, validation, payload_dtype=payload_dtype),
                 batch_size=task.batch_size,
                 num_workers=task.num_workers,
                 seed=config.seed,
@@ -581,7 +609,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         trainer.fit(module, train_loader, val_loader)
 
         predict_loader = make_loader(
-            WindowDataset(store, index, fold.test),
+            WindowDataset(store, index, fold.test, payload_dtype=payload_dtype),
             batch_size=task.batch_size,
             num_workers=task.num_workers,
             seed=config.seed,
