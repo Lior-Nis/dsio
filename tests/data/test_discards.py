@@ -237,3 +237,84 @@ def test_a_metric_floor_never_refuses_a_build(tmp_path: Path) -> None:
 
     assert len(index) == 1
     assert set(index.entity_ids) == {"clean"}
+
+
+# --- one window per entity: the guarantee fixed-size item corpora rest on ----------------
+
+
+def test_an_item_corpus_asserts_its_one_to_one_correspondence(tmp_path: Path) -> None:
+    """Equal-length entities at ``length == stride == item length``: one window each."""
+    store = _store(tmp_path, (64, 64, 64), name="items")
+    index = build_index(store, WindowSpec(length=64, stride=64), one_window_per_entity=True)
+    assert len(index) == 3
+
+
+def test_an_oversized_item_is_refused_when_one_to_one_is_claimed(tmp_path: Path) -> None:
+    """The hole the too-short guard leaves open, and the one that bites a vision corpus.
+
+    An item *larger* than the window is not lost -- it becomes several windows that are
+    not items. Nothing downstream can tell: the index is consistent, the loader yields
+    tensors of the right shape, and every one of them is a crop of an image rather than
+    an image. Only the caller knows a window was supposed to be a whole item.
+    """
+    store = _store(tmp_path, (64, 144, 64), name="ragged")
+    with pytest.raises(ViewError, match="2 windows"):
+        build_index(store, WindowSpec(length=64, stride=64), one_window_per_entity=True)
+
+
+def test_the_refusal_names_the_offending_entities_and_the_remedy(tmp_path: Path) -> None:
+    store = _store(tmp_path, (64, 144, 64), name="ragged")
+    with pytest.raises(ViewError) as excinfo:
+        build_index(store, WindowSpec(length=64, stride=64), one_window_per_entity=True)
+    message = str(excinfo.value)
+    assert "v1" in message
+    assert "144" in message
+    assert "resize" in message.lower()
+
+
+def test_one_to_one_is_not_claimed_by_default(tmp_path: Path) -> None:
+    """A waveform corpus wants many windows per recording; that is the normal case."""
+    store = _store(tmp_path, (64, 144, 64), name="ragged")
+    index = build_index(store, WindowSpec(length=64, stride=64))
+    assert len(index) == 4
+
+
+def test_an_entity_with_no_windows_fails_the_claim_even_when_dropping_is_allowed(
+    tmp_path: Path,
+) -> None:
+    """``on_dropped_entities='drop'`` and ``one_window_per_entity=True`` contradict.
+
+    Dropping says "recordings shorter than a window are meant to go"; one-to-one says
+    "every entity is exactly one item". The stronger claim is the one that must hold.
+    """
+    store = _store(tmp_path, (64, 20, 64), name="short")
+    with pytest.raises(ViewError, match="0 windows"):
+        build_index(
+            store,
+            WindowSpec(length=64, stride=64),
+            on_dropped_entities="drop",
+            one_window_per_entity=True,
+        )
+
+
+def test_a_cached_index_cannot_launder_a_broken_correspondence(tmp_path: Path) -> None:
+    """The same laundering `on_dropped_entities` already closes, for the same reason."""
+    store = _store(tmp_path, (64, 144, 64), name="ragged")
+    spec = WindowSpec(length=64, stride=64)
+    load_or_build(store, spec, root=tmp_path / "views")
+
+    with pytest.raises(ViewError, match="2 windows"):
+        load_or_build(store, spec, root=tmp_path / "views", one_window_per_entity=True)
+
+
+def test_the_claim_leaves_the_spec_digest_alone(tmp_path: Path) -> None:
+    """It is a claim about the corpus, not a property of the view.
+
+    A digest that moved would invalidate every cached index and every committed split the
+    moment someone asserted a correspondence that already held.
+    """
+    store = _store(tmp_path, (64, 64), name="items")
+    spec = WindowSpec(length=64, stride=64)
+    plain = build_index(store, spec)
+    claimed = build_index(store, spec, one_window_per_entity=True)
+    assert plain.digest == claimed.digest == spec.digest
