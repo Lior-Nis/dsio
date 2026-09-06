@@ -93,7 +93,8 @@ with SignalStore.builder("stores/scans", channels=3, dtype="uint8") as builder:
         builder.add(name, image.reshape(64, 3), group=patient)
 
 store = SignalStore("stores/scans")
-index = build_index(store, WindowSpec(length=64, stride=64))    # 16 images -> 16 windows
+index = build_index(store, WindowSpec(length=64, stride=64),
+                    one_window_per_entity=True)                 # 16 images -> 16 windows
 batch = next(iter(make_loader(WindowDataset(store, index), batch_size=4)))
 batch["x"].reshape(4, 3, 8, 8)                                  # (B, C, H*W) -> (B, C, H, W)
 ```
@@ -110,16 +111,20 @@ them is scored on data it trained on. `tests/dataset/test_fixed_size_items.py` p
 chain: 16 images in, 16 windows out, one per entity, every pixel row covered exactly once,
 and the right pixels at the right coordinates after the reshape.
 
-**Fixed-size only.** `WindowSpec.length` is a single int for the whole store, so a corpus of
-differently-sized images has no length that means "one item". The two ways that goes wrong are
-not equally visible. An item *smaller* than `length` yields no window at all, and `build_index`
-refuses that by default — a whole image absent from the index is loss nothing downstream can
-see. An item *larger* than `length` is the quiet one: at `length=64` a 12×12 image becomes two
-windows that are not images and loses its last 16 rows. That is reported by
-`dsio.data.views.window_discards` and not refused, because it is indistinguishable from a
-waveform being windowed exactly as intended — so the one-window-per-item correspondence this
-section rests on is yours to keep, not the index's to enforce. Resize at ingest, or give each
-size its own store.
+**Fixed-size only, and say so.** `WindowSpec.length` is a single int for the whole store, so a
+corpus of differently-sized images has no length that means "one item". The two ways that goes
+wrong are not equally visible. An item *smaller* than `length` yields no window at all, and
+`build_index` refuses that by default — a whole image absent from the index is loss nothing
+downstream can see. An item *larger* than `length` is the quiet one: at `length=64` a 12×12
+image becomes two windows that are not images. Nothing is lost, so nothing is missing, and the
+loader keeps yielding tensors of exactly the right shape — every one of them a crop.
+
+`one_window_per_entity=True` is how you say the corpus is items rather than recordings. It is
+off by default because a waveform corpus wants many windows per recording, and it is the one
+thing the other checks cannot infer: only the caller knows a window was supposed to be a whole
+image. Claim it and a store that stops being uniform — one 12×12 scan among the 8×8s — is
+refused by name, on the cache-hit path too, rather than quietly training on strips. Then resize
+at ingest, or give each size its own store.
 
 ## Developing
 

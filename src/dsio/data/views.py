@@ -498,6 +498,52 @@ def _refuse_dropped_entities(
     )
 
 
+def _refuse_multi_window_entities(index: WindowIndex, store: SignalStore) -> None:
+    """Refuse an index whose entities are not one-for-one with its windows.
+
+    The hole :func:`_refuse_dropped_entities` leaves open, and the opposite failure. An
+    entity *larger* than the window is not lost: it becomes several windows that are not
+    items, and nothing downstream can tell. The index is internally consistent, the loader
+    yields tensors of the right shape, and every one of them is a crop of an image rather
+    than an image -- a corpus of 12x12 pictures read as pairs of 64-row strips, scoring
+    perfectly plausibly on something that is not the data.
+
+    Only the caller knows a window was meant to be a whole item, which is why this is a
+    claim rather than a default: a waveform corpus wants many windows per recording, and
+    that is the normal case.
+
+    Counted from the built index rather than re-derived from the store, so it costs a
+    bincount over the windows and works unchanged on :func:`load_or_build`'s cache-hit
+    path -- and so it sees the index that will actually be used, including whatever a
+    metric floor removed from it.
+    """
+    counts = np.bincount(index.entity_codes, minlength=len(index.entity_names))
+    offenders = [
+        (index.entity_names[code], int(n)) for code, n in enumerate(counts) if n != 1
+    ]
+    if not offenders:
+        return
+
+    named = ", ".join(
+        f"{name} ({n} windows)" for name, n in offenders[:MAX_NAMED_ENTITIES]
+    )
+    if len(offenders) > MAX_NAMED_ENTITIES:
+        named += f", and {len(offenders) - MAX_NAMED_ENTITIES:,} more"
+    sizes = sorted({entity.n_rows for entity in store.entities})
+    raise ViewError(
+        f"one_window_per_entity was claimed, but {len(offenders)} of "
+        f"{len(index.entity_names)} entities in {store.path.name!r} do not yield exactly "
+        f"one {index.spec.length}-row window: {named}. An entity larger than the window "
+        "becomes several windows that are not items, and an index of offsets cannot say "
+        "so -- the loader yields crops of the right shape and nothing downstream can tell "
+        f"them from items. The store holds {len(sizes)} distinct entity size(s) "
+        f"({', '.join(f'{s:,}' for s in sizes[:5])}"
+        f"{', ...' if len(sizes) > 5 else ''}); resize at ingest so every item is the same "
+        "length, give each size its own store, or drop the claim and treat these as "
+        "windows."
+    )
+
+
 def build_index(
     store: SignalStore,
     spec: WindowSpec,
@@ -506,6 +552,7 @@ def build_index(
     labels: np.ndarray | None = None,
     row_metrics: dict[str, np.ndarray] | None = None,
     on_dropped_entities: DroppedEntityPolicy = "raise",
+    one_window_per_entity: bool = False,
 ) -> WindowIndex:
     """Enumerate window starts for every entity in ``store``.
 
@@ -535,6 +582,14 @@ def build_index(
     window is meaningless on a waveform, and discarding one is what the flag is for. It is
     still a cost, and :func:`window_discards` is where a caller reads it — for either kind
     of loss, and without having to opt in to anything.
+
+    ``one_window_per_entity`` claims the corpus is one of items rather than of recordings —
+    images, documents, trials — so that every entity must yield exactly one window. It is
+    the guarantee whole-item access rests on, and the one thing the checks above cannot
+    infer: an entity *larger* than the window is not lost, it becomes several windows that
+    are not items, and every downstream check passes on crops. Off by default, because a
+    waveform corpus wants many windows per recording. It is a claim about the corpus, not a
+    property of the view, so like ``on_dropped_entities`` it stays out of the spec digest.
     """
     _refuse_dropped_entities(store, spec, on_dropped_entities)
 
@@ -557,7 +612,7 @@ def build_index(
 
     window_metrics, keep = _metric_filter(spec, start_array, row_metrics)
 
-    return WindowIndex(
+    index = WindowIndex(
         starts=start_array[keep],
         entity_codes=code_array[keep],
         entity_names=entity_names,
@@ -567,6 +622,9 @@ def build_index(
         labels=None if window_labels is None else window_labels[keep],
         metrics={name: values[keep] for name, values in window_metrics.items()},
     )
+    if one_window_per_entity:
+        _refuse_multi_window_entities(index, store)
+    return index
 
 
 def _metric_filter(
@@ -674,6 +732,7 @@ def load_or_build(
     row_metrics: dict[str, np.ndarray] | None = None,
     root: Path | None = None,
     on_dropped_entities: DroppedEntityPolicy = "raise",
+    one_window_per_entity: bool = False,
 ) -> WindowIndex:
     """Return the index for ``spec``, building and caching it if absent.
 
@@ -683,11 +742,17 @@ def load_or_build(
     but a caller who did not opt in to losing recordings must still be refused when an
     earlier caller who did opt in already left the index on disk, or the cache launders the
     loss. The check is a pass over the entity table, not over the windows.
+
+    ``one_window_per_entity`` is checked on both paths for the same reason and, being
+    counted from the index itself, needs no re-derivation to check a cached one.
     """
     path = index_path(store, spec, root, labels=labels)
     if path.is_file():
         _refuse_dropped_entities(store, spec, on_dropped_entities)
-        return WindowIndex.load(path)
+        cached = WindowIndex.load(path)
+        if one_window_per_entity:
+            _refuse_multi_window_entities(cached, store)
+        return cached
     index = build_index(
         store,
         spec,
@@ -695,6 +760,7 @@ def load_or_build(
         labels=labels,
         row_metrics=row_metrics,
         on_dropped_entities=on_dropped_entities,
+        one_window_per_entity=one_window_per_entity,
     )
     index.save(path)
     return index
