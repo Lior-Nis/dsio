@@ -167,3 +167,41 @@ def test_a_token_corpus_trains_through_lightning(
     ).fit(module, train_loader, val_loader)
 
     assert not torch.equal(before, backbone.embedding.weight.detach())
+
+
+# --- the vocabulary check costs one sync per run, not one per step -----------------------
+
+
+def test_a_vocabulary_mismatch_is_named_rather_than_left_to_torch() -> None:
+    """`nn.Embedding` says "index out of range in self", naming neither knob."""
+    encoder = EmbeddingEncoder(vocab_size=10)
+    with pytest.raises(ValueError, match="vocab_size is 10"):
+        encoder(torch.tensor([[[0.0, 1.0, 42.0]]]))
+
+
+def test_the_range_check_runs_once_rather_than_once_per_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`int(ids.max())` blocks the CPU until the GPU drains — once is fine, per-step is not.
+
+    A GPU runs asynchronously; pulling a Python int out of a tensor forces a device
+    synchronisation. In `forward` that is one stall per training step, and
+    `assert_no_row_overlap`'s docstring already states this codebase's position: a check
+    this expensive belongs outside the training path. A vocabulary mismatch is a config
+    error — wrong on the first batch or never wrong — so the first batch is where it is
+    worth paying for.
+    """
+    calls: list[int] = []
+    real_max = torch.Tensor.max
+
+    def counting_max(self: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
+        calls.append(1)
+        return real_max(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "max", counting_max)
+
+    encoder = EmbeddingEncoder(vocab_size=10)
+    for _ in range(5):
+        encoder(torch.zeros(2, 1, 4))
+
+    assert len(calls) == 1, f"the range check synced the device {len(calls)} times in 5 steps"

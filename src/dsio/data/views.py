@@ -407,7 +407,11 @@ def _covered_rows(offsets: Sequence[int], length: int) -> int:
 
 
 def window_discards(
-    store: SignalStore, spec: WindowSpec, *, dense_mask: np.ndarray | None = None
+    store: SignalStore,
+    spec: WindowSpec,
+    *,
+    dense_mask: np.ndarray | None = None,
+    row_metrics: dict[str, np.ndarray] | None = None,
 ) -> WindowDiscards:
     """Account for every row of ``store`` that ``spec`` would leave out of an index.
 
@@ -416,17 +420,30 @@ def window_discards(
     the view are compared, so it is the only place a caller can learn that a 64-row window
     kept half a store.
 
-    Metric floors (``min_metrics`` / ``max_metrics``) are deliberately not counted here.
-    They are applied to built windows, not to the store's geometry, and discarding part of
-    a view is precisely what a caller asks for by putting a purity floor in the spec -- the
-    spec digest already records that choice, reproducibly. What this reports is the loss
-    nobody asked for and nobody can see.
+    Metric floors (``min_metrics`` / ``max_metrics``) are counted only when ``row_metrics``
+    is supplied, and are never a reason to refuse a build. Without them this stays what it
+    has always been -- a function of the store and the spec, answerable before anything is
+    built or read.
+
+    They are worth counting when they can be. A caller writes
+    ``min_metrics={'purity': 0.9}``; they do not write "and remove this subject from the
+    study". The filter is deliberate and the spec digest records it; a recording filtered
+    away to nothing is neither, and it is the same invisible loss as a recording too short
+    to window -- a group missing from every fold while every check passes. It is reported
+    rather than refused because filtering a recording to nothing may be exactly what a
+    purity floor is for, and refusing would be a guess about how a project filters that
+    reporting cannot get wrong.
     """
     entities: list[EntityDiscard] = []
     total_rows = 0
     total_covered = 0
     for entity in store.entities:
-        covered = _covered_rows(_entity_offsets(entity, spec, dense_mask), spec.length)
+        offsets = _entity_offsets(entity, spec, dense_mask)
+        if row_metrics is not None and offsets:
+            starts = np.asarray(offsets, dtype=np.int64)
+            _, keep = _metric_filter(spec, starts, row_metrics)
+            offsets = starts[keep].tolist()
+        covered = _covered_rows(offsets, spec.length)
         total_rows += entity.n_rows
         total_covered += covered
         if covered < entity.n_rows:
@@ -538,12 +555,35 @@ def build_index(
     if labels is not None and spec.label_policy != "none":
         window_labels = _derive_labels(np.asarray(labels), start_array, spec)
 
+    window_metrics, keep = _metric_filter(spec, start_array, row_metrics)
+
+    return WindowIndex(
+        starts=start_array[keep],
+        entity_codes=code_array[keep],
+        entity_names=entity_names,
+        entity_groups=entity_groups,
+        spec=spec,
+        store_name=store.path.name,
+        labels=None if window_labels is None else window_labels[keep],
+        metrics={name: values[keep] for name, values in window_metrics.items()},
+    )
+
+
+def _metric_filter(
+    spec: WindowSpec, starts: np.ndarray, row_metrics: dict[str, np.ndarray] | None
+) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    """Per-window metrics, and the mask the spec's floors and ceilings keep.
+
+    The single filter both :func:`build_index` and :func:`window_discards` read, for the
+    same reason :func:`_entity_offsets` is the single enumeration: a report derived from
+    its own re-reading of the spec would eventually disagree with the index it claims to
+    describe, and the disagreement would be silent.
+    """
     window_metrics = {
-        name: _window_means(np.asarray(values, dtype=np.float64), start_array, spec.length)
+        name: _window_means(np.asarray(values, dtype=np.float64), starts, spec.length)
         for name, values in (row_metrics or {}).items()
     }
-
-    keep = np.ones(start_array.size, dtype=bool)
+    keep = np.ones(starts.size, dtype=bool)
     for name, floor in spec.min_metrics.items():
         if name not in window_metrics:
             raise ViewError(
@@ -558,17 +598,7 @@ def build_index(
                 f"available: {', '.join(sorted(window_metrics)) or 'none'}"
             )
         keep &= window_metrics[name] <= ceiling
-
-    return WindowIndex(
-        starts=start_array[keep],
-        entity_codes=code_array[keep],
-        entity_names=entity_names,
-        entity_groups=entity_groups,
-        spec=spec,
-        store_name=store.path.name,
-        labels=None if window_labels is None else window_labels[keep],
-        metrics={name: values[keep] for name, values in window_metrics.items()},
-    )
+    return window_metrics, keep
 
 
 def _window_means(values: np.ndarray, starts: np.ndarray, length: int) -> np.ndarray:
