@@ -13,10 +13,13 @@ into both runners — model logging stays `dsio.artifacts.store.ModelRegistry`'s
 has the fail-closed policy MLflow's own model logging does not. `runs/` (`dsio.runs.
 record`) is reduced to the provenance stamper; `artifacts/` (`dsio.artifacts.store`) is
 reduced to digest-on-save, verify-on-load and fail-closed-on-mismatch over MLflow's Model
-Registry. The nightly backup (`ops/backup-mlflow.sh`, `ops/mlflow-backup.service`, `ops/
-mlflow-backup.timer`) is push-only (`rclone copy`, never `sync`) and captures both halves —
-the Postgres dump and the `mlartifacts` volume — since Postgres holds artifact URIs and
-restoring the database alone yields an index pointing at files that no longer exist.
+Registry. The nightly backup shipped as `ops/backup-mlflow.sh` plus a systemd service and
+timer, push-only (`rclone copy`, never `sync`), capturing both the Postgres dump and the
+`mlartifacts` volume — since Postgres holds artifact URIs, restoring the database alone
+yields an index pointing at files that no longer exist.
+
+Amended (2026-09-11): **`ops/` is deleted and the concentration risk below is accepted
+rather than mitigated.** See "The mitigation that never ran" at the end of this file.
 
 ## Context
 
@@ -116,3 +119,26 @@ the moment the backup matters.
 Fail-fast has a cost that will arrive with cloud training: a GPU box that cannot reach MLflow
 cannot train at all. That is deferred deliberately rather than solved speculatively, and it is
 the one part of this decision that will need revisiting rather than extending.
+
+## The mitigation that never ran
+
+Amended 2026-09-11. The paragraph above says the mitigation "is not optional and belongs on
+day one". It was written, reviewed, tested and never installed, and `ops/` is now deleted.
+
+What was true at deletion: no systemd unit in `~/.config/systemd/user`, no timer listed,
+`rclone` present but with no config file at all and therefore no `gdrive:` remote,
+`/var/backups/mlflow` absent, and both unit files still carrying a literal
+`/CHANGE-ME-to-this-checkout-path`. Fifty-one experiments were live in MLflow at the time,
+in Docker volumes named after a worktree that had already been deleted.
+
+**Deleting it does not change the exposure — there was never a backup.** What changes is
+that the repository stops describing a durability property it does not have, which is the
+worse of the two failure modes: an unrun backup is more dangerous than no backup, because
+it is the one you believe in.
+
+The concentration risk this ADR named is therefore accepted, explicitly and with the
+numbers above, rather than mitigated. Reversing that means installing a backup, not
+restoring these files — and the cheapest credible version is local (a timer dumping to a
+second disk), not the Drive round-trip whose OAuth setup is why this one never happened.
+The deleted implementation, including the `copy`-not-`sync` reasoning and its test, is
+recoverable at `git show <sha>:ops/backup-mlflow.sh`.
