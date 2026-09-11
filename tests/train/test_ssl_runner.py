@@ -195,7 +195,10 @@ def test_every_method_pretrains_and_registers_an_encoder(method: str, corpus: Pa
     # `run_id` cites MLflow's own run id, not dsio's human-readable label -- see
     # `run_ssl_pretrain`'s comment on the same field in `dsio.train.ssl_task`.
     assert version.run_id == active.mlflow_run_id
-    assert version.size_bytes > 0
+    # The encoder is loadable by the reference that run wrote, which is the property the
+    # deleted `size_bytes` mirror was standing in for.
+    registry = ModelRegistry()
+    assert registry.load(registry.ref_for(f"enc_{method}", int(version.version)))
 
 
 @pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
@@ -277,11 +280,13 @@ def test_the_encoder_records_its_lineage(corpus: Path) -> None:
     active, _ = run(config, corpus)
     version = ModelRegistry().versions("enc_mae")[-1]
     store = SignalStore(corpus / "stores" / "tone")
-    assert version.config_hash == config.config_hash
-    assert version.data_snapshot_ids == (store.manifest().signal_sha256,)
-    assert version.provenance_digest
+    # Lineage is MLflow tags now, which is where it was always stored -- the deleted
+    # typed mirror only restated them.
+    assert version.tags["dsio.config_hash"] == config.config_hash
+    assert version.tags["dsio.data_snapshot_id"] == store.manifest().signal_sha256
+    assert version.tags["dsio.seed"] == str(config.seed)
     written = json.loads((active.artifacts_dir / "encoder.json").read_text())
-    assert written["digest"] == version.digest
+    assert written["digest"] == version.tags["dsio.digest"]
 
 
 def test_the_online_probe_runs_during_pretraining(corpus: Path) -> None:
@@ -497,7 +502,11 @@ def downstream_task(root: Path, encoder: EncoderRef | None) -> TorchTask:
 def pretrained(corpus: Path) -> EncoderRef:
     run(RunConfig(name="pre", seed=0, task=pretrain_task(corpus)), corpus)
     version = ModelRegistry().versions("enc_mae")[-1]
-    return EncoderRef(name=version.name, version=version.version, digest=version.digest)
+    return EncoderRef(
+        name=version.name,
+        version=int(version.version),
+        digest=version.tags["dsio.digest"],
+    )
 
 
 def test_a_pinned_encoder_loads_into_a_downstream_run(corpus: Path, pretrained: EncoderRef) -> None:

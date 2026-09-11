@@ -106,8 +106,8 @@ class RunRecord(DsioModel):
         ADR 0003's clean-tree property, unchanged by decision 7: a dirty tree is still
         reproducible as long as its diff was captured (``git.code_hash`` covers both the
         clean and the dirty case -- see ``dsio.runs.provenance.capture_git``), it is just
-        not eligible for *promotion* (``dsio.artifacts.store.promotion_blockers``, a
-        stricter, separate question).
+        not eligible for *promotion*, a stricter and separate question that has no
+        implementation today (see ``docs/adr/0003-never-block-gate-at-promotion.md``).
         """
         return self.git.code_hash is not None and self.env.lock_sha256 is not None
 
