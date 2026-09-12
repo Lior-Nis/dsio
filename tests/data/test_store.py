@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import numpy as np
 import pytest
 
+import dsio.data.views as views
 from dsio.data.adapters import SignalExamples, entity_examples
 from dsio.data.examples import ExamplesError
 from dsio.data.format import (
@@ -272,6 +275,82 @@ def test_index_round_trips(store: SignalStore, tmp_path: Path) -> None:
     assert np.array_equal(restored.starts, index.starts)
     assert restored.spec == index.spec
     assert restored.store_digest == index.store_digest
+    assert not path.with_suffix(".json").exists()
+
+
+def test_interrupted_index_save_publishes_no_cache_entry(
+    store: SignalStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "interrupted.npz"
+    index = build_index(store, WindowSpec(length=500, stride=500))
+    real_replace = views.os.replace
+
+    def interrupt(source: Path, target: Path) -> None:
+        if Path(target) == path:
+            raise OSError("simulated interruption")
+        real_replace(source, target)
+
+    monkeypatch.setattr(views.os, "replace", interrupt)
+
+    with pytest.raises(OSError, match="simulated interruption"):
+        index.save(path)
+
+    assert not path.exists()
+    assert list(tmp_path.glob(f".{path.name}.*.tmp")) == []
+
+
+def test_incomplete_legacy_cache_is_rebuilt(store: SignalStore, tmp_path: Path) -> None:
+    spec = WindowSpec(length=500, stride=500)
+    path = index_path(store, spec, tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        starts=np.array([999], dtype=np.int64),
+        entity_codes=np.array([0], dtype=np.int32),
+    )
+
+    rebuilt = load_or_build(store, spec, root=tmp_path)
+
+    assert 999 not in rebuilt.starts
+    with np.load(path, allow_pickle=False) as data:
+        assert "__metadata__" in data.files
+
+
+def test_corrupt_new_index_cache_fails_closed(store: SignalStore, tmp_path: Path) -> None:
+    spec = WindowSpec(length=500, stride=500)
+    path = index_path(store, spec, tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"not an npz archive")
+
+    with pytest.raises(ViewError, match="cannot load index"):
+        load_or_build(store, spec, root=tmp_path)
+
+
+def test_concurrent_index_saves_publish_one_coherent_archive(
+    store: SignalStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "concurrent.npz"
+    first = build_index(store, WindowSpec(length=500, stride=500))
+    second = build_index(store, WindowSpec(length=500, stride=250))
+    arrivals = Barrier(2, timeout=5)
+    real_replace = views.os.replace
+
+    def publish_together(source: Path, target: Path) -> None:
+        if Path(target) == path:
+            arrivals.wait()
+        real_replace(source, target)
+
+    monkeypatch.setattr(views.os, "replace", publish_together)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(index.save, path) for index in (first, second)]
+        for future in futures:
+            future.result(timeout=10)
+
+    loaded = WindowIndex.load(path)
+    matches_first = loaded.spec == first.spec and np.array_equal(loaded.starts, first.starts)
+    matches_second = loaded.spec == second.spec and np.array_equal(loaded.starts, second.starts)
+    assert matches_first or matches_second
+    assert loaded.store_digest == first.store_digest == second.store_digest
 
 
 def test_index_is_cached_by_spec(store: SignalStore, tmp_path: Path) -> None:
@@ -550,10 +629,12 @@ def test_loading_index_without_store_provenance_fails_clearly(
 ) -> None:
     path = tmp_path / "legacy.npz"
     build_index(store, WindowSpec(length=500, stride=500)).save(path)
-    metadata_path = path.with_suffix(".json")
-    metadata = json.loads(metadata_path.read_text())
+    with np.load(path, allow_pickle=False) as data:
+        arrays = {name: data[name] for name in data.files}
+    metadata = json.loads(arrays["__metadata__"].tobytes().decode())
     metadata.pop("store_digest")
-    metadata_path.write_text(json.dumps(metadata))
+    arrays["__metadata__"] = np.frombuffer(json.dumps(metadata).encode(), dtype=np.uint8)
+    np.savez_compressed(path, **arrays)
 
     with pytest.raises(ViewError, match="store provenance.*rebuild"):
         WindowIndex.load(path)
