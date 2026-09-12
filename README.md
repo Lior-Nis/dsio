@@ -70,9 +70,9 @@ deterministic; index everything cheap and combinatorial.
 
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree
-gate belongs at model-registry promotion: `dsio.artifacts.store.promotion_blockers`
-enforces it today as a policy function with its own tests, ahead of the CLI command
-(`dsio registry promote`) that would call it, which is still aspirational — see
+gate belongs at model-registry promotion, and **is not implemented**: there is no
+`dsio registry promote`, so nothing enforces it. What a run records is enough to decide
+the question later (`RunRecord.reproducible`); deciding it is not wired up. See
 `docs/adr/0003-never-block-gate-at-promotion.md`.
 
 **Correctness is structural.** Leakage walls are import-linter contracts, not review

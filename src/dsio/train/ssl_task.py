@@ -414,23 +414,29 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         # (`run.run_id`): decision 7 makes MLflow's the real, collision-free identity
         # (see `dsio.runs.record`'s module docstring), and this manifest row is exactly
         # the kind of place a stale or colliding label would be misleading.
-        version = ModelRegistry().save(
+        # Provenance goes on as MLflow tags rather than through typed parameters: tags are
+        # where it is stored either way, and nothing reads it back structurally. None-valued
+        # entries are dropped because MLflow tag values must be strings.
+        provenance = {
+            "dsio.config_hash": config.config_hash,
+            "dsio.code_hash": run.record.git.code_hash,
+            "dsio.data_snapshot_id": store.manifest().signal_sha256,
+            "dsio.seed": str(config.seed),
+        }
+        ref = ModelRegistry().save(
             task.register_as,
             payload,
             run_id=run.mlflow_run_id,
-            config_hash=config.config_hash,
-            code_hash=run.record.git.code_hash,
-            data_snapshot_ids=(store.manifest().signal_sha256,),
-            seed=config.seed,
+            tags={k: v for k, v in provenance.items() if v is not None},
         )
         (run.artifacts_dir / "encoder.json").write_text(
-            json.dumps(version.ref.model_dump(mode="json"), indent=2, sort_keys=True)
+            json.dumps(ref.model_dump(mode="json"), indent=2, sort_keys=True)
         )
 
         metrics: dict[str, float] = {
             "train_windows": float(fold.train.size),
             "feature_dim": float(feature_dim),
-            "encoder_version": float(version.version),
+            "encoder_version": float(ref.version),
         }
         logged = trainer.logged_metrics
         for name in ("train/loss_epoch", "train/loss", "val/loss"):
