@@ -64,11 +64,32 @@ name, with labels leaking into a representation that is supposed to be label-fre
 
 ## The encoder handoff
 
-The bug FORGE shipped is now unrepresentable. An encoder is registered in the model
-registry, whose `ModelRef` has no way to express "latest", and a downstream `TorchTask`
-names it by `name`, `version` and `digest`. There is no path to hardcode. The registry
-re-hashes on load and refuses a mismatch, so the remaining risk — a swapped artifact — fails
-closed.
+The bug FORGE shipped is now unrepresentable. An encoder is saved as an artifact of the run
+that produced it, and a downstream `TorchTask` names it by `run_id`, `path` and `digest`.
+There is no path to hardcode. The loader re-hashes on load and refuses a mismatch, so the
+remaining risk — a swapped artifact — fails closed.
+
+### The registry was the wrong phase
+
+Amended 2026-09-12. This originally read "registered in the model registry ... by `name`,
+`version` and `digest`", and used MLflow's Model Registry to do it.
+
+MLflow's Model Registry is a **promotion-time** mechanism: named models, integer versions,
+and aliases like `@champion` so serving can follow "the current model" without a redeploy.
+A pretrained encoder is none of those things — it is an intermediate artifact of a
+two-stage training pipeline that only the next run reads. Nothing serves it, nothing
+aliases it, and `versions()` was called by tests and nothing else. Registering it at save
+time spent a deployment concept on a training detail, and cost a registered model, a
+version row and a scratch experiment to host run-less saves.
+
+`mlflow.register_model(uri, name)` promotes an existing artifact in one call, so this
+forecloses nothing: the registry is deferred to promotion, which is where ADR 0003 already
+says the gate belongs and where aliases and `models:/` URIs are actually the point.
+
+Dropping it also removed a way to be wrong. The registry held the digest a *second* time,
+as a tag, so a load reconciled three things — the reference, the tag, and the bytes — two of
+which could disagree in ways no caller could act on. Now there is the reference and there
+are the bytes.
 
 `freeze` distinguishes the two experiments people conflate: a *probe* measures what the
 representation already contains, a *finetune* measures what it is a good starting point for.
