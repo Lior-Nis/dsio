@@ -20,6 +20,8 @@ from dsio.data.format import (
 )
 from dsio.data.store import Entity, SignalStore, StoreError
 from dsio.data.views import (
+    ViewError,
+    WindowIndex,
     WindowSpec,
     assert_index_matches_store,
     build_index,
@@ -196,11 +198,10 @@ def test_index_round_trips(store: SignalStore, tmp_path: Path) -> None:
     index = build_index(store, WindowSpec(length=400, stride=400))
     path = tmp_path / "idx.npz"
     index.save(path)
-    from dsio.data.views import WindowIndex
-
     restored = WindowIndex.load(path)
     assert np.array_equal(restored.starts, index.starts)
     assert restored.spec == index.spec
+    assert restored.store_digest == index.store_digest
 
 
 def test_index_is_cached_by_spec(store: SignalStore, tmp_path: Path) -> None:
@@ -414,6 +415,80 @@ def test_index_built_for_a_different_store_is_rejected(
         assert_index_matches_store(store, index)
 
 
+def test_same_named_store_with_different_signal_is_rejected(tmp_path: Path) -> None:
+    first_path = tmp_path / "first" / "same"
+    with SignalStore.builder(first_path, channels=1) as builder:
+        builder.add("item", np.zeros((8, 1), dtype=np.float32), group="group")
+    second_path = tmp_path / "second" / "same"
+    with SignalStore.builder(second_path, channels=1) as builder:
+        builder.add("item", np.ones((8, 1), dtype=np.float32), group="group")
+
+    index = build_index(SignalStore(first_path), WindowSpec(length=4, stride=4))
+    with pytest.raises(ViewError, match="content"):
+        assert_index_matches_store(SignalStore(second_path), index)
+
+
+def test_store_entity_metadata_is_part_of_index_compatibility(tmp_path: Path) -> None:
+    signal = np.zeros((8, 1), dtype=np.float32)
+    first_path = tmp_path / "first" / "same"
+    with SignalStore.builder(first_path, channels=1) as builder:
+        builder.add("original", signal, group="first")
+    second_path = tmp_path / "second" / "same"
+    with SignalStore.builder(second_path, channels=1) as builder:
+        builder.add("renamed", signal, group="second")
+
+    first = SignalStore(first_path)
+    second = SignalStore(second_path)
+    assert first.manifest().signal_sha256 == second.manifest().signal_sha256
+    assert first.manifest().index_sha256 == second.manifest().index_sha256
+
+    index = build_index(first, WindowSpec(length=4, stride=4))
+    with pytest.raises(ViewError, match="content"):
+        assert_index_matches_store(second, index)
+
+
+def test_index_remains_compatible_when_its_store_moves(tmp_path: Path) -> None:
+    original = tmp_path / "original"
+    with SignalStore.builder(original, channels=1) as builder:
+        builder.add("item", np.zeros((8, 1), dtype=np.float32), group="group")
+    index = build_index(SignalStore(original), WindowSpec(length=4, stride=4))
+
+    moved = tmp_path / "renamed"
+    original.rename(moved)
+    assert_index_matches_store(SignalStore(moved), index)
+
+
+def test_cache_hit_validates_the_index_store_binding(tmp_path: Path) -> None:
+    expected_path = tmp_path / "expected"
+    with SignalStore.builder(expected_path, channels=1) as builder:
+        builder.add("item", np.zeros((8, 1), dtype=np.float32), group="group")
+    foreign_path = tmp_path / "foreign"
+    with SignalStore.builder(foreign_path, channels=1) as builder:
+        builder.add("item", np.ones((8, 1), dtype=np.float32), group="group")
+
+    expected_store = SignalStore(expected_path)
+    spec = WindowSpec(length=4, stride=4)
+    cache_path = index_path(expected_store, spec, tmp_path / "views")
+    build_index(SignalStore(foreign_path), spec).save(cache_path)
+
+    with pytest.raises(ViewError, match="content"):
+        load_or_build(expected_store, spec, root=tmp_path / "views")
+
+
+def test_loading_index_without_store_provenance_fails_clearly(
+    store: SignalStore, tmp_path: Path
+) -> None:
+    path = tmp_path / "legacy.npz"
+    build_index(store, WindowSpec(length=500, stride=500)).save(path)
+    metadata_path = path.with_suffix(".json")
+    metadata = json.loads(metadata_path.read_text())
+    metadata.pop("store_digest")
+    metadata_path.write_text(json.dumps(metadata))
+
+    with pytest.raises(ViewError, match="store provenance.*rebuild"):
+        WindowIndex.load(path)
+
+
 def test_signal_examples_rejects_a_foreign_index(store: SignalStore, tmp_path: Path) -> None:
     """SignalExamples calls the same guard, but must keep raising its own exception type --
 
@@ -435,6 +510,7 @@ def test_subset_keeps_arrays_aligned(store: SignalStore) -> None:
     assert len(subset) == int(mask.sum())
     assert set(subset.groups.tolist()) == {"p1"}
     assert np.array_equal(subset.starts, index.starts[mask])
+    assert subset.store_digest == index.store_digest
 
 
 def test_windows_shorter_than_an_entity_are_skipped_only_when_asked(tmp_path: Path) -> None:

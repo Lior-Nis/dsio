@@ -49,6 +49,16 @@ MAX_NAMED_ENTITIES = 5
 """How many lost entities a refusal lists by name before summarising the rest."""
 
 
+def _store_identity(store: SignalStore) -> dict[str, str]:
+    """Committed files that define how a store is read and partitioned."""
+    manifest = store.manifest()
+    return {
+        "signal": manifest.signal_sha256,
+        "index": manifest.index_sha256,
+        "entities": manifest.entities_sha256,
+    }
+
+
 class ViewError(ValueError):
     """Raised when a view cannot be built as asked, or would quietly not be what it claims.
 
@@ -122,6 +132,7 @@ class WindowIndex:
         entity_groups: Sequence[str],
         spec: WindowSpec,
         store_name: str,
+        store_digest: str,
         labels: np.ndarray | None = None,
         metrics: dict[str, np.ndarray] | None = None,
     ) -> None:
@@ -131,6 +142,7 @@ class WindowIndex:
         self.entity_groups = list(entity_groups)
         self.spec = spec
         self.store_name = store_name
+        self.store_digest = store_digest
         self.labels = labels
         self.metrics = dict(metrics or {})
         if self.starts.size != self.entity_codes.size:
@@ -172,6 +184,7 @@ class WindowIndex:
             entity_groups=self.entity_groups,
             spec=self.spec,
             store_name=self.store_name,
+            store_digest=self.store_digest,
             labels=None if self.labels is None else self.labels[mask],
             metrics={name: values[mask] for name, values in self.metrics.items()},
         )
@@ -199,6 +212,7 @@ class WindowIndex:
             json.dumps(
                 {
                     "store": self.store_name,
+                    "store_digest": self.store_digest,
                     "spec": self.spec.model_dump(mode="json"),
                     "entity_names": self.entity_names,
                     "entity_groups": self.entity_groups,
@@ -211,6 +225,8 @@ class WindowIndex:
     @classmethod
     def load(cls, path: Path) -> WindowIndex:
         meta = json.loads(path.with_suffix(".json").read_text())
+        if "store_digest" not in meta:
+            raise ViewError(f"index {path} has no store provenance; rebuild it")
         with np.load(path, allow_pickle=False) as data:
             return cls(
                 starts=data["starts"],
@@ -225,6 +241,7 @@ class WindowIndex:
                 },
                 spec=WindowSpec.model_validate(meta["spec"]),
                 store_name=meta["store"],
+                store_digest=meta["store_digest"],
             )
 
     def __repr__(self) -> str:
@@ -244,9 +261,12 @@ def assert_index_matches_store(store: SignalStore, index: WindowIndex) -> None:
     so anything that turns an index and a store into windows -- torch-facing or not -- can
     call it instead of repeating the comparison.
     """
-    if index.store_name != store.path.name:
+    store_digest = sha256_of(_store_identity(store))
+    if index.store_digest != store_digest:
         raise ViewError(
-            f"index was built for store {index.store_name!r}, not {store.path.name!r}"
+            f"index was built for store {index.store_name!r} with content "
+            f"{index.store_digest[:12]}, not store {store.path.name!r} with content "
+            f"{store_digest[:12]}"
         )
 
 
@@ -619,6 +639,7 @@ def build_index(
         entity_groups=entity_groups,
         spec=spec,
         store_name=store.path.name,
+        store_digest=sha256_of(_store_identity(store)),
         labels=None if window_labels is None else window_labels[keep],
         metrics={name: values[keep] for name, values in window_metrics.items()},
     )
@@ -727,15 +748,10 @@ def _index_cache_identity(
     row_metrics: dict[str, np.ndarray],
 ) -> str:
     """Full content identity for one logically distinct cached index."""
-    manifest = store.manifest()
     return sha256_of(
         {
-            "algorithm": "window-index:v2",
-            "store": {
-                "signal": manifest.signal_sha256,
-                "index": manifest.index_sha256,
-                "entities": manifest.entities_sha256,
-            },
+            "algorithm": "window-index:v3",
+            "store": _store_identity(store),
             "spec": spec.model_dump(mode="json"),
             "inputs": {
                 "dense_mask": _array_identity(dense_mask),
@@ -832,6 +848,7 @@ def load_or_build(
     if path.is_file():
         _refuse_dropped_entities(store, spec, on_dropped_entities)
         cached = WindowIndex.load(path)
+        assert_index_matches_store(store, cached)
         if one_window_per_entity:
             _refuse_multi_window_entities(cached, store)
         return cached
