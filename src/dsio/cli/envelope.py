@@ -20,13 +20,13 @@ from typing import Any, TypeVar
 
 from pydantic import ValidationError
 
-from dsio.artifacts.store import RegistryIntegrityError
 from dsio.config.overrides import OverrideError
 from dsio.config.registry import DuplicateComponentError, UnknownComponentError
 from dsio.data.staging import StagingError
 from dsio.data.store import StoreError
 from dsio.eval.contract import EvalError
 from dsio.splits.models import SplitError
+from dsio.train.artifacts import ArtifactIntegrityError
 
 T = TypeVar("T")
 
@@ -89,7 +89,7 @@ _CODES: list[tuple[type[BaseException], ErrorCode, bool]] = [
     # Integrity is its own code because a caller must be able to tell "your bytes changed"
     # from "dsio has a bug". The first is actionable — restore the store, regenerate the
     # split — and the second is a bug report.
-    (RegistryIntegrityError, ErrorCode.INTEGRITY, False),
+    (ArtifactIntegrityError, ErrorCode.INTEGRITY, False),
     (StoreError, ErrorCode.INTEGRITY, False),
     (StagingError, ErrorCode.INTEGRITY, False),
     # Leakage is separated from ordinary invalid input because it is the one failure class

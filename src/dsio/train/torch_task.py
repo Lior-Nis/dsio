@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from pydantic import Field, model_validator
 
-from dsio.artifacts.store import ModelRef, ModelRegistry
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.contracts import DsioModel, sha256_of
 from dsio.data.adapters import SignalExamples
@@ -52,6 +51,7 @@ from dsio.model.registry import (
     TRANSFORMS,
 )
 from dsio.splits.folds import load_folds, require_fold, split_path
+from dsio.train.artifacts import ArtifactRef, load_artifact
 from dsio.train.runner import preflight, runner
 from dsio.train.tracking import (
     build_mlflow_logger,
@@ -108,10 +108,12 @@ class Component(DsioModel):
 class EncoderRef(DsioModel):
     """A pinned pretrained encoder, plus what to do with it.
 
-    Wraps :class:`~dsio.artifacts.store.ModelRef`, which cannot express "latest". An
-    encoder loaded from a hardcoded absolute path fails on a fresh clone and — worse — a
-    reproduction on the original machine silently picks up whatever has been written there
-    since. A name, a version and a digest cannot do either.
+    Wraps :class:`~dsio.train.artifacts.ArtifactRef`, which names a run, a path inside it
+    and a content digest — nothing that can drift. An encoder loaded from a hardcoded
+    absolute path fails on a fresh clone and — worse — a reproduction on the original
+    machine silently picks up whatever has been written there since. A run id and a digest
+    cannot do either, and unlike a registry name and version there is no second record of
+    the digest that could disagree with the bytes.
 
     ``freeze`` distinguishes the two experiments people conflate: a *probe* measures what
     the representation already contains, while a *finetune* measures what it is a good
@@ -119,8 +121,8 @@ class EncoderRef(DsioModel):
     overstated.
     """
 
-    name: str
-    version: int
+    run_id: str
+    path: str
     digest: str
     freeze: bool = True
     strict: bool = Field(
@@ -128,8 +130,8 @@ class EncoderRef(DsioModel):
         description="Require every encoder weight to load. Off only for deliberate surgery.",
     )
 
-    def as_model_ref(self) -> ModelRef:
-        return ModelRef(name=self.name, version=self.version, digest=self.digest)
+    def as_artifact_ref(self) -> ArtifactRef:
+        return ArtifactRef(run_id=self.run_id, path=self.path, digest=self.digest)
 
 
 class TrainerConfig(DsioModel):
@@ -334,8 +336,8 @@ def load_encoder(
 ) -> dict[str, int]:
     """Load a pinned encoder into a freshly built chain, verifying it first.
 
-    The registry re-hashes the artifact on load and refuses a digest mismatch, so a
-    corrupted or swapped encoder cannot be silently trained on top of. Freezing, when
+    :func:`~dsio.train.artifacts.load_artifact` re-hashes the bytes and refuses a digest
+    mismatch, so a corrupted or swapped encoder cannot be silently trained on top of. Freezing, when
     asked, also puts the backbone in eval mode: a frozen BatchNorm whose running statistics
     keep updating is not frozen, and the difference shows up as a probe that mysteriously
     outperforms its own linear separability.
@@ -344,8 +346,7 @@ def load_encoder(
 
     import torch
 
-    registry = ModelRegistry()
-    payload = registry.load(reference.as_model_ref())
+    payload = load_artifact(reference.as_artifact_ref())
     bundle = torch.load(io.BytesIO(payload), map_location="cpu", weights_only=False)
 
     components: dict[str, Any] = {"backbone": backbone}
@@ -366,7 +367,7 @@ def load_encoder(
 
     if reference.strict and loaded == 0:
         raise ValueError(
-            f"encoder {reference.name}:v{reference.version} contained no weights for the "
+            f"encoder {reference.path} contained no weights for the "
             "configured components; the backbone almost certainly differs from the one "
             "that was pretrained"
         )

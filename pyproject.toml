@@ -149,11 +149,13 @@ root_packages = ["dsio"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-# config/runs/artifacts are leaves. If one grows an upward import, the dependency
-# direction has inverted and every downstream module becomes untestable in isolation.
+# config/runs are leaves. If one grows an upward import, the dependency direction has
+# inverted and every downstream module becomes untestable in isolation. `dsio.artifacts`
+# was the third leaf; it is gone, and the encoder handoff it held now lives beside its
+# only two callers in `dsio.train.artifacts`, which is not a leaf and does not claim to be.
 name = "Foundation modules import no other dsio module"
 type = "independence"
-modules = ["dsio.config", "dsio.runs", "dsio.artifacts"]
+modules = ["dsio.config", "dsio.runs"]
 
 [[tool.importlinter.contracts]]
 # The fold loop and the artifact contract must stay framework-agnostic -- not because
@@ -174,7 +176,7 @@ forbidden_modules = [
     "dsio.model",
     "dsio.train",
     "dsio.runs",
-    "dsio.artifacts",
+
     "dsio.cli",
 ]
 
@@ -204,7 +206,7 @@ source_modules = [
     "dsio.model",
     "dsio.train",
     "dsio.runs",
-    "dsio.artifacts",
+
     "dsio.cli",
 ]
 forbidden_modules = ["dsio.testing"]

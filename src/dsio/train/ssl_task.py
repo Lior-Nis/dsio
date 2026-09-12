@@ -34,7 +34,6 @@ import numpy as np
 from pydantic import Field, model_validator
 from torch.utils.data import DataLoader
 
-from dsio.artifacts.store import ModelRegistry
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
@@ -45,6 +44,7 @@ from dsio.model.masking import MASKS
 from dsio.model.module import DsioModule, export_encoder
 from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
 from dsio.splits.folds import load_folds, require_fold, split_path
+from dsio.train.artifacts import save_artifact
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
 from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional, build_callbacks
@@ -98,7 +98,7 @@ class SslPretrainTask(TaskConfig):
         ),
     )
 
-    register_as: str = Field(description="Name to register the encoder under.")
+    register_as: str = Field(description="Name the encoder artifact is saved under.")
 
     labels: str | None = Field(
         default=None,
@@ -414,21 +414,12 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         # (`run.run_id`): decision 7 makes MLflow's the real, collision-free identity
         # (see `dsio.runs.record`'s module docstring), and this manifest row is exactly
         # the kind of place a stale or colliding label would be misleading.
-        # Provenance goes on as MLflow tags rather than through typed parameters: tags are
-        # where it is stored either way, and nothing reads it back structurally. None-valued
-        # entries are dropped because MLflow tag values must be strings.
-        provenance = {
-            "dsio.config_hash": config.config_hash,
-            "dsio.code_hash": run.record.git.code_hash,
-            "dsio.data_snapshot_id": store.manifest().signal_sha256,
-            "dsio.seed": str(config.seed),
-        }
-        ref = ModelRegistry().save(
-            task.register_as,
-            payload,
-            run_id=run.mlflow_run_id,
-            tags={k: v for k, v in provenance.items() if v is not None},
-        )
+        # The encoder is an artifact of *this* run, not a registered model: nothing serves
+        # it and nothing aliases it, so it lives under the run that produced it and its
+        # lineage is that run's own params and tags rather than a second copy on a registry
+        # entry. Promotion, if it ever happens, is `mlflow.register_model` over this URI.
+        assert run.mlflow_run_id is not None, "stamp_provenance runs first and sets this"
+        ref = save_artifact(payload, run_id=run.mlflow_run_id, name=task.register_as)
         (run.artifacts_dir / "encoder.json").write_text(
             json.dumps(ref.model_dump(mode="json"), indent=2, sort_keys=True)
         )
@@ -436,7 +427,6 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         metrics: dict[str, float] = {
             "train_windows": float(fold.train.size),
             "feature_dim": float(feature_dim),
-            "encoder_version": float(ref.version),
         }
         logged = trainer.logged_metrics
         for name in ("train/loss_epoch", "train/loss", "val/loss"):
@@ -445,7 +435,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         if probe is not None and probe.history:
             for name, value in probe.history[-1].items():
                 metrics[f"probe_{name}"] = float(value)
-        # `train_windows`, `feature_dim` and `encoder_version` are computed here, not
+        # `train_windows` and `feature_dim` are computed here, not
         # inside a `*_step` hook, so nothing during training's own `self.log(...)` calls
         # captured them -- logged explicitly, through the same logger the Trainer
         # streamed epoch metrics to, so they land in the same MLflow run as everything

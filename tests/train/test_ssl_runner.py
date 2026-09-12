@@ -9,7 +9,6 @@ scaffolding — ``SslPretrainTask`` itself has no ``method`` field any more.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,6 @@ pytest.importorskip("torch")
 pytest.importorskip("lightning")
 pytest.importorskip("sklearn")
 
-from dsio.artifacts.store import ModelRegistry  # noqa: E402
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
@@ -28,6 +26,7 @@ from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
 from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
+from dsio.train.artifacts import ArtifactRef, load_artifact  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
@@ -191,14 +190,13 @@ def test_every_method_pretrains_and_registers_an_encoder(method: str, corpus: Pa
 
     assert metrics["feature_dim"] == 16.0
     assert metrics["train_windows"] > 0
-    version = ModelRegistry().versions(f"enc_{method}")[-1]
-    # `run_id` cites MLflow's own run id, not dsio's human-readable label -- see
-    # `run_ssl_pretrain`'s comment on the same field in `dsio.train.ssl_task`.
-    assert version.run_id == active.mlflow_run_id
-    # The encoder is loadable by the reference that run wrote, which is the property the
-    # deleted `size_bytes` mirror was standing in for.
-    registry = ModelRegistry()
-    assert registry.load(registry.ref_for(f"enc_{method}", int(version.version)))
+    # `encoder.json` is the handoff, so it is what gets read back -- not a registry
+    # listing, which was a second index over the same bytes.
+    ref = ArtifactRef.model_validate_json((active.artifacts_dir / "encoder.json").read_text())
+    # The artifact belongs to this run: MLflow's own run id, not dsio's human-readable
+    # label -- see `run_ssl_pretrain`'s comment on the same field in `dsio.train.ssl_task`.
+    assert ref.run_id == active.mlflow_run_id
+    assert load_artifact(ref)
 
 
 @pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
@@ -278,15 +276,21 @@ def test_the_encoder_records_its_lineage(corpus: Path) -> None:
     """Two models with identical bytes but different training data are different models."""
     config = RunConfig(name="pre", seed=0, task=pretrain_task(corpus))
     active, _ = run(config, corpus)
-    version = ModelRegistry().versions("enc_mae")[-1]
-    store = SignalStore(corpus / "stores" / "tone")
-    # Lineage is MLflow tags now, which is where it was always stored -- the deleted
-    # typed mirror only restated them.
-    assert version.tags["dsio.config_hash"] == config.config_hash
-    assert version.tags["dsio.data_snapshot_id"] == store.manifest().signal_sha256
-    assert version.tags["dsio.seed"] == str(config.seed)
-    written = json.loads((active.artifacts_dir / "encoder.json").read_text())
-    assert written["digest"] == version.tags["dsio.digest"]
+    ref = ArtifactRef.model_validate_json((active.artifacts_dir / "encoder.json").read_text())
+
+    # The encoder's lineage is its hosting run's provenance, not a second copy of it on a
+    # registry entry: the run that produced these bytes already carries `config_hash` as a
+    # tag and the whole resolved config as params (`dsio.train.tracking.stamp_provenance`).
+    # Anchoring the artifact to that run is what makes the lineage one record instead of
+    # two that can disagree.
+    from mlflow.tracking import MlflowClient
+
+    from dsio.train.tracking import resolve_tracking_uri
+
+    hosting = MlflowClient(tracking_uri=resolve_tracking_uri()).get_run(ref.run_id)
+    assert hosting.data.tags["config_hash"] == config.config_hash
+    assert hosting.data.params["seed"] == str(config.seed)
+    assert load_artifact(ref) , "the digest in encoder.json must match the stored bytes"
 
 
 def test_the_online_probe_runs_during_pretraining(corpus: Path) -> None:
@@ -500,13 +504,11 @@ def downstream_task(root: Path, encoder: EncoderRef | None) -> TorchTask:
 
 @pytest.fixture
 def pretrained(corpus: Path) -> EncoderRef:
-    run(RunConfig(name="pre", seed=0, task=pretrain_task(corpus)), corpus)
-    version = ModelRegistry().versions("enc_mae")[-1]
-    return EncoderRef(
-        name=version.name,
-        version=int(version.version),
-        digest=version.tags["dsio.digest"],
+    active, _ = run(RunConfig(name="pre", seed=0, task=pretrain_task(corpus)), corpus)
+    ref = ArtifactRef.model_validate_json(
+        (active.artifacts_dir / "encoder.json").read_text()
     )
+    return EncoderRef(run_id=ref.run_id, path=ref.path, digest=ref.digest)
 
 
 def test_a_pinned_encoder_loads_into_a_downstream_run(corpus: Path, pretrained: EncoderRef) -> None:
@@ -529,12 +531,17 @@ def test_a_tampered_digest_fails_closed(corpus: Path, pretrained: EncoderRef) ->
         load_encoder(wrong, backbone=backbone)
 
 
-def test_there_is_no_way_to_ask_for_latest(pretrained: EncoderRef) -> None:
+def test_there_is_nothing_in_a_reference_that_can_drift(pretrained: EncoderRef) -> None:
     """Resolving a moving alias at load time is how a reproduction silently becomes a
-    different experiment. A hardcoded path is the same failure with worse ergonomics."""
-    assert isinstance(pretrained.version, int)
-    with pytest.raises(Exception):
-        EncoderRef(name="enc_mae", version="latest", digest=pretrained.digest)  # type: ignore[arg-type]
+    different experiment. A hardcoded path is the same failure with worse ergonomics.
+
+    A run id, an artifact path and a content digest are all immutable by construction --
+    there is no name to rebind, no version to bump and no alias to move, so "latest" is
+    not expressible rather than merely discouraged.
+    """
+    assert set(EncoderRef.model_fields) >= {"run_id", "path", "digest"}
+    assert "version" not in EncoderRef.model_fields
+    assert "name" not in EncoderRef.model_fields
 
 
 def test_freezing_actually_freezes(corpus: Path, pretrained: EncoderRef) -> None:

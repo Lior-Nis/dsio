@@ -13,7 +13,11 @@ into both runners — model logging stays `dsio.artifacts.store.ModelRegistry`'s
 has the fail-closed policy MLflow's own model logging does not. `runs/` (`dsio.runs.
 record`) is reduced to the provenance stamper; `artifacts/` (`dsio.artifacts.store`) is
 reduced to digest-on-save, verify-on-load and fail-closed-on-mismatch over MLflow's Model
-Registry. The nightly backup shipped as `ops/backup-mlflow.sh` plus a systemd service and
+Registry. **Amended 2026-09-12: MLflow's Model Registry is no longer used at all, and
+`dsio.artifacts` is deleted — see "The registry was the wrong phase" at the end of ADR
+0011.** Digest-on-save and verify-on-load survive unchanged in
+`dsio.train.artifacts`; what is gone is the registered model, the version row and the
+scratch experiment they needed. The nightly backup shipped as `ops/backup-mlflow.sh` plus a systemd service and
 timer, push-only (`rclone copy`, never `sync`), capturing both the Postgres dump and the
 `mlartifacts` volume — since Postgres holds artifact URIs, restoring the database alone
 yields an index pointing at files that no longer exist.
