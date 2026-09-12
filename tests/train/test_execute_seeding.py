@@ -90,8 +90,7 @@ def _run_once(config: RunConfig, runs_root: Path) -> dict[str, float]:
         seed=config.seed,
         root=runs_root,
     )
-    with run:
-        return execute(config, run)
+    return execute(config, run)
 
 
 @pytest.fixture(autouse=True)
