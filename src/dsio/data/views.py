@@ -33,8 +33,8 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import Field, model_validator
 
-from dsio.contracts import DsioModel, short_digest
-from dsio.contracts.hashing import DIGEST_PREFIX_LEN, sha256_of_bytes
+from dsio.contracts import DsioModel, sha256_of, short_digest
+from dsio.contracts.hashing import sha256_of_bytes
 from dsio.data.store import Entity, SignalStore, StoreError
 
 VIEWS_DIRNAME = "views"
@@ -684,23 +684,88 @@ def _derive_labels(labels: np.ndarray, starts: np.ndarray, spec: WindowSpec) -> 
     return out
 
 
-def _labels_digest(labels: np.ndarray | None) -> str:
-    """Short digest of a labels array, folded into the index cache key.
+def _normalise_index_inputs(
+    spec: WindowSpec,
+    dense_mask: np.ndarray | None,
+    labels: np.ndarray | None,
+    row_metrics: dict[str, np.ndarray] | None,
+) -> tuple[np.ndarray | None, np.ndarray | None, dict[str, np.ndarray]]:
+    """Own one semantic snapshot of every runtime input that changes an index."""
+    normalised_mask = (
+        None
+        if dense_mask is None or spec.dense_stride is None
+        else np.array(dense_mask, dtype=bool, order="C", copy=True)
+    )
+    normalised_labels = (
+        None
+        if labels is None or spec.label_policy == "none"
+        else np.array(labels, dtype=bool, order="C", copy=True)
+    )
+    normalised_metrics = {
+        name: np.array(values, dtype=np.float64, order="C", copy=True)
+        for name, values in sorted((row_metrics or {}).items())
+    }
+    return normalised_mask, normalised_labels, normalised_metrics
 
-    ``load_or_build`` bakes whatever ``labels=`` array the caller passed into the cached
-    index -- `run_torch` derives every ``y_true`` from ``index.labels``. Without this, two
-    calls against the same store and the same `WindowSpec` that differ only in which label
-    provider they used would collide on one cache file, and whichever call built it first
-    would silently win: `task.labels` is part of the config hash, so provenance would state
-    the second label provider while the computation used the first. `WindowSpec.digest`
-    cannot catch this on its own -- labels are not part of the spec, they are supplied at
-    call time.
-    """
-    if labels is None:
-        return "none"
-    array = np.asarray(labels)
-    payload = array.tobytes() + f"|{array.dtype!s}|{array.shape!r}".encode()
-    return sha256_of_bytes(payload)[:DIGEST_PREFIX_LEN]
+
+def _array_identity(values: np.ndarray | None) -> dict[str, Any] | None:
+    if values is None:
+        return None
+    return {
+        "dtype": values.dtype.str,
+        "shape": [int(size) for size in values.shape],
+        "sha256": sha256_of_bytes(values.tobytes(order="C")),
+    }
+
+
+def _index_cache_identity(
+    store: SignalStore,
+    spec: WindowSpec,
+    *,
+    dense_mask: np.ndarray | None,
+    labels: np.ndarray | None,
+    row_metrics: dict[str, np.ndarray],
+) -> str:
+    """Full content identity for one logically distinct cached index."""
+    manifest = store.manifest()
+    return sha256_of(
+        {
+            "algorithm": "window-index:v2",
+            "store": {
+                "signal": manifest.signal_sha256,
+                "index": manifest.index_sha256,
+                "entities": manifest.entities_sha256,
+            },
+            "spec": spec.model_dump(mode="json"),
+            "inputs": {
+                "dense_mask": _array_identity(dense_mask),
+                "labels": _array_identity(labels),
+                "row_metrics": {
+                    name: _array_identity(values) for name, values in row_metrics.items()
+                },
+            },
+        }
+    )
+
+
+def _index_path_for_inputs(
+    store: SignalStore,
+    spec: WindowSpec,
+    root: Path | None,
+    *,
+    dense_mask: np.ndarray | None,
+    labels: np.ndarray | None,
+    row_metrics: dict[str, np.ndarray],
+) -> Path:
+    base = root or store.path.parent.parent / VIEWS_DIRNAME
+    identity = _index_cache_identity(
+        store,
+        spec,
+        dense_mask=dense_mask,
+        labels=labels,
+        row_metrics=row_metrics,
+    )
+    return base / store.path.name / f"{identity}.npz"
 
 
 def index_path(
@@ -708,19 +773,26 @@ def index_path(
     spec: WindowSpec,
     root: Path | None = None,
     *,
+    dense_mask: np.ndarray | None = None,
     labels: np.ndarray | None = None,
+    row_metrics: dict[str, np.ndarray] | None = None,
 ) -> Path:
     """Content-addressed location for a built index.
 
-    Keyed by the spec's own digest plus the store's signal digest and a digest of the
-    labels array -- not the spec digest alone. The store digest means a re-staged corpus at
-    the same path does not silently reuse an index built from different bytes; the labels
-    digest means two calls that differ only in which label provider they passed do not
-    collide on the same cache entry (see :func:`_labels_digest`).
+    The identity covers the complete store, the spec, and every runtime input that changes
+    the logical index. Policy-only validation flags remain outside it.
     """
-    base = root or store.path.parent.parent / VIEWS_DIRNAME
-    signal_digest = store.manifest().signal_sha256[:DIGEST_PREFIX_LEN]
-    return base / store.path.name / f"{spec.digest}-{signal_digest}-{_labels_digest(labels)}.npz"
+    dense_mask, labels, row_metrics = _normalise_index_inputs(
+        spec, dense_mask, labels, row_metrics
+    )
+    return _index_path_for_inputs(
+        store,
+        spec,
+        root,
+        dense_mask=dense_mask,
+        labels=labels,
+        row_metrics=row_metrics,
+    )
 
 
 def load_or_build(
@@ -746,7 +818,17 @@ def load_or_build(
     ``one_window_per_entity`` is checked on both paths for the same reason and, being
     counted from the index itself, needs no re-derivation to check a cached one.
     """
-    path = index_path(store, spec, root, labels=labels)
+    dense_mask, labels, row_metrics = _normalise_index_inputs(
+        spec, dense_mask, labels, row_metrics
+    )
+    path = _index_path_for_inputs(
+        store,
+        spec,
+        root,
+        dense_mask=dense_mask,
+        labels=labels,
+        row_metrics=row_metrics,
+    )
     if path.is_file():
         _refuse_dropped_entities(store, spec, on_dropped_entities)
         cached = WindowIndex.load(path)
