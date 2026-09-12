@@ -661,3 +661,13 @@ def test_a_seeded_collate_varies_with_the_seed() -> None:
     a = TwoViewCollate(_RandomTag(), seed=1)(items)["x"]
     b = TwoViewCollate(_RandomTag(), seed=2)(items)["x"]
     assert not torch.equal(a, b)
+
+
+def test_seeded_collate_distinguishes_batches_with_the_same_row_sum() -> None:
+    first = _items(2)
+    first[0]["row"], first[1]["row"] = 1, 4
+    second = _items(2)
+    second[0]["row"], second[1]["row"] = 2, 3
+
+    collate = TwoViewCollate(_RandomTag(), seed=42)
+    assert not torch.equal(collate(first)["x"], collate(second)["x"])

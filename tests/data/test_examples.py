@@ -6,6 +6,10 @@ all. If any of them needed a store, a window or a tensor, the abstraction would 
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
@@ -88,6 +92,22 @@ def test_group_attribute_refuses_a_categorical_that_varies_within_a_group() -> N
     )
     with pytest.raises(ExamplesError, match="must be constant per group"):
         group_attribute(mixed, "site")
+
+
+def test_categorical_report_number_is_stable_across_processes() -> None:
+    command = (
+        "from dsio.data.examples import _as_number; "
+        "print(_as_number('categorical-site'))"
+    )
+    values = [
+        subprocess.check_output(
+            [sys.executable, "-c", command],
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        ).strip()
+        for seed in ("1", "2")
+    ]
+    assert values[0] == values[1]
 
 
 # --- subsetting ---------------------------------------------------------------------------

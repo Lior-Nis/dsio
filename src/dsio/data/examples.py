@@ -153,7 +153,8 @@ def _as_number(value: object) -> float:
     except (TypeError, ValueError):
         # Categorical levels are hashed to a stable number only for reporting; the
         # stratifier keys on the raw value, so collisions here cannot affect a split.
-        return float(abs(hash(value)) % (2**31))
+        digest = sha256_of_bytes(str(value).encode("utf-8"))
+        return float(int(digest[:8], 16) % (2**31))
 
 
 def check(examples: object) -> Examples:
