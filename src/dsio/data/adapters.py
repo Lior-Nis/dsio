@@ -153,10 +153,7 @@ class SignalExamples:
         backwards — and would silently invalidate a published split whenever anyone tried a
         different stride.
         """
-        try:
-            return str(self.store.manifest().signal_sha256[:16])
-        except Exception:  # noqa: BLE001 - a store without a manifest is still splittable
-            return "nomanifest"
+        return str(self.store.manifest().signal_sha256[:16])
 
     @property
     def derivation(self) -> str:
@@ -241,10 +238,7 @@ def entity_examples(store: Any) -> TableExamples:
     """
     entities = list(store.entities)
     names = sorted({key for entity in entities for key in entity.attrs})
-    try:
-        digest = store.manifest().signal_sha256[:16]
-    except Exception:  # noqa: BLE001 - a store without a manifest is still splittable
-        digest = None
+    digest = store.manifest().signal_sha256[:16]
     return TableExamples(
         name=str(store.path.name),
         groups=[entity.group for entity in entities],
