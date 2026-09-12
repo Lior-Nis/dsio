@@ -66,7 +66,8 @@ def _require_score(y_score: np.ndarray | None, name: str) -> np.ndarray:
     if y_score is None:
         raise MetricError(
             f"{name} needs continuous scores, but the runner produced only hard "
-            f"predictions; return y_score from fit_predict or drop {name} from metrics"
+            f"predictions; provide y_score in the prediction artifact or drop {name} "
+            "from metrics"
         )
     score = np.asarray(y_score, dtype=np.float64)
     if score.ndim == 2:

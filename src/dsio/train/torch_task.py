@@ -19,9 +19,8 @@ six stray ``checkpoints/checkpoint-epoch=NN-metrics/`` *directories*, because th
 inside the format field became a path separator.
 
 **Checkpoints close over their lineage.** A checkpoint that reloads its encoder from a
-hardcoded path fails on a fresh clone. An encoder here is named by run id and digest,
-resolved through the model registry (``dsio.artifacts.store.ModelRegistry``), and
-verified on load.
+hardcoded path fails on a fresh clone. An encoder here is identified by its MLflow run,
+artifact path and digest, and verified on load.
 """
 
 from __future__ import annotations
@@ -182,7 +181,7 @@ class TorchTask(TaskConfig):
 
     encoder: EncoderRef | None = Field(
         default=None,
-        description="A pretrained encoder to start from, pinned by name, version and digest.",
+        description="A pretrained encoder pinned by MLflow run, artifact path and digest.",
     )
 
     lr: float = Field(default=1e-3, gt=0.0)
@@ -199,17 +198,6 @@ class TorchTask(TaskConfig):
     )
     metrics: tuple[str, ...] = ("accuracy", "f1_macro")
 
-    predict: Literal["prediction", "embedding"] = Field(
-        default="prediction",
-        description=(
-            "What the module's predict_step returns when run_torch calls trainer.predict: "
-            "the head's own output ('prediction', the only value _assemble below can "
-            "score) or raw backbone features ('embedding'). This is the field "
-            "SslPretrainTask used to carry, on the task whose runner never calls "
-            "trainer.predict at all -- this runner does, below."
-        ),
-    )
-
     @model_validator(mode="after")
     def _check(self) -> TorchTask:
         if not self.metrics:
@@ -221,14 +209,6 @@ class TorchTask(TaskConfig):
             raise ValueError(
                 "a supervised torch run needs window labels, but the window spec's "
                 "label_policy is 'none'; set 'any', 'majority' or 'ratio'"
-            )
-        if self.predict != "prediction":
-            raise ValueError(
-                f"predict={self.predict!r} is not supported here: run_torch always scores "
-                "metrics from the head's own (prediction, score) output, not raw "
-                "embeddings. An embedding-producing "
-                "encoder is what SslPretrainTask registers via register_as; a TorchTask "
-                "built with `encoder=` loads one, it does not export one."
             )
         return self
 
@@ -301,7 +281,6 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
         preprocessor=_optional(task.preprocessor, PREPROCESSORS),
         lr=task.lr,
         weight_decay=task.weight_decay,
-        predict=task.predict,
     )
 
 
@@ -627,7 +606,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         # that looks merely disappointing rather than wrong.
         if len(result.y_true) != fold.test.size:
             raise EvalError(
-                f"{fold.name}: fit_predict returned {len(result.y_true)} predictions for "
+                f"{fold.name}: the runner returned {len(result.y_true)} predictions for "
                 f"{fold.test.size} test rows; the runner and the fold disagree about what "
                 "was held out"
             )

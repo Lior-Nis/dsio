@@ -2,9 +2,7 @@
 
 Used by a run's local provenance files (``dsio.runs.record``), the data store and the
 splits store. A partially-written provenance file or manifest is worse than a missing one,
-because it looks complete. ``dsio.artifacts.store`` no longer uses this: model artifact
-storage is MLflow's job now (decision 7 of the lean design), and MLflow's own client
-handles the durability of its writes.
+because it looks complete. Model artifacts go through the MLflow client instead.
 """
 
 from __future__ import annotations
