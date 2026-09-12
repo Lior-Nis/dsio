@@ -32,7 +32,7 @@ from typing import Any, Self
 
 import numpy as np
 import yaml
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from dsio.contracts import DsioModel, atomic_write, sha256_of_file
 from dsio.data.format import IndexHeader, read_index, write_index
@@ -351,7 +351,10 @@ class SignalStore:
         path = self.path / MANIFEST_FILE
         if not path.is_file():
             raise StoreError(f"store {self.path.name} has no {MANIFEST_FILE}")
-        return StoreManifest.model_validate(yaml.safe_load(path.read_text()))
+        try:
+            return StoreManifest.model_validate(yaml.safe_load(path.read_text()))
+        except (OSError, UnicodeError, yaml.YAMLError, ValidationError) as exc:
+            raise StoreError(f"cannot read manifest {path}: {exc}") from exc
 
     def verify(self) -> None:
         """Re-hash every file and compare against the manifest, failing closed.

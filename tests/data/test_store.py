@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dsio.data.adapters import SignalExamples
+from dsio.data.adapters import SignalExamples, entity_examples
 from dsio.data.examples import ExamplesError
 from dsio.data.format import (
     FORMAT_VERSION,
@@ -200,6 +200,26 @@ def test_manifest_records_group_count(store: SignalStore) -> None:
     assert manifest.n_entities == 6
     assert manifest.n_groups == 3
     assert manifest.channels == 3
+
+
+def test_adapter_identities_require_a_manifest(store: SignalStore) -> None:
+    examples = SignalExamples(store, build_index(store, WindowSpec(length=500, stride=500)))
+    (store.path / "manifest.yaml").unlink()
+
+    with pytest.raises(StoreError, match="manifest.yaml"):
+        _ = examples.digest
+    with pytest.raises(StoreError, match="manifest.yaml"):
+        entity_examples(store)
+
+
+def test_adapter_identities_reject_a_corrupt_manifest(store: SignalStore) -> None:
+    examples = SignalExamples(store, build_index(store, WindowSpec(length=500, stride=500)))
+    (store.path / "manifest.yaml").write_text("channels: [")
+
+    with pytest.raises(StoreError, match="cannot read manifest"):
+        _ = examples.digest
+    with pytest.raises(StoreError, match="cannot read manifest"):
+        entity_examples(store)
 
 
 def test_store_survives_pickling(store: SignalStore) -> None:
