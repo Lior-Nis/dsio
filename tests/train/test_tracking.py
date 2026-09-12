@@ -90,9 +90,8 @@ def test_a_local_backend_is_accepted_without_touching_the_network(
 
 
 def test_build_mlflow_logger_disables_model_logging(tmp_path: Path) -> None:
-    """``log_model=False`` is the spec's deliberate default (decision 7's table): MLflow's
-    own model logging would duplicate ``dsio.artifacts.store.ModelRegistry``'s
-    digest-on-save / fail-closed-on-load policy layer with a mechanism that has neither.
+    """``log_model=False`` is deliberate: runners upload their selected, digest-addressed
+    artifacts themselves, while automatic model logging would create an unverified copy.
     Fake-backed: a real ``MLFlowLogger`` against a `file:` URI, no server."""
     config = SimpleNamespace(name="probe-experiment")
     run = SimpleNamespace(run_id="run-123")

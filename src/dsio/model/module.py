@@ -39,17 +39,11 @@ costs no second forward pass to get it.
 
 **One `LightningModule`, no paradigm subclass.** A pretraining run and a supervised one are
 both this class: what differs is which backbone/head/loss/transform go into the slots, and
-what the dataset behind the loader hands the ``(x, target)`` pair. There used to be an
-``SslModule`` whose only real differences from this class were its ``predict_step``
-(embedding, not classifying) and which state ``encoder_state`` kept; both are now a plain
-function and a config field instead — see :func:`export_encoder` and the ``predict``
-constructor argument below — because neither needed a subclass, only a different answer to
-"what do I do with the chain's output". Contrastive objectives (SimCLR, VICReg) used to need
-a second subclass, ``ContrastiveModule``, because their loss read the raw batch of windows
-and built its own two views inside ``step()``. Task 6b moved that view-building to
-:class:`~dsio.dataset.dataset.TwoViewCollate`, at collate time, so their loss is an ordinary
+what the dataset behind the loader hands the ``(x, target)`` pair. Contrastive objectives
+(SimCLR, VICReg) build their two views at collate time through
+:class:`~dsio.dataset.dataset.TwoViewCollate`, so their loss is an ordinary
 ``(prediction, target)`` loss too (:class:`~dsio.model.components.NTXent`,
-:class:`~dsio.model.components.VICReg`) and needs no override of its own.
+:class:`~dsio.model.components.VICReg`) and needs no module subclass.
 """
 
 from __future__ import annotations
@@ -86,15 +80,11 @@ class DsioModule(LightningModule):
         lr: float = 1e-3,
         weight_decay: float = 0.0,
         target_key: str = "y",
-        predict: Literal["prediction", "embedding"] = "prediction",
     ) -> None:
         super().__init__()
         for name, component in (("backbone", backbone), ("head", head), ("loss", loss)):
             if component is None:
                 raise ComponentError(f"{name} is required and may not be None")
-        if predict not in ("prediction", "embedding"):
-            raise ComponentError(f"predict must be 'prediction' or 'embedding', got {predict!r}")
-
         self.transform = transform if transform is not None else nn.Identity()
         self.backbone = backbone
         self.head = head
@@ -104,7 +94,6 @@ class DsioModule(LightningModule):
         self.lr = lr
         self.weight_decay = weight_decay
         self.target_key = target_key
-        self.predict = predict
         self.save_hyperparameters(ignore=["backbone", "head", "loss", "transform", "preprocessor"])
 
     # --- the chain --------------------------------------------------------------
@@ -112,9 +101,9 @@ class DsioModule(LightningModule):
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """Run the chain up to and including the backbone, returning features.
 
-        Separate from :meth:`forward` because this is what SSL pretraining hands to a
-        downstream probe, and what an embedding-extraction stage caches. A head is a task's
-        opinion about features; the features themselves outlive it.
+        Separate from :meth:`forward` because SSL callbacks inspect backbone features and
+        pretrained runs export them for downstream tasks. A head is a task's opinion about
+        features; the features themselves outlive it.
         """
         if self.preprocessor is not None:
             x = self.preprocessor(x)
@@ -163,16 +152,7 @@ class DsioModule(LightningModule):
         Returning bare logits would make alignment a property of DataLoader ordering, which
         is true today and silently untrue the moment anyone shuffles a prediction loader or
         uses a sampler. Carrying the position makes it checkable instead.
-
-        ``predict="embedding"`` stops at :meth:`encode`, before ``head``: for a pretrained
-        module the head is the pretext objective's own decoder or projector, which has no
-        meaning to whoever is about to consume the output (see :func:`export_encoder`), so a
-        caller that wants a representation asks for one explicitly rather than the module
-        inferring it from what kind of run built it — the property that used to live on
-        ``SslModule.predict_step`` being a different method than this one.
         """
-        if self.predict == "embedding":
-            return {"row": batch["row"], "embedding": self.encode(batch["x"]).detach()}
         prediction = self(batch["x"])
         return {
             "row": batch["row"],
@@ -195,10 +175,8 @@ def export_encoder(module: DsioModule) -> dict[str, torch.Tensor]:
     the model — the same is true of a contrastive projector, which exists only to give a
     loss a space to compare views in.
 
-    A free function rather than a method: after Task 6b there is only one module class, so
-    "this state is the exportable encoder" is not a fact any one class needs to carry — it
-    is a fact about which slots this function chooses to keep, callable on any
-    :class:`DsioModule` regardless of what trained it.
+    A free function because exportability is a policy about which slots to keep, callable on
+    any :class:`DsioModule` regardless of what trained it.
     """
     state: dict[str, torch.Tensor] = {}
     for name in ("preprocessor", "transform", "backbone"):

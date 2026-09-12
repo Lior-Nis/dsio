@@ -6,15 +6,13 @@ downstream. Scoring it across folds would produce a cross-validated masked-recon
 MSE, which is a number nobody should act on, so this runner writes no ``predictions.npz``
 for :func:`dsio.eval.pool.pool_folds` to find.
 
-What it produces instead is an artifact with a pinned reference. The encoder goes into the
-model registry, whose ``ModelRef`` has no way to express "latest", and a downstream run
-names that ref. A downstream checkpoint that reloads its encoder from a hardcoded path
-fails on a fresh clone and, worse, silently picks up whatever has since been written there;
-neither is expressible when the reference is a name, a version and a digest.
+What it produces instead is an MLflow artifact with a pinned reference. A downstream run
+names the source run, artifact path and content digest. A checkpoint that reloads its
+encoder from a hardcoded path fails on a fresh clone and, worse, silently picks up whatever
+has since been written there; a verified artifact reference can do neither.
 
-**There is no pretext-objective registry any more.** Task 6b deleted ``dsio.ssl.methods``
-and its ``METHODS``/``PretextObjective`` machinery along with ``SslModule`` and
-``ContrastiveModule``: a pretraining run is built from the same pieces a supervised one is
+**There is no pretext-objective registry.** A pretraining run is built from the same pieces
+a supervised one is
 (:class:`~dsio.model.module.DsioModule`, a registered ``backbone``/``head``/``loss``), plus
 exactly one of ``mask`` or ``augmentor`` telling this module which of the two
 training-dataset contracts to build — masked-reconstruction (MAE's shape) or two-view
@@ -175,12 +173,6 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
         transform=_optional(task.transform, TRANSFORMS),
         lr=task.lr,
         weight_decay=task.weight_decay,
-        # No `predict=` here: run_ssl_pretrain (below) only ever calls trainer.fit on
-        # this module, never trainer.predict, so predict_step -- and therefore this
-        # constructor argument -- never executes. That is what made SslPretrainTask's
-        # own `predict` field a knob with no wire behind it; it moved to TorchTask
-        # (torch_task.py), whose fit_predict is the one place trainer.predict actually
-        # runs.
     )
     return module, feature_dim
 

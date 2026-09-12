@@ -8,11 +8,9 @@ reproduce script and whatever a runner writes before it becomes an MLflow artifa
 under the OS temp directory, not a tmp_path pytest cleans up on its own. Pointing it here
 keeps that scratch space contained the same way `stores/` already needs to be.
 
-The same isolation now covers MLflow, and with it the model registry (`dsio.artifacts.
-store.ModelRegistry`, Task 4 of plan 3b): storage is MLflow's now, so pointing
-`MLFLOW_TRACKING_URI` at a tmp_path is what isolates a saved model between tests, the same
-job `DSIO_REGISTRY_ROOT` used to do for the deleted local filesystem registry.
-`dsio.train.tracking.require_mlflow` (Task 2 of plan 3b) makes every torch/ssl_pretrain run
+The same isolation covers MLflow: pointing `MLFLOW_TRACKING_URI` at a tmp_path isolates
+saved artifacts between tests. `dsio.train.tracking.require_mlflow` makes every
+torch/ssl_pretrain run
 fail immediately if MLflow is unreachable, and `uv run --extra cpu pytest` must still pass
 on a machine with nothing running (the plan's "the suite must not need Docker"
 constraint) -- so every test, by default, is pointed at a `file:` tracking URI under its

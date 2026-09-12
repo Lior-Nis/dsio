@@ -119,9 +119,9 @@ _MAX_PARAM_VALUE_LENGTH = 250
 def build_mlflow_logger(config: RunConfig, run: Run, tracking_uri: str) -> MLFlowLogger:
     """The Lightning logger a runner's ``Trainer`` streams ``self.log(...)`` metrics through.
 
-    ``log_model=False`` per the spec's deliberate default: MLflow's own model logging would
-    duplicate ``dsio.artifacts.store.ModelRegistry``'s digest-on-save / fail-closed-on-load
-    policy layer with a mechanism that has neither. ``experiment_name=config.name`` is what
+    ``log_model=False`` because runners upload their explicitly selected, digest-addressed
+    artifacts themselves; automatic model logging would create a second unverified copy.
+    ``experiment_name=config.name`` is what
     makes decision 8's "a shell loop over 5 folds produces 5 runs in one experiment" true
     natively: ``name`` already labels a run and groups seeds (see ``RunConfig.name``), and an
     MLflow experiment is the grouping unit that mirrors it. ``run_name=run.run_id`` ties the

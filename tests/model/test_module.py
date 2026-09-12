@@ -148,44 +148,12 @@ def test_predict_step_reports_the_rows_it_predicted(batch: torch.Tensor) -> None
     """Alignment by identity, not by trusting loader ordering."""
     module = tiny_module().eval()
     rows = torch.tensor([7, 3, 11, 5])
-    out = module.predict_step({"x": batch, "y": torch.zeros(4).long(), "row": rows}, 0)
+    targets = torch.zeros(4).long()
+    out = module.predict_step({"x": batch, "y": targets, "row": rows}, 0)
+    assert set(out) == {"row", "prediction", "y"}
     assert torch.equal(out["row"], rows)
+    assert torch.equal(out["y"], targets)
     assert out["prediction"].shape == (4, 2)
-
-
-# --- predict is a config choice, not a subclass --------------------------------------
-#
-# There used to be a separate SslModule whose only real difference from DsioModule was
-# this: predict_step returned an embedding, not a classification. Task 6b deleted that
-# subclass in favour of a `predict` constructor argument, branched on here instead of on
-# `isinstance`.
-
-
-def test_predict_defaults_to_running_the_whole_chain() -> None:
-    module = tiny_module()
-    assert module.predict == "prediction"
-
-
-def test_predict_embedding_stops_before_the_head(batch: torch.Tensor) -> None:
-    module = tiny_module(predict="embedding").eval()
-    rows = torch.tensor([1, 2, 3, 4])
-    out = module.predict_step({"x": batch, "row": rows}, 0)
-    assert set(out) == {"row", "embedding"}
-    assert torch.equal(out["row"], rows)
-    with torch.no_grad():
-        assert torch.equal(out["embedding"], module.encode(batch))
-
-
-def test_predict_choice_is_recorded_in_hyperparameters() -> None:
-    """"Visible in the recorded config instead of implied by a type": save_hyperparameters
-    is what a checkpoint's hparams and a run's provenance both read."""
-    module = tiny_module(predict="embedding")
-    assert module.hparams["predict"] == "embedding"
-
-
-def test_an_unknown_predict_value_is_rejected() -> None:
-    with pytest.raises(ComponentError, match="predict"):
-        tiny_module(predict="logits")  # type: ignore[arg-type]
 
 
 # --- export_encoder --------------------------------------------------------------------
