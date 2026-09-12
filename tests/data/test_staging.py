@@ -1,8 +1,15 @@
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Barrier, Lock
 
+import numpy as np
 import pytest
 
+import dsio.data.staging as staging
 from dsio.data.staging import StagingError, stage
+from dsio.data.store import SignalStore
 
 
 def test_builds_once_and_skips_on_repeat(tmp_path: Path):
@@ -147,3 +154,37 @@ def test_hashing_the_whole_config_remains_the_default(tmp_path: Path):
     a = stage("w", {"length": 500, "num_workers": 4}, build, root=tmp_path)
     b = stage("w", {"length": 500, "num_workers": 16}, build, root=tmp_path)
     assert a != b
+
+
+def test_concurrent_calls_build_a_stage_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    arrivals = Barrier(2)
+    real_lock = staging._stage_lock
+
+    @contextmanager
+    def arrive_together(target: Path) -> Iterator[None]:
+        arrivals.wait()
+        with real_lock(target):
+            yield
+
+    monkeypatch.setattr(staging, "_stage_lock", arrive_together)
+    builds = 0
+    builds_lock = Lock()
+
+    def build(out: Path) -> None:
+        nonlocal builds
+        with builds_lock:
+            builds += 1
+        with SignalStore.builder(out, channels=1) as builder:
+            builder.add("a", np.zeros((4, 1), dtype="float32"), group="g")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(lambda _: stage("stores", {"id": 1}, build, root=tmp_path), range(2))
+        )
+
+    assert results[0] == results[1]
+    store = SignalStore(results[0])
+    store.verify()
+    assert store.manifest().name == f"{results[0].name}.partial"
+    assert builds == 1
+    assert list(tmp_path.rglob("*.partial")) == []
