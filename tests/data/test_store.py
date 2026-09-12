@@ -230,6 +230,107 @@ def test_index_cache_key_includes_the_labels_array(store: SignalStore, tmp_path:
     assert np.all(built_b.labels == 1)
 
 
+def test_index_cache_key_includes_the_dense_mask(store: SignalStore, tmp_path: Path) -> None:
+    spec = WindowSpec(length=200, stride=200, dense_stride=50)
+    sparse = np.zeros(store.n_rows, dtype=bool)
+    dense = sparse.copy()
+    dense[300:800] = True
+
+    load_or_build(store, spec, dense_mask=sparse, root=tmp_path)
+    cached = load_or_build(store, spec, dense_mask=dense, root=tmp_path)
+    expected = build_index(store, spec, dense_mask=dense)
+
+    assert index_path(store, spec, tmp_path, dense_mask=sparse) != index_path(
+        store, spec, tmp_path, dense_mask=dense
+    )
+    assert np.array_equal(cached.starts, expected.starts)
+    assert np.array_equal(cached.entity_codes, expected.entity_codes)
+
+
+def test_index_cache_key_includes_row_metrics(store: SignalStore, tmp_path: Path) -> None:
+    spec = WindowSpec(length=500, stride=500, min_metrics={"quality": 0.5})
+    low = {"quality": np.zeros(store.n_rows)}
+    high = {"quality": np.ones(store.n_rows)}
+
+    load_or_build(store, spec, row_metrics=low, root=tmp_path)
+    cached = load_or_build(store, spec, row_metrics=high, root=tmp_path)
+    expected = build_index(store, spec, row_metrics=high)
+
+    assert index_path(store, spec, tmp_path, row_metrics=low) != index_path(
+        store, spec, tmp_path, row_metrics=high
+    )
+    assert np.array_equal(cached.starts, expected.starts)
+    assert np.array_equal(cached.metrics["quality"], expected.metrics["quality"])
+
+
+def test_index_cache_identity_is_semantic_and_order_independent(
+    store: SignalStore, tmp_path: Path
+) -> None:
+    spec = WindowSpec(length=500, stride=500, label_policy="any", dense_stride=250)
+    values = np.arange(store.n_rows * 2, dtype=np.float64).reshape(store.n_rows, 2)
+    non_contiguous = values[:, 0]
+    contiguous = non_contiguous.copy()
+    labels = non_contiguous != 0
+    mask = labels.copy()
+
+    first = index_path(
+        store,
+        spec,
+        tmp_path,
+        dense_mask=mask,
+        labels=labels,
+        row_metrics={"second": contiguous, "first": non_contiguous},
+    )
+    second = index_path(
+        store,
+        spec,
+        tmp_path,
+        dense_mask=mask.copy(),
+        labels=labels.copy(),
+        row_metrics={"first": contiguous, "second": non_contiguous.copy()},
+    )
+
+    assert first == second
+
+
+def test_inactive_inputs_do_not_change_the_cache_identity(
+    store: SignalStore, tmp_path: Path
+) -> None:
+    spec = WindowSpec(length=500, stride=500)
+    baseline = index_path(store, spec, tmp_path)
+    with_inactive_inputs = index_path(
+        store,
+        spec,
+        tmp_path,
+        dense_mask=np.ones(store.n_rows, dtype=bool),
+        labels=np.ones(store.n_rows),
+    )
+    assert baseline == with_inactive_inputs
+
+
+def test_index_cache_key_includes_store_topology(tmp_path: Path) -> None:
+    signal = np.arange(8, dtype=np.float32).reshape(8, 1)
+    first_path = tmp_path / "first" / "same"
+    with SignalStore.builder(first_path, channels=1) as builder:
+        builder.add("whole", signal, group="one")
+    second_path = tmp_path / "second" / "same"
+    with SignalStore.builder(second_path, channels=1) as builder:
+        builder.add("left", signal[:4], group="two")
+        builder.add("right", signal[4:], group="two")
+
+    first_store = SignalStore(first_path)
+    second_store = SignalStore(second_path)
+    spec = WindowSpec(length=4, stride=4)
+    root = tmp_path / "views"
+    first = load_or_build(first_store, spec, root=root)
+    second = load_or_build(second_store, spec, root=root)
+
+    assert first_store.manifest().signal_sha256 == second_store.manifest().signal_sha256
+    assert index_path(first_store, spec, root) != index_path(second_store, spec, root)
+    assert first.entity_names == ["whole"]
+    assert second.entity_names == ["left", "right"]
+
+
 def test_dense_stride_oversamples_only_marked_regions(store: SignalStore) -> None:
     """A denser stride over rare regions: more windows there, not more bytes anywhere."""
     mask = np.zeros(store.n_rows, dtype=bool)
