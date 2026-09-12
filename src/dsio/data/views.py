@@ -25,15 +25,18 @@ arithmetic lives, and :func:`build_index` refuses the unambiguous half of it by 
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
+from zipfile import BadZipFile
 
 import numpy as np
 from pydantic import Field, model_validator
 
-from dsio.contracts import DsioModel, sha256_of, short_digest
+from dsio.contracts import DsioModel, fsync_dir, sha256_of, short_digest
 from dsio.contracts.hashing import sha256_of_bytes
 from dsio.data.store import Entity, SignalStore, StoreError
 
@@ -67,6 +70,10 @@ class ViewError(ValueError):
     to re-raise as ``ExamplesError``. Callers that want to distinguish "this store and this
     spec do not fit each other" from any other bad argument now can.
     """
+
+
+class _IncompleteIndexError(ViewError):
+    """An old or interrupted cache entry that is safe to rebuild."""
 
 
 T_START_ATTR = "t_start"
@@ -207,42 +214,72 @@ class WindowIndex:
             arrays["labels"] = self.labels
         for name, values in self.metrics.items():
             arrays[f"metric__{name}"] = values
-        np.savez_compressed(path, **arrays)
-        path.with_suffix(".json").write_text(
-            json.dumps(
-                {
-                    "store": self.store_name,
-                    "store_digest": self.store_digest,
-                    "spec": self.spec.model_dump(mode="json"),
-                    "entity_names": self.entity_names,
-                    "entity_groups": self.entity_groups,
-                },
-                indent=2,
-                sort_keys=True,
-            )
+        metadata = json.dumps(
+            {
+                "store": self.store_name,
+                "store_digest": self.store_digest,
+                "spec": self.spec.model_dump(mode="json"),
+                "entity_names": self.entity_names,
+                "entity_groups": self.entity_groups,
+            },
+            sort_keys=True,
         )
+        arrays["__metadata__"] = np.frombuffer(metadata.encode(), dtype=np.uint8)
+
+        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temporary.open("xb") as handle:
+                np.savez_compressed(handle, **arrays)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            path.with_suffix(".json").unlink(missing_ok=True)
+            fsync_dir(path.parent)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
     @classmethod
     def load(cls, path: Path) -> WindowIndex:
-        meta = json.loads(path.with_suffix(".json").read_text())
-        if "store_digest" not in meta:
-            raise ViewError(f"index {path} has no store provenance; rebuild it")
-        with np.load(path, allow_pickle=False) as data:
-            return cls(
-                starts=data["starts"],
-                entity_codes=data["entity_codes"],
-                entity_names=meta["entity_names"],
-                entity_groups=meta["entity_groups"],
-                labels=data.get("labels"),
-                metrics={
-                    key.removeprefix("metric__"): data[key]
-                    for key in data.files
-                    if key.startswith("metric__")
-                },
-                spec=WindowSpec.model_validate(meta["spec"]),
-                store_name=meta["store"],
-                store_digest=meta["store_digest"],
-            )
+        try:
+            with np.load(path, allow_pickle=False) as data:
+                metadata = data.get("__metadata__")
+                if metadata is None:
+                    raise _IncompleteIndexError(
+                        f"index {path} uses an incomplete legacy cache format; rebuild it"
+                    )
+                if metadata.dtype != np.uint8 or metadata.ndim != 1:
+                    raise ViewError(f"index {path} has invalid embedded metadata")
+                meta = json.loads(metadata.tobytes().decode())
+                if "store_digest" not in meta:
+                    raise ViewError(f"index {path} has no store provenance; rebuild it")
+                return cls(
+                    starts=data["starts"],
+                    entity_codes=data["entity_codes"],
+                    entity_names=meta["entity_names"],
+                    entity_groups=meta["entity_groups"],
+                    labels=data.get("labels"),
+                    metrics={
+                        key.removeprefix("metric__"): data[key]
+                        for key in data.files
+                        if key.startswith("metric__")
+                    },
+                    spec=WindowSpec.model_validate(meta["spec"]),
+                    store_name=meta["store"],
+                    store_digest=meta["store_digest"],
+                )
+        except ViewError:
+            raise
+        except (
+            BadZipFile,
+            EOFError,
+            KeyError,
+            OSError,
+            TypeError,
+            UnicodeError,
+            ValueError,
+        ) as exc:
+            raise ViewError(f"cannot load index {path}: {exc}") from exc
 
     def __repr__(self) -> str:
         return (
@@ -846,12 +883,16 @@ def load_or_build(
         row_metrics=row_metrics,
     )
     if path.is_file():
-        _refuse_dropped_entities(store, spec, on_dropped_entities)
-        cached = WindowIndex.load(path)
-        assert_index_matches_store(store, cached)
-        if one_window_per_entity:
-            _refuse_multi_window_entities(cached, store)
-        return cached
+        try:
+            cached = WindowIndex.load(path)
+        except _IncompleteIndexError:
+            pass
+        else:
+            _refuse_dropped_entities(store, spec, on_dropped_entities)
+            assert_index_matches_store(store, cached)
+            if one_window_per_entity:
+                _refuse_multi_window_entities(cached, store)
+            return cached
     index = build_index(
         store,
         spec,
