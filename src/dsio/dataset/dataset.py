@@ -44,6 +44,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
+from dsio.contracts import sha256_of_bytes
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex, assert_index_matches_store
 from dsio.model.masking import apply_mask
@@ -331,10 +332,10 @@ class TwoViewCollate:
 
     ``seed``, when given, makes the two views a function of the batch's own row
     composition rather than of call order: ``augment`` is called inside
-    ``torch.random.fork_rng``, reseeded with ``seed`` XORed with the *sum* of the
-    batch's row positions, so the same set of rows, batched together, always draws the
-    same two views regardless of the order they arrive in, and the outer (global) RNG
-    stream is left exactly as it was found. That sum is a property of the whole batch,
+    ``torch.random.fork_rng``, reseeded with ``seed`` XORed with a digest of the ordered
+    bytes of the batch's row positions, so the same rows in the same order always draw the
+    same two views, and the outer (global) RNG stream is left exactly as it was found. That
+    digest is a property of the whole batch,
     not of any one row, so the guarantee is coarser than ``WindowDataset``'s
     ``mask_seed``: ``mask_seed`` is derived per item and so is unaffected by anything
     about the rest of the batch, whereas changing which rows share a batch — a
@@ -368,7 +369,8 @@ class TwoViewCollate:
         if self.seed is None:
             with torch.no_grad():
                 return torch.cat([self.augment(x), self.augment(x)], dim=0)
-        derived = self.seed ^ int(row.sum().item())
+        row_bytes = row.detach().cpu().contiguous().numpy().tobytes()
+        derived = self.seed ^ int(sha256_of_bytes(row_bytes)[:16], 16)
         with torch.random.fork_rng(devices=[]), torch.no_grad():
             torch.manual_seed(derived)
             return torch.cat([self.augment(x), self.augment(x)], dim=0)
