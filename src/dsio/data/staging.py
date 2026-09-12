@@ -12,7 +12,8 @@ complete is worse than a missing one, because the next run reuses it.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -51,14 +52,36 @@ def stage(
     if target.exists():
         return target
 
-    partial = target.with_suffix(".partial")
-    try:
-        build(partial)
-    except Exception as exc:
+    with _stage_lock(target):
+        if target.exists():
+            return target
+
+        partial = target.with_suffix(".partial")
         _cleanup_partial(partial)
-        raise StagingError(f"stage {name!r} failed to build: {exc}") from exc
-    partial.replace(target)
-    return target
+        try:
+            build(partial)
+            partial.replace(target)
+        except Exception as exc:
+            _cleanup_partial(partial)
+            raise StagingError(f"stage {name!r} failed to build: {exc}") from exc
+        return target
+
+
+@contextmanager
+def _stage_lock(target: Path) -> Iterator[None]:
+    """Make one process responsible for a target's shared partial at a time.
+
+    The lock file remains in place. Unlinking it would let a new caller lock a different
+    inode while a waiter still holds the old one, creating two simultaneous builders.
+    """
+    try:
+        import fcntl
+    except ModuleNotFoundError as exc:
+        raise StagingError("concurrent-safe staging requires POSIX file locking") from exc
+
+    with target.with_suffix(".lock").open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def _identity_of(

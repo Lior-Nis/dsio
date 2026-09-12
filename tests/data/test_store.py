@@ -128,6 +128,56 @@ def test_duplicate_entity_id_is_rejected(tmp_path: Path) -> None:
         builder.add("a", np.zeros((10, 1), "float32"), group="g")
 
 
+def test_builder_refuses_to_overwrite_a_store_without_changing_it(tmp_path: Path) -> None:
+    path = tmp_path / "existing"
+    with SignalStore.builder(path, channels=1) as builder:
+        builder.add("a", np.arange(10, dtype="float32").reshape(10, 1), group="g")
+    before = {
+        item.relative_to(path): item.read_bytes() for item in path.rglob("*") if item.is_file()
+    }
+
+    with pytest.raises(StoreError, match="not empty"):
+        SignalStore.builder(path, channels=1)
+
+    after = {
+        item.relative_to(path): item.read_bytes() for item in path.rglob("*") if item.is_file()
+    }
+    assert after == before
+
+
+def test_builder_refuses_an_unrelated_non_empty_directory(tmp_path: Path) -> None:
+    path = tmp_path / "occupied"
+    path.mkdir()
+    marker = path / "keep.txt"
+    marker.write_bytes(b"do not touch")
+
+    with pytest.raises(StoreError, match="not empty"):
+        SignalStore.builder(path, channels=1)
+
+    assert list(path.iterdir()) == [marker]
+    assert marker.read_bytes() == b"do not touch"
+
+
+def test_builder_accepts_an_existing_empty_directory(tmp_path: Path) -> None:
+    path = tmp_path / "empty"
+    path.mkdir()
+
+    with SignalStore.builder(path, channels=1) as builder:
+        builder.add("a", np.zeros((4, 1), dtype="float32"), group="g")
+
+    SignalStore(path).verify()
+
+
+def test_competing_builders_cannot_open_the_same_destination(tmp_path: Path) -> None:
+    path = tmp_path / "race"
+    with SignalStore.builder(path, channels=1) as winner:
+        with pytest.raises(StoreError, match="not empty"):
+            SignalStore.builder(path, channels=1)
+        winner.add("a", np.zeros((4, 1), dtype="float32"), group="g")
+
+    SignalStore(path).verify()
+
+
 def test_wrong_channel_count_is_rejected(tmp_path: Path) -> None:
     builder = SignalStore.builder(tmp_path / "bad", channels=3)
     with pytest.raises(StoreError, match="expected \\(n, 3\\)"):

@@ -129,9 +129,16 @@ class SignalStoreBuilder:
         self._offsets: list[int] = [0]
         self._rows = 0
         self.path.mkdir(parents=True, exist_ok=True)
+        if any(self.path.iterdir()):
+            raise StoreError(f"cannot build store at {self.path}: destination is not empty")
         # Held open across many add() calls, so the builder itself is the context
         # manager rather than this handle. Closed in close() and in __exit__.
-        self._signal = open(self.path / SIGNAL_FILE, "wb")  # noqa: SIM115
+        try:
+            self._signal = open(self.path / SIGNAL_FILE, "xb")  # noqa: SIM115
+        except (FileExistsError, IsADirectoryError) as exc:
+            raise StoreError(
+                f"cannot build store at {self.path}: destination is not empty"
+            ) from exc
         self._closed = False
 
     def add(
