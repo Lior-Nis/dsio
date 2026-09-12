@@ -555,8 +555,7 @@ def test_the_runner_produces_the_same_artifact_contract(corpus: Path, tmp_path: 
         config_hash=config.config_hash,
         seed=config.seed,
     )
-    with run:
-        metrics = execute(config, run)
+    metrics = execute(config, run)
 
     assert set(metrics) >= {"accuracy", "roc_auc"}
 
@@ -598,8 +597,7 @@ def test_pool_folds_refuses_folds_trained_under_different_backbones(
             config_hash=config.config_hash,
             seed=config.seed,
         )
-        with run:
-            execute(config, run)
+        execute(config, run)
         run_dirs.append(run.artifacts_dir)
 
     with pytest.raises(Exception, match="config"):
@@ -628,8 +626,7 @@ def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> N
         config_hash=config.config_hash,
         seed=config.seed,
     )
-    with run:
-        metrics = execute(config, run)
+    metrics = execute(config, run)
     assert metrics["roc_auc"] > 0.9
 
 
@@ -667,8 +664,7 @@ def test_running_one_fold_writes_only_that_folds_predictions(
         config_hash=config.config_hash,
         seed=config.seed,
     )
-    with run:
-        execute(config, run)
+    execute(config, run)
 
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)
@@ -693,8 +689,7 @@ def test_the_run_records_which_corpus_it_read(corpus: Path, tmp_path: Path) -> N
         config_hash=config.config_hash,
         seed=config.seed,
     )
-    with run:
-        execute(config, run)
+    execute(config, run)
     payload = json.loads((run.artifacts_dir / "windows.json").read_text())
     store = SignalStore(Path(corpus) / "stores" / "tone")
     assert payload["store_sha256"] == store.manifest().signal_sha256

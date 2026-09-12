@@ -138,8 +138,7 @@ def run(config: RunConfig, root: Path):  # type: ignore[no-untyped-def]
         seed=config.seed,
         root=root / "runs",
     )
-    with active:
-        metrics = execute(config, active)
+    metrics = execute(config, active)
     return active, metrics
 
 

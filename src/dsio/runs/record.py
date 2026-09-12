@@ -46,8 +46,7 @@ import os
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Self
+from typing import Any
 
 import yaml
 from pydantic import Field
@@ -136,15 +135,9 @@ class Run:
     run_ssl_pretrain``) -- ``Run`` itself never talks to MLflow (see the module
     docstring), so this is the one field it does not set.
 
-    Supports ``with run:`` for compatibility with every existing call site, but the
-    context manager does nothing: there is no local state whose correctness depends on
-    exiting the block (no status to flip, no file to close), and deleting the scratch
-    directory on exit would break every caller -- test and CLI alike -- that inspects
-    ``run.artifacts_dir`` after the run completes, which is the ordinary way to look at
-    what a run just wrote. Nothing here cleans the scratch directory up automatically;
-    it lives under the OS temp directory (or ``DSIO_RUNS_ROOT``), not the source tree, so
-    leaving it for the OS's own temp-file hygiene is the same tradeoff every other
-    ``tempfile.mkdtemp()`` caller makes.
+    Nothing here cleans the scratch directory up automatically. It lives under the OS temp
+    directory (or ``DSIO_RUNS_ROOT``), not the source tree, so leaving it for the OS's own
+    temp-file hygiene is the same tradeoff every other ``tempfile.mkdtemp()`` caller makes.
     """
 
     def __init__(self, directory: Path, record: RunRecord) -> None:
@@ -172,17 +165,6 @@ class Run:
         """
         candidates = (self.dir / CONFIG_FILE, self.dir / REPRODUCE_FILE, self.dir / PATCH_FILE)
         return [path for path in candidates if path.is_file()]
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        return None
 
 
 def start_run(

@@ -114,22 +114,7 @@ def test_run_id_is_a_label_not_a_claimed_identity(config: RunConfig) -> None:
     assert run.mlflow_run_id is None, "Run itself never talks to MLflow -- see its docstring"
 
 
-# --- run status: MLflow's job now, not `Run.__exit__`'s ---------------------------------
-
-
-def test_run_exit_no_longer_records_anything(config: RunConfig) -> None:
-    """Replaces ``test_failed_run_is_recorded_not_lost``, which used to assert
-    ``ledger.load(run.run_id).record.status is RunStatus.FAILED`` after an exception
-    propagated out of ``with ledger.start(...) as run: raise ...``. ``Run.__exit__`` is a
-    no-op now (see its docstring): there is no local status field to flip, and MLflow is
-    what is authoritative for status, so recording a failure is not this module's job at
-    all any more -- it belongs to whichever runner built the MLflow run in the first
-    place. The two tests below prove *that* property holds, against a real MLflow run
-    reached through ``execute()``, which is the only path that can ever produce one.
-    """
-    with pytest.raises(RuntimeError), _start(config) as run:
-        raise RuntimeError("boom")
-    assert run.mlflow_run_id is None
+# --- run status: the runner records it in MLflow -----------------------------------------
 
 
 def test_a_successful_run_is_recorded_finished_in_mlflow(config: RunConfig) -> None:
@@ -482,8 +467,8 @@ def test_same_seed_gives_identical_metrics(config: RunConfig) -> None:
         if i == 1:
             torch.rand(97)
             np.random.random(97)
-        with _start(seed_config) as run:
-            results.append(execute(seed_config, run))
+        run = _start(seed_config)
+        results.append(execute(seed_config, run))
     assert results[0] == results[1]
 
 
@@ -515,8 +500,8 @@ def test_different_seed_gives_different_metrics(
     for seed in (1, 999):
         variant = _with_seed_sensitive_metrics(config.model_copy(update={"seed": seed}))
         _reseed_ambient()
-        with _start(variant) as run:
-            outcomes.append(execute(variant, run))
+        run = _start(variant)
+        outcomes.append(execute(variant, run))
     assert outcomes[0] != outcomes[1]
 
 

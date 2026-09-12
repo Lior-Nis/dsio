@@ -58,9 +58,6 @@ if TYPE_CHECKING:
     from dsio.config.schema import RunConfig
     from dsio.runs.record import Run
 
-ENCODER_FILE = "encoder.pt"
-
-
 @TASKS.register("ssl_pretrain")
 class SslPretrainTask(TaskConfig):
     """Pretrain an encoder on unlabelled windows and register it.
