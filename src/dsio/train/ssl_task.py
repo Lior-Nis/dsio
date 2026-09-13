@@ -43,16 +43,20 @@ from dsio.model.module import DsioModule, export_encoder
 from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
 from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.artifacts import save_artifact
+from dsio.train.assembly import (
+    Component,
+    accepted_shape_arguments,
+    build_optional_component,
+)
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
-from dsio.train.torch_task import Component, TrainerConfig, _accepted, _optional, build_callbacks
 from dsio.train.tracking import (
-    build_mlflow_logger,
     finite_metrics,
     log_run_artifacts,
     require_mlflow,
-    stamp_provenance,
+    tracked_run,
 )
+from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 
 if TYPE_CHECKING:
     from dsio.config.schema import RunConfig
@@ -155,19 +159,19 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
     twice.
     """
     factory = BACKBONES.get(task.backbone.name)
-    shape = _accepted(factory, {"channels": channels, "length": length})
+    shape = accepted_shape_arguments(factory, {"channels": channels, "length": length})
     backbone = factory(**{**shape, **task.backbone.params})
     feature_dim = int(getattr(backbone, "out_dim", 0)) or _infer_dim(backbone, channels, length)
 
     head_factory = HEADS.get(task.head.name)
-    head_shape = _accepted(
+    head_shape = accepted_shape_arguments(
         head_factory, {"in_dim": feature_dim, "channels": channels, "length": length}
     )
     module = DsioModule(
         backbone=backbone,
         head=head_factory(**{**head_shape, **task.head.params}),
         loss=LOSSES.get(task.loss.name)(**task.loss.params),
-        transform=_optional(task.transform, TRANSFORMS),
+        transform=build_optional_component(task.transform, TRANSFORMS),
         lr=task.lr,
         weight_decay=task.weight_decay,
     )
@@ -274,34 +278,13 @@ def build_loaders(
 def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
     """Pretrain, probe as it goes, and register the encoder with its lineage."""
     import torch
-    from lightning import Trainer
 
-    # Fails before the store, module or trainer exist -- the same guarantee `check_ssl`
-    # gives the CLI's pre-flight path, reasserted here for any caller (every test in this
-    # module, and any future caller) that reaches `execute()` without going through it.
-    # MLflow first, per decision 7: a run that cannot write to it should not even resolve
-    # a fold first.
-    tracking_uri = require_mlflow()
-
-    task = config.task
-    assert isinstance(task, SslPretrainTask)
-
-    # Created as early as `require_mlflow` allows -- see `run_torch`'s own comment
-    # (`torch_task.py`) for why everything below, *including* `stamp_provenance` itself,
-    # is wrapped in `try`/`except`: this pretraining run has no `trainer.predict` step,
-    # but registering the encoder and stamping its lineage still happen after
-    # `trainer.fit` returns and Lightning has already finalized the logger to "success"
-    # -- and a crash while `stamp_provenance` is itself talking to MLflow (a network
-    # call, just like everything after it) must not leave the run stuck RUNNING forever
-    # instead of flipping to FAILED. `run.mlflow_run_id` is only set once
-    # `stamp_provenance`'s own run-creation call has actually succeeded, so the `except`
-    # below uses it -- not a bare `mlflow_logger.run_id` re-access, which would itself
-    # attempt to lazily create a *second* run if creating the first one is what failed --
-    # to decide whether there is a run to terminate at all.
-    mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
-
-    try:
-        stamp_provenance(run, mlflow_logger)
+    # `tracked_run` keeps MLflow reachability first and stamps provenance before any
+    # store, model or Trainer work. It also marks an existing run failed if anything in
+    # this task-specific body crashes, including after Lightning has finalized success.
+    with tracked_run(config, run) as mlflow_logger:
+        task = config.task
+        assert isinstance(task, SslPretrainTask)
 
         require_fold(task.splits_root, task.split, task.fold)
 
@@ -363,23 +346,11 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
             task.trainer, run.artifacts_dir, has_validation=val_loader is not None
         )
 
-        trainer = Trainer(
-            max_epochs=task.trainer.max_epochs,
-            accelerator=task.trainer.accelerator,
-            devices=task.trainer.devices,
-            precision=task.trainer.precision,  # type: ignore[arg-type]
-            gradient_clip_val=task.trainer.gradient_clip_val,
-            accumulate_grad_batches=task.trainer.accumulate_grad_batches,
-            log_every_n_steps=task.trainer.log_every_n_steps,
-            enable_progress_bar=task.trainer.enable_progress_bar,
-            enable_model_summary=False,
-            deterministic="warn" if task.trainer.deterministic else False,
-            default_root_dir=run.artifacts_dir,
-            logger=mlflow_logger,
-            # I1: same fix as `run_torch` -- without this, Lightning installs its own
-            # default `ModelCheckpoint` regardless of `task.trainer.checkpoint`.
-            enable_checkpointing=task.trainer.checkpoint,
-            callbacks=callbacks,
+        trainer = build_trainer(
+            task.trainer,
+            run.artifacts_dir,
+            mlflow_logger,
+            callbacks,
         )
         trainer.fit(module, train_loader, val_loader)
 
@@ -431,10 +402,6 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         # else this pretraining fold produced.
         mlflow_logger.log_metrics(finite_metrics(metrics))
         log_run_artifacts(run, mlflow_logger)
-    except BaseException:
-        if run.mlflow_run_id is not None:
-            mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
-        raise
     return metrics
 
 

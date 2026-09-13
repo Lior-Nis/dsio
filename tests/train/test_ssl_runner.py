@@ -390,14 +390,14 @@ def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
     `create_run`), so a crash anywhere in the rest of its own work left a run that
     unambiguously exists, sitting in `RUNNING` forever. See the identical test in
     `test_torch_runner.py` for `run_torch`'s half of the same bug."""
-    import dsio.train.ssl_task as ssl_task
+    import dsio.train.tracking as tracking
 
     def fake_stamp_provenance(active: object, mlflow_logger: object) -> None:
         mlflow_run_id = mlflow_logger.run_id  # type: ignore[attr-defined]
         active.mlflow_run_id = mlflow_run_id  # type: ignore[attr-defined]
         raise RuntimeError("boom: crash mid-provenance-stamp, after the run was created")
 
-    monkeypatch.setattr(ssl_task, "stamp_provenance", fake_stamp_provenance)
+    monkeypatch.setattr(tracking, "stamp_provenance", fake_stamp_provenance)
 
     config = RunConfig(name="pre-prov-crash", seed=0, task=pretrain_task(corpus))
     active = start_run(
