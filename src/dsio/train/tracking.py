@@ -16,11 +16,10 @@ MLflow, so it fires before ``task = config.task`` is even read where that costs 
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from lightning.pytorch.loggers import MLFlowLogger
 from mlflow.environment_variables import (
     MLFLOW_HTTP_REQUEST_MAX_RETRIES,
     MLFLOW_HTTP_REQUEST_TIMEOUT,
@@ -29,6 +28,8 @@ from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
 if TYPE_CHECKING:
+    from lightning.pytorch.loggers import MLFlowLogger
+
     from dsio.config.schema import RunConfig
     from dsio.runs.record import Run
 
@@ -55,19 +56,19 @@ class MlflowUnavailableError(RuntimeError):
     """MLflow's tracking server could not be reached; the run has not started."""
 
 
-def resolve_tracking_uri() -> str:
-    """The tracking URI a run logs to: ``MLFLOW_TRACKING_URI``, or the local default."""
+def resolve_tracking_uri(tracking_uri: str | None = None) -> str:
+    """Resolve an explicit URI, ``MLFLOW_TRACKING_URI``, or the local default."""
+    if tracking_uri is not None:
+        return tracking_uri
     return os.environ.get(TRACKING_URI_ENV) or DEFAULT_TRACKING_URI
 
 
 @contextmanager
-def _bounded_probe_timeout() -> Iterator[None]:
-    """Shrink MLflow's HTTP timeout/retry budget for the probe call only."""
-    names = (MLFLOW_HTTP_REQUEST_TIMEOUT.name, MLFLOW_HTTP_REQUEST_MAX_RETRIES.name)
-    saved = {name: os.environ.get(name) for name in names}
-    os.environ[MLFLOW_HTTP_REQUEST_TIMEOUT.name] = _PROBE_TIMEOUT_SECONDS
-    os.environ[MLFLOW_HTTP_REQUEST_MAX_RETRIES.name] = _PROBE_MAX_RETRIES
+def temporary_mlflow_environment(values: Mapping[str, str]) -> Iterator[None]:
+    """Set process environment values for one MLflow operation, then restore them."""
+    saved = {name: os.environ.get(name) for name in values}
     try:
+        os.environ.update(values)
         yield
     finally:
         for name, value in saved.items():
@@ -75,6 +76,18 @@ def _bounded_probe_timeout() -> Iterator[None]:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+@contextmanager
+def _bounded_probe_timeout() -> Iterator[None]:
+    """Shrink MLflow's HTTP timeout/retry budget for the probe call only."""
+    with temporary_mlflow_environment(
+        {
+            MLFLOW_HTTP_REQUEST_TIMEOUT.name: _PROBE_TIMEOUT_SECONDS,
+            MLFLOW_HTTP_REQUEST_MAX_RETRIES.name: _PROBE_MAX_RETRIES,
+        }
+    ):
+        yield
 
 
 def require_mlflow(tracking_uri: str | None = None) -> str:
@@ -92,7 +105,7 @@ def require_mlflow(tracking_uri: str | None = None) -> str:
     (Postgres, per decision 8) is unreachable. A component a run cannot *write* to is not a
     sink, so the check has to reach the store, not merely the process in front of it.
     """
-    uri = tracking_uri if tracking_uri is not None else resolve_tracking_uri()
+    uri = resolve_tracking_uri(tracking_uri)
     if not (uri.startswith("http://") or uri.startswith("https://")):
         return uri
 
@@ -128,6 +141,8 @@ def build_mlflow_logger(config: RunConfig, run: Run, tracking_uri: str) -> MLFlo
     MLflow run back to this process's own run id, so the two are cross-referenced without a
     lookup table.
     """
+    from lightning.pytorch.loggers import MLFlowLogger
+
     return MLFlowLogger(
         experiment_name=config.name,
         run_name=run.run_id,

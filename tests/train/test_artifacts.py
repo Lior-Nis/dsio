@@ -10,6 +10,7 @@ fake: a loader that raises on everything passes every corruption test and is use
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -18,11 +19,13 @@ import pytest
 
 pytest.importorskip("mlflow")
 
+from mlflow.environment_variables import MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR  # noqa: E402
 from mlflow.tracking import MlflowClient  # noqa: E402
 
 from dsio.train.artifacts import (  # noqa: E402
     ArtifactIntegrityError,
     ArtifactRef,
+    _no_progress_bar,
     load_artifact,
     resolve_tracking_uri,
     save_artifact,
@@ -60,6 +63,18 @@ def _on_disk(ref: ArtifactRef) -> Path:
     """
     artifact_uri = _client().get_run(ref.run_id).info.artifact_uri
     return Path(urlparse(artifact_uri).path) / ref.path
+
+
+def test_progress_bar_override_is_applied_and_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR.name
+    monkeypatch.setenv(name, "true")
+
+    with _no_progress_bar():
+        assert os.environ[name] == "false"
+
+    assert os.environ[name] == "true"
 
 
 def test_a_clean_artifact_round_trips() -> None:

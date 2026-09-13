@@ -13,6 +13,7 @@ proves the logger is *built* the way decision 7 and 8 say it must be.
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,6 +31,7 @@ from dsio.train.tracking import (  # noqa: E402
     finite_metrics,
     require_mlflow,
     resolve_tracking_uri,
+    temporary_mlflow_environment,
 )
 
 # A closed local port: nothing binds this by construction (the compose stack, when it
@@ -60,6 +62,60 @@ def test_resolve_tracking_uri_prefers_the_environment_variable(
 ) -> None:
     monkeypatch.setenv(TRACKING_URI_ENV, "http://tracking.example:9000")
     assert resolve_tracking_uri() == "http://tracking.example:9000"
+
+
+@pytest.mark.parametrize(
+    ("explicit", "environment", "expected"),
+    [
+        (None, "", DEFAULT_TRACKING_URI),
+        (
+            "http://explicit.example:5000",
+            "http://environment.example:5000",
+            "http://explicit.example:5000",
+        ),
+        ("", "http://environment.example:5000", ""),
+    ],
+)
+def test_resolve_tracking_uri_precedence_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    explicit: str | None,
+    environment: str,
+    expected: str,
+) -> None:
+    monkeypatch.setenv(TRACKING_URI_ENV, environment)
+
+    assert resolve_tracking_uri(explicit) == expected
+
+
+@pytest.mark.parametrize("existing", [None, "before"])
+@pytest.mark.parametrize("raises", [False, True])
+def test_temporary_mlflow_environment_restores_present_and_absent_values(
+    monkeypatch: pytest.MonkeyPatch,
+    existing: str | None,
+    raises: bool,
+) -> None:
+    name = "DSIO_TEST_MLFLOW_ENVIRONMENT"
+    if existing is None:
+        monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv(name, existing)
+
+    def exercise() -> None:
+        with temporary_mlflow_environment({name: "during"}):
+            assert os.environ[name] == "during"
+            if raises:
+                raise RuntimeError("probe failed")
+
+    if raises:
+        with pytest.raises(RuntimeError, match="probe failed"):
+            exercise()
+    else:
+        exercise()
+
+    if existing is None:
+        assert name not in os.environ
+    else:
+        assert os.environ[name] == existing
 
 
 # --- local backends are never probed ----------------------------------------------------
@@ -163,8 +219,6 @@ def test_the_probes_timeout_override_is_restored_after_a_failure(
     """The bounded probe timeout/retry budget is a global environment mutation for the
     duration of one call; a real run's later logging calls must get MLflow's normal
     (generous) retry behaviour back, not the probe's tight one."""
-    import os
-
     monkeypatch.setenv("MLFLOW_HTTP_REQUEST_TIMEOUT", "77")
     monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "3")
     with pytest.raises(MlflowUnavailableError):
@@ -182,8 +236,6 @@ def test_bounded_probe_timeout_actually_shrinks_the_budget_inside_its_own_scope(
     budget the docstring promises is actually in effect *while the context is open*, not
     only that whatever was there before comes back afterward.
     """
-    import os
-
     from dsio.train.tracking import (
         _PROBE_MAX_RETRIES,
         _PROBE_TIMEOUT_SECONDS,

@@ -32,7 +32,6 @@ bytes are gone.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -43,14 +42,10 @@ from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
 from dsio.contracts import DsioModel, sha256_of_bytes
-
-# Mirrors `dsio.train.tracking.TRACKING_URI_ENV`/`DEFAULT_TRACKING_URI`. A run has already
-# resolved and proved this URI reachable via `require_mlflow()` before anything here runs;
-# this exists so a call with no explicit URI agrees with that resolution rather than
-# falling back to MLflow's own default (a local `./mlruns` directory), which would split a
-# run's metrics and its encoder across two unrelated backends.
-TRACKING_URI_ENV = "MLFLOW_TRACKING_URI"
-DEFAULT_TRACKING_URI = "http://localhost:5000"
+from dsio.train.tracking import DEFAULT_TRACKING_URI as DEFAULT_TRACKING_URI
+from dsio.train.tracking import TRACKING_URI_ENV as TRACKING_URI_ENV
+from dsio.train.tracking import resolve_tracking_uri as resolve_tracking_uri
+from dsio.train.tracking import temporary_mlflow_environment
 
 ARTIFACT_FILE = "artifact.bin"
 _ARTIFACT_PREFIX = "dsio-artifacts"
@@ -80,12 +75,6 @@ class ArtifactRef(DsioModel):
         return f"{self.path}@{self.digest[:12]}"
 
 
-def resolve_tracking_uri(tracking_uri: str | None = None) -> str:
-    if tracking_uri is not None:
-        return tracking_uri
-    return os.environ.get(TRACKING_URI_ENV) or DEFAULT_TRACKING_URI
-
-
 @contextmanager
 def _no_progress_bar() -> Iterator[None]:
     """Suppress MLflow's tqdm upload/download bars, which are noise in test output and in
@@ -93,16 +82,8 @@ def _no_progress_bar() -> Iterator[None]:
     """
     from mlflow.environment_variables import MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR
 
-    name = MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR.name
-    saved = os.environ.get(name)
-    os.environ[name] = "false"
-    try:
+    with temporary_mlflow_environment({MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR.name: "false"}):
         yield
-    finally:
-        if saved is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = saved
 
 
 def save_artifact(
