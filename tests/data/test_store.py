@@ -423,6 +423,38 @@ def test_index_cache_key_includes_row_metrics(store: SignalStore, tmp_path: Path
     assert np.array_equal(cached.metrics["quality"], expected.metrics["quality"])
 
 
+def test_metric_ceiling_filters_windows() -> None:
+    starts = np.array([0, 2, 4], dtype=np.int64)
+    spec = WindowSpec(length=2, stride=2, max_metrics={"quality": 0.5})
+
+    metrics, keep = views._metric_filter(
+        spec,
+        starts,
+        {"quality": np.array([0.0, 0.0, 0.5, 0.5, 1.0, 1.0])},
+    )
+
+    assert np.array_equal(metrics["quality"], [0.0, 0.5, 1.0])
+    assert np.array_equal(keep, [True, True, False])
+
+
+def test_metric_floor_and_ceiling_filter_together() -> None:
+    starts = np.array([0, 2, 4], dtype=np.int64)
+    spec = WindowSpec(
+        length=2,
+        stride=2,
+        min_metrics={"quality": 0.5},
+        max_metrics={"quality": 0.5},
+    )
+
+    _, keep = views._metric_filter(
+        spec,
+        starts,
+        {"quality": np.array([0.0, 0.0, 0.5, 0.5, 1.0, 1.0])},
+    )
+
+    assert np.array_equal(keep, [False, True, False])
+
+
 def test_index_cache_identity_is_semantic_and_order_independent(
     store: SignalStore, tmp_path: Path
 ) -> None:

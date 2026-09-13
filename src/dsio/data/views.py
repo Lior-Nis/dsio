@@ -25,6 +25,7 @@ arithmetic lives, and :func:`build_index` refuses the unambiguous half of it by 
 from __future__ import annotations
 
 import json
+import operator
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -700,20 +701,17 @@ def _metric_filter(
         for name, values in (row_metrics or {}).items()
     }
     keep = np.ones(starts.size, dtype=bool)
-    for name, floor in spec.min_metrics.items():
-        if name not in window_metrics:
-            raise ViewError(
-                f"spec filters on metric {name!r}, but it was not supplied in row_metrics; "
-                f"available: {', '.join(sorted(window_metrics)) or 'none'}"
-            )
-        keep &= window_metrics[name] >= floor
-    for name, ceiling in spec.max_metrics.items():
-        if name not in window_metrics:
-            raise ViewError(
-                f"spec filters on metric {name!r}, but it was not supplied in row_metrics; "
-                f"available: {', '.join(sorted(window_metrics)) or 'none'}"
-            )
-        keep &= window_metrics[name] <= ceiling
+    for bounds, compare in (
+        (spec.min_metrics, operator.ge),
+        (spec.max_metrics, operator.le),
+    ):
+        for name, bound in bounds.items():
+            if name not in window_metrics:
+                raise ViewError(
+                    f"spec filters on metric {name!r}, but it was not supplied in row_metrics; "
+                    f"available: {', '.join(sorted(window_metrics)) or 'none'}"
+                )
+            keep &= compare(window_metrics[name], bound)
     return window_metrics, keep
 
 

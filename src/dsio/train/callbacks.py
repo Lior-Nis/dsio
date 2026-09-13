@@ -102,6 +102,11 @@ def embed(module: Encodable, loader: DataLoader[Any]) -> tuple[np.ndarray, np.nd
     )
 
 
+def _is_scheduled(trainer: Trainer, every_n_epochs: int) -> bool:
+    """Whether a validation callback should run at this epoch."""
+    return not trainer.sanity_checking and (trainer.current_epoch + 1) % every_n_epochs == 0
+
+
 class OnlineProbe(Callback):
     """Fit a linear model on frozen features and report what it scores.
 
@@ -131,9 +136,7 @@ class OnlineProbe(Callback):
         self.history: list[dict[str, float]] = []
 
     def on_validation_epoch_end(self, trainer: Trainer, module: LightningModule) -> None:
-        if trainer.sanity_checking:
-            return
-        if (trainer.current_epoch + 1) % self.every_n_epochs:
+        if not _is_scheduled(trainer, self.every_n_epochs):
             return
         scores = self.run(cast("Encodable", module))
         self.history.append({"epoch": float(trainer.current_epoch), **scores})
@@ -190,9 +193,7 @@ class RankMeMonitor(Callback):
         self.history: list[dict[str, float]] = []
 
     def on_validation_epoch_end(self, trainer: Trainer, module: LightningModule) -> None:
-        if trainer.sanity_checking:
-            return
-        if (trainer.current_epoch + 1) % self.every_n_epochs:
+        if not _is_scheduled(trainer, self.every_n_epochs):
             return
         features, _ = embed(cast("Encodable", module), self.loader)
         value = rankme(torch.from_numpy(features))

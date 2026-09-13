@@ -75,29 +75,20 @@ def build_callbacks(
 
     callbacks: list[Any] = []
     if trainer.checkpoint:
+        checkpoint_kwargs: dict[str, Any] = {
+            "dirpath": directory,
+            "filename": "epoch{epoch:02d}",
+            "save_top_k": 1,
+            "auto_insert_metric_name": False,
+        }
         if has_validation:
             monitor = trainer.monitor
-            callbacks.append(
-                ModelCheckpoint(
-                    dirpath=directory,
-                    filename=(
-                        "epoch{epoch:02d}-" + sanitise_metric(monitor) + "{" + monitor + ":.4f}"
-                    ),
-                    monitor=monitor,
-                    mode=trainer.monitor_mode,
-                    save_top_k=1,
-                    auto_insert_metric_name=False,
-                )
+            checkpoint_kwargs.update(
+                filename=("epoch{epoch:02d}-" + sanitise_metric(monitor) + "{" + monitor + ":.4f}"),
+                monitor=monitor,
+                mode=trainer.monitor_mode,
             )
-        else:
-            callbacks.append(
-                ModelCheckpoint(
-                    dirpath=directory,
-                    filename="epoch{epoch:02d}",
-                    save_top_k=1,
-                    auto_insert_metric_name=False,
-                )
-            )
+        callbacks.append(ModelCheckpoint(**checkpoint_kwargs))
     if has_validation and trainer.early_stopping_patience is not None:
         callbacks.append(
             EarlyStopping(

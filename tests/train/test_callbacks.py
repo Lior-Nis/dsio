@@ -8,6 +8,9 @@ anything SSL-specific — they measure any :class:`~dsio.model.module.DsioModule
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import numpy as np
 import pytest
 
@@ -230,6 +233,48 @@ def test_the_probe_fires_on_schedule(module: DsioModule, loader: DataLoader) -> 
     )
     trainer.fit(module, loader, loader)
     assert [entry["epoch"] for entry in probe.history] == [1.0, 3.0]
+
+
+@pytest.mark.parametrize("callback_kind", ["probe", "rankme"])
+@pytest.mark.parametrize(
+    ("sanity_checking", "current_epoch", "expected_runs"),
+    [(True, 1, 0), (False, 0, 0), (False, 1, 1)],
+)
+def test_quality_callbacks_apply_the_same_schedule(
+    loader: DataLoader,
+    monkeypatch: pytest.MonkeyPatch,
+    callback_kind: str,
+    sanity_checking: bool,
+    current_epoch: int,
+    expected_runs: int,
+) -> None:
+    import dsio.train.callbacks as callback_module
+
+    logged = Mock()
+    callback: OnlineProbe | RankMeMonitor
+    if callback_kind == "probe":
+        callback = OnlineProbe(loader, loader, every_n_epochs=2)
+        monkeypatch.setattr(callback, "run", Mock(return_value={"accuracy": 1.0}))
+    else:
+        callback = RankMeMonitor(loader, every_n_epochs=2)
+        monkeypatch.setattr(
+            callback_module,
+            "embed",
+            Mock(return_value=(np.eye(2, dtype=np.float32), np.empty(0))),
+        )
+        monkeypatch.setattr(callback_module, "rankme", Mock(return_value=2.0))
+
+    trainer = SimpleNamespace(
+        sanity_checking=sanity_checking,
+        current_epoch=current_epoch,
+    )
+    callback.on_validation_epoch_end(  # type: ignore[arg-type]
+        trainer,
+        SimpleNamespace(log=logged),
+    )
+
+    assert len(callback.history) == expected_runs
+    assert logged.call_count == expected_runs
 
 
 def test_rankme_monitor_records_a_history(module: DsioModule, loader: DataLoader) -> None:
