@@ -29,7 +29,7 @@ PRESETS: Registry[PresetFn] = Registry("preset")
 #: corpus, warming a cache) immediately before it executes. Deliberately separate from
 #: PRESETS: a preset function only *composes* a RunConfig — resolving one, including
 #: under `--dry-run`, must never write a file or mutate a registry. A hook runs once,
-#: only on the path that is actually about to execute the run (see `dsio.cli.run_cmd`).
+#: only on the path that is actually about to execute the run (see `dsio.application`).
 STAGE_HOOKS: Registry[StageHookFn] = Registry("stage_hook")
 
 PRESET_MODULES_ENV = "DSIO_PRESET_MODULES"
