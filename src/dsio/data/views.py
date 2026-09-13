@@ -729,17 +729,23 @@ def _window_means(values: np.ndarray, starts: np.ndarray, length: int) -> np.nda
 
 def _derive_labels(labels: np.ndarray, starts: np.ndarray, spec: WindowSpec) -> np.ndarray:
     """Reduce per-row labels to one value per window under the spec's policy."""
-    out = np.empty(starts.size, dtype=np.float32)
-    for i, start in enumerate(starts):
-        window = labels[start : start + spec.length]
-        ratio = float(np.count_nonzero(window)) / spec.length
-        if spec.label_policy == "any":
-            out[i] = float(ratio > 0.0)
-        elif spec.label_policy == "majority":
-            out[i] = float(ratio >= spec.label_threshold)
-        else:
-            out[i] = ratio
-    return out
+    if starts.size == 0:
+        return np.empty(0, dtype=np.float32)
+
+    nonzero = np.asarray(labels, dtype=bool)
+    if nonzero.ndim > 1:
+        nonzero = np.count_nonzero(nonzero, axis=tuple(range(1, nonzero.ndim)))
+    ratios = _window_means(nonzero, starts, spec.length)
+
+    if spec.label_policy == "any":
+        result = ratios > 0.0
+    elif spec.label_policy == "majority":
+        result = ratios >= spec.label_threshold
+    elif spec.label_policy == "ratio":
+        result = ratios
+    else:
+        raise ViewError("cannot derive labels when label_policy is 'none'")
+    return result.astype(np.float32, copy=False)
 
 
 def _normalise_index_inputs(

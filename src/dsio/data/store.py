@@ -126,6 +126,7 @@ class SignalStoreBuilder:
         self.source = source
         self.attrs = attrs or {}
         self._entities: list[Entity] = []
+        self._entity_ids: set[str] = set()
         self._offsets: list[int] = [0]
         self._rows = 0
         self.path.mkdir(parents=True, exist_ok=True)
@@ -159,9 +160,6 @@ class SignalStoreBuilder:
             )
         if array.shape[0] == 0:
             raise StoreError(f"entity {entity_id!r} is empty")
-        if any(existing.entity_id == entity_id for existing in self._entities):
-            raise StoreError(f"duplicate entity_id {entity_id!r}")
-
         entity = Entity(
             entity_id=entity_id,
             group=group,
@@ -169,8 +167,12 @@ class SignalStoreBuilder:
             n_rows=int(array.shape[0]),
             attrs=attrs or {},
         )
+        if entity.entity_id in self._entity_ids:
+            raise StoreError(f"duplicate entity_id {entity.entity_id!r}")
+
         self._signal.write(array.tobytes())
         self._entities.append(entity)
+        self._entity_ids.add(entity.entity_id)
         self._rows += entity.n_rows
         self._offsets.append(self._rows)
         return entity

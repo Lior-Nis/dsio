@@ -6,6 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+from typing import Any
 
 import numpy as np
 import pytest
@@ -127,6 +128,15 @@ def test_entity_at_maps_rows_back(store: SignalStore) -> None:
 def test_duplicate_entity_id_is_rejected(tmp_path: Path) -> None:
     builder = SignalStore.builder(tmp_path / "dupe", channels=1)
     builder.add("a", np.zeros((10, 1), "float32"), group="g")
+    with pytest.raises(StoreError, match="duplicate entity_id"):
+        builder.add("a", np.zeros((10, 1), "float32"), group="g")
+
+
+def test_duplicate_entity_id_uses_the_persisted_normalized_value(tmp_path: Path) -> None:
+    bytes_id: Any = bytearray(b"a")
+    builder = SignalStore.builder(tmp_path / "normalized-dupe", channels=1)
+    builder.add(bytes_id, np.zeros((10, 1), "float32"), group="g")
+
     with pytest.raises(StoreError, match="duplicate entity_id"):
         builder.add("a", np.zeros((10, 1), "float32"), group="g")
 
@@ -539,6 +549,126 @@ def test_label_policies_differ(store: SignalStore) -> None:
         "'majority' must report a positive window once it clears its threshold"
     )
     assert any_idx.labels.sum() >= maj_idx.labels.sum()
+
+
+@pytest.mark.parametrize("policy", ["any", "majority", "ratio"])
+def test_window_label_reduction_matches_naive_reference_for_random_windows(
+    policy: str,
+) -> None:
+    rng = np.random.default_rng(20260912)
+    labels = rng.integers(-2, 3, size=257, dtype=np.int8)
+    starts = rng.integers(0, 238, size=100, dtype=np.int64)
+    spec = WindowSpec(
+        length=19,
+        stride=1,
+        label_policy=policy,
+        label_threshold=0.63,
+    )
+    expected = np.empty(starts.size, dtype=np.float32)
+    for i, start in enumerate(starts):
+        ratio = float(np.count_nonzero(labels[start : start + spec.length])) / spec.length
+        if policy == "any":
+            expected[i] = float(ratio > 0.0)
+        elif policy == "majority":
+            expected[i] = float(ratio >= spec.label_threshold)
+        else:
+            expected[i] = ratio
+
+    actual = views._derive_labels(labels, starts, spec)
+
+    assert actual.dtype == np.float32
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_ratio_label_policy_returns_explicit_float32_ratios() -> None:
+    labels = np.array([0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0], dtype=np.int8)
+    starts = np.array([0, 4, 8, 12], dtype=np.int64)
+    spec = WindowSpec(length=4, stride=4, label_policy="ratio")
+
+    actual = views._derive_labels(labels, starts, spec)
+
+    assert actual.dtype == np.float32
+    np.testing.assert_array_equal(actual, np.array([0.0, 0.25, 0.5, 0.75], dtype=np.float32))
+
+
+def test_label_policy_threshold_boundaries_are_explicit() -> None:
+    labels = np.array([1, 0, 0, 0], dtype=np.int8)
+    starts = np.array([0], dtype=np.int64)
+
+    any_result = views._derive_labels(
+        labels,
+        starts,
+        WindowSpec(length=4, stride=4, label_policy="any", label_threshold=1.0),
+    )
+    at_boundary = views._derive_labels(
+        labels,
+        starts,
+        WindowSpec(length=4, stride=4, label_policy="majority", label_threshold=0.25),
+    )
+    above_boundary = views._derive_labels(
+        labels,
+        starts,
+        WindowSpec(length=4, stride=4, label_policy="majority", label_threshold=0.2501),
+    )
+
+    np.testing.assert_array_equal(any_result, np.array([1.0], dtype=np.float32))
+    np.testing.assert_array_equal(at_boundary, np.array([1.0], dtype=np.float32))
+    np.testing.assert_array_equal(above_boundary, np.array([0.0], dtype=np.float32))
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        np.array([0, -3, 2, 0, 0, 7], dtype=np.int64),
+        np.array([None, "", "positive", 0, [], [1]], dtype=object),
+    ],
+)
+def test_window_label_reduction_preserves_nonzero_semantics(labels: np.ndarray) -> None:
+    starts = np.array([0, 2], dtype=np.int64)
+    spec = WindowSpec(length=4, stride=2, label_policy="ratio")
+    expected = np.array(
+        [
+            np.count_nonzero(labels[start : start + spec.length]) / spec.length
+            for start in starts
+        ],
+        dtype=np.float32,
+    )
+
+    np.testing.assert_array_equal(views._derive_labels(labels, starts, spec), expected)
+
+
+def test_multidimensional_labels_count_every_nonzero_element() -> None:
+    labels = np.array(
+        [
+            [[1, 0], [0, 2]],
+            [[3, 4], [0, 0]],
+            [[0, 0], [0, 0]],
+            [[5, 6], [7, 8]],
+        ],
+        dtype=np.int8,
+    )
+    starts = np.array([0, 2], dtype=np.int64)
+    spec = WindowSpec(length=2, stride=2, label_policy="ratio")
+
+    actual = views._derive_labels(labels, starts, spec)
+
+    np.testing.assert_array_equal(actual, np.array([2.0, 2.0], dtype=np.float32))
+
+
+def test_empty_window_starts_return_float32_without_reading_labels() -> None:
+    class InvalidLabel:
+        def __bool__(self) -> bool:
+            raise AssertionError("empty windows must not inspect labels")
+
+    labels = np.array([InvalidLabel()], dtype=object)
+    result = views._derive_labels(
+        labels,
+        np.empty(0, dtype=np.int64),
+        WindowSpec(length=1, stride=1, label_policy="ratio"),
+    )
+
+    assert result.dtype == np.float32
+    assert result.shape == (0,)
 
 
 # WindowView (a numpy-only, framework-free window reader over store + index) was merged
