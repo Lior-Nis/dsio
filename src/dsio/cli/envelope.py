@@ -110,15 +110,10 @@ _CODES: list[tuple[type[BaseException], ErrorCode, bool]] = [
 def _mlflow_unavailable_error_type() -> type[BaseException] | None:
     """``MlflowUnavailableError``'s type, or ``None`` if it cannot even be imported.
 
-    Deliberately not a module-level import: ``dsio.train.tracking`` imports Lightning at
-    its own module scope, and this module (``dsio.cli.envelope``) must stay importable
-    without torch/lightning installed at all -- a bare ``dsio run`` lists presets without
-    either (``dsio.train.load_runners``'s own docstring), and this is exactly the module
-    that has to turn a missing-torch ``ModuleNotFoundError`` into a helpful message
-    rather than crash trying to report it. If ``exc`` really is an
-    ``MlflowUnavailableError``, that module necessarily already imported successfully to
-    raise it, so this import is a cache hit off ``sys.modules``, never the first (and
-    possibly failing) import of Lightning.
+    The lookup stays lazy because this error belongs to the optional MLflow policy. Importing
+    ``dsio.train.tracking`` no longer pulls in Lightning -- its ``MLFlowLogger`` import
+    happens only when a runner builds one -- so the CLI envelope and artifact commands remain
+    importable without torch or Lightning while still recognizing this error when raised.
     """
     try:
         from dsio.train.tracking import MlflowUnavailableError
