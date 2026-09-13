@@ -43,25 +43,7 @@ def resolve(
     return {part: examples.subset(mask) for part, mask in masks.items()}
 
 
-def resolve_masks(
-    examples: Examples,
-    split: SplitFile,
-    fold: SplitFold,
-    *,
-    require_total: bool = True,
-) -> dict[str, np.ndarray]:
-    """Boolean mask per part, over the dataset's examples, for one fold of ``split``.
-
-    The mask form is what :func:`dsio.splits.folds.folds_from_splits` turns into a
-    :class:`~dsio.eval.contract.Fold`'s integer positions; a subset has forgotten where
-    its examples came from, so the mask is kept as the intermediate form.
-    :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
-    validation and there is no second code path to keep in step.
-
-    The store binding (``store`` / ``store_manifest_sha256``) lives on ``split``, not on
-    ``fold`` — one family binds to one corpus, so that check runs once per call rather than
-    being duplicated onto every fold.
-    """
+def _validate_split_binding(examples: Examples, split: SplitFile) -> None:
     if split.store != examples.name:
         raise SplitError(
             f"split {split.name!r} was built for {split.store!r}, not {examples.name!r}"
@@ -88,7 +70,11 @@ def resolve_masks(
                 "groups this split assigns were chosen over a different population"
             )
 
-    present = {str(g) for g in examples.groups}
+
+def _validate_group_assignments(
+    examples: Examples, split: SplitFile, fold: SplitFold, *, require_total: bool
+) -> None:
+    present = {str(group) for group in examples.groups}
     named = fold.all_groups
 
     unknown = named - present
@@ -105,17 +91,46 @@ def resolve_masks(
                 f"group(s) present in the index: {', '.join(sorted(unassigned)[:5])}"
             )
 
+
+def _temporal_coordinates(
+    examples: Examples, split: SplitFile, fold: SplitFold
+) -> tuple[np.ndarray, np.ndarray] | None:
+    if fold.temporal is None:
+        return None
+    times = examples.times()
+    if times is None:
+        raise SplitError(
+            f"split {split.name!r} fold {fold.index} has temporal bounds, but "
+            f"{examples.name!r} has no time coordinates to apply them to"
+        )
+    return times
+
+
+def resolve_masks(
+    examples: Examples,
+    split: SplitFile,
+    fold: SplitFold,
+    *,
+    require_total: bool = True,
+) -> dict[str, np.ndarray]:
+    """Boolean mask per part, over the dataset's examples, for one fold of ``split``.
+
+    The mask form is what :func:`dsio.splits.folds.folds_from_splits` turns into a
+    :class:`~dsio.eval.contract.Fold`'s integer positions; a subset has forgotten where
+    its examples came from, so the mask is kept as the intermediate form.
+    :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
+    validation and there is no second code path to keep in step.
+
+    The store binding (``store`` / ``store_manifest_sha256``) lives on ``split``, not on
+    ``fold`` — one family binds to one corpus, so that check runs once per call rather than
+    being duplicated onto every fold.
+    """
+    _validate_split_binding(examples, split)
+    _validate_group_assignments(examples, split, fold, require_total=require_total)
+
     groups = np.asarray([str(g) for g in examples.groups])
     parts = set(fold.parts) | set(fold.temporal.spans if fold.temporal else ())
-
-    times: tuple[np.ndarray, np.ndarray] | None = None
-    if fold.temporal is not None:
-        times = examples.times()
-        if times is None:
-            raise SplitError(
-                f"split {split.name!r} fold {fold.index} has temporal bounds, but "
-                f"{examples.name!r} has no time coordinates to apply them to"
-            )
+    times = _temporal_coordinates(examples, split, fold)
 
     out: dict[str, np.ndarray] = {}
     for part in sorted(parts):

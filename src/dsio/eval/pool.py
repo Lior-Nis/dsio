@@ -75,6 +75,109 @@ def _read(path: Path) -> dict[str, np.ndarray]:
         return {key: data[key] for key in data.files}
 
 
+def _validate_expected_folds(
+    files: list[dict[str, np.ndarray]], expected_folds: Sequence[int] | None
+) -> None:
+    if expected_folds is None:
+        return
+    present = {int(data["fold"]) for data in files}
+    missing = sorted(set(expected_folds) - present)
+    if missing:
+        raise EvalError(
+            f"pooled {len(present)} of {len(set(expected_folds))} folds the caller "
+            f"expected; fold(s) {missing} never ran. A pooled metric over incomplete "
+            "folds is silently biased toward whichever folds happened to run"
+        )
+
+
+def _validate_shared_identities(files: list[dict[str, np.ndarray]]) -> tuple[str, str]:
+    split = str(files[0]["split"])
+    digest = str(files[0]["split_digest"])
+    window_digest = str(files[0]["window_digest"])
+    config_identity = str(files[0]["config_identity"])
+    for data in files[1:]:
+        if str(data["split"]) != split or str(data["split_digest"]) != digest:
+            raise EvalError(
+                f"refusing to pool fold {int(data['fold'])} of "
+                f"{str(data['split'])!r} (store {str(data['split_digest'])[:12]}) with "
+                f"fold {int(files[0]['fold'])} of {split!r} (store {digest[:12]}). Pooling "
+                "across split families or store snapshots measures the data, not the model"
+            )
+        if str(data["window_digest"]) != window_digest:
+            raise EvalError(
+                f"refusing to pool fold {int(data['fold'])} (window "
+                f"{str(data['window_digest'])[:12]}) with fold {int(files[0]['fold'])} "
+                f"(window {window_digest[:12]}). Different WindowSpecs give row_id a "
+                "different meaning in each file -- the same row_id in two folds would not "
+                "even name the same window, let alone the same row"
+            )
+        if str(data["config_identity"]) != config_identity:
+            raise EvalError(
+                f"refusing to pool fold {int(data['fold'])} with fold "
+                f"{int(files[0]['fold'])}: their configs differ outside of `fold` "
+                "(backbone, hyperparameters, or a component). Folds of one experiment must "
+                "agree on everything except which fold they are -- these are predictions "
+                "from two different models that happen to share a split family"
+            )
+    return split, digest
+
+
+def _validate_score_presence(files: list[dict[str, np.ndarray]]) -> list[int]:
+    scored = [int(data["fold"]) for data in files if "y_score" in data]
+    if scored and len(scored) != len(files):
+        missing = [int(data["fold"]) for data in files if "y_score" not in data]
+        raise EvalError(
+            f"{len(scored)} of {len(files)} folds recorded y_score; fold(s) "
+            f"{', '.join(str(fold) for fold in missing[:5])} did not. Pooling a mixture of "
+            "probabilities and hard labels produces a ranking metric that means nothing"
+        )
+    return scored
+
+
+def _validate_disjoint_rows(files: list[dict[str, np.ndarray]]) -> None:
+    seen: dict[int, int] = {}
+    for data in files:
+        index = int(data["fold"])
+        for row in data["row_id"].tolist():
+            if row in seen:
+                raise EvalError(
+                    f"row {row} was predicted by fold {seen[row]} and again by fold "
+                    f"{index}; folds must be disjoint or the pooled metric double-counts "
+                    "them. The split assigns each group to one test fold, and every file "
+                    "here already agreed on the same window spec and config, so this is a "
+                    "runner reporting the wrong positions rather than a bad split or a "
+                    "mismatched WindowSpec"
+                )
+            seen[row] = index
+
+
+def _compute_metrics(
+    files: list[dict[str, np.ndarray]],
+    metrics: Sequence[str],
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_score: np.ndarray | None,
+    scored: list[int],
+) -> tuple[dict[str, float], dict[int, dict[str, float]]]:
+    try:
+        values = compute(list(metrics), y_true, y_pred, y_score)
+        fold_metrics = {
+            int(data["fold"]): compute(
+                list(metrics),
+                data["y_true"],
+                data["y_pred"],
+                data["y_score"] if scored else None,
+            )
+            for data in files
+        }
+    except MetricError as error:
+        raise EvalError(
+            f"{error}. Pooled predictions that cannot be scored are a split problem "
+            "before they are a metric problem -- check stratification"
+        ) from error
+    return values, fold_metrics
+
+
 def pool_folds(
     paths: Sequence[Path | str],
     *,
@@ -108,86 +211,16 @@ def pool_folds(
     files = [_read(Path(p)) for p in paths]
     files.sort(key=lambda d: int(d["fold"]))
 
-    if expected_folds is not None:
-        present = {int(d["fold"]) for d in files}
-        missing = sorted(set(expected_folds) - present)
-        if missing:
-            raise EvalError(
-                f"pooled {len(present)} of {len(set(expected_folds))} folds the caller "
-                f"expected; fold(s) {missing} never ran. A pooled metric over incomplete "
-                "folds is silently biased toward whichever folds happened to run"
-            )
-
-    split = str(files[0]["split"])
-    digest = str(files[0]["split_digest"])
-    window_digest = str(files[0]["window_digest"])
-    config_identity = str(files[0]["config_identity"])
-    for data in files[1:]:
-        if str(data["split"]) != split or str(data["split_digest"]) != digest:
-            raise EvalError(
-                f"refusing to pool fold {int(data['fold'])} of "
-                f"{str(data['split'])!r} (store {str(data['split_digest'])[:12]}) with "
-                f"fold {int(files[0]['fold'])} of {split!r} (store {digest[:12]}). Pooling "
-                "across split families or store snapshots measures the data, not the model"
-            )
-        if str(data["window_digest"]) != window_digest:
-            raise EvalError(
-                f"refusing to pool fold {int(data['fold'])} (window "
-                f"{str(data['window_digest'])[:12]}) with fold {int(files[0]['fold'])} "
-                f"(window {window_digest[:12]}). Different WindowSpecs give row_id a "
-                "different meaning in each file -- the same row_id in two folds would not "
-                "even name the same window, let alone the same row"
-            )
-        if str(data["config_identity"]) != config_identity:
-            raise EvalError(
-                f"refusing to pool fold {int(data['fold'])} with fold "
-                f"{int(files[0]['fold'])}: their configs differ outside of `fold` "
-                "(backbone, hyperparameters, or a component). Folds of one experiment must "
-                "agree on everything except which fold they are -- these are predictions "
-                "from two different models that happen to share a split family"
-            )
-
-    scored = [int(d["fold"]) for d in files if "y_score" in d]
-    if scored and len(scored) != len(files):
-        missing = [int(d["fold"]) for d in files if "y_score" not in d]
-        raise EvalError(
-            f"{len(scored)} of {len(files)} folds recorded y_score; fold(s) "
-            f"{', '.join(str(f) for f in missing[:5])} did not. Pooling a mixture of "
-            "probabilities and hard labels produces a ranking metric that means nothing"
-        )
-
-    seen: dict[int, int] = {}
-    for data in files:
-        index = int(data["fold"])
-        for row in data["row_id"].tolist():
-            if row in seen:
-                raise EvalError(
-                    f"row {row} was predicted by fold {seen[row]} and again by fold "
-                    f"{index}; folds must be disjoint or the pooled metric double-counts "
-                    "them. The split assigns each group to one test fold, and every file "
-                    "here already agreed on the same window spec and config, so this is a "
-                    "runner reporting the wrong positions rather than a bad split or a "
-                    "mismatched WindowSpec"
-                )
-            seen[row] = index
+    _validate_expected_folds(files, expected_folds)
+    split, digest = _validate_shared_identities(files)
+    scored = _validate_score_presence(files)
+    _validate_disjoint_rows(files)
 
     y_true = np.concatenate([d["y_true"] for d in files])
     y_pred = np.concatenate([d["y_pred"] for d in files])
     y_score = np.concatenate([d["y_score"] for d in files]) if scored else None
 
-    try:
-        values = compute(list(metrics), y_true, y_pred, y_score)
-        fold_metrics = {
-            int(d["fold"]): compute(
-                list(metrics), d["y_true"], d["y_pred"], d["y_score"] if scored else None
-            )
-            for d in files
-        }
-    except MetricError as error:
-        raise EvalError(
-            f"{error}. Pooled predictions that cannot be scored are a split problem "
-            "before they are a metric problem -- check stratification"
-        ) from error
+    values, fold_metrics = _compute_metrics(files, metrics, y_true, y_pred, y_score, scored)
 
     return Pooled(
         row_id=np.concatenate([d["row_id"] for d in files]),
