@@ -160,9 +160,6 @@ class SignalStoreBuilder:
             )
         if array.shape[0] == 0:
             raise StoreError(f"entity {entity_id!r} is empty")
-        if entity_id in self._entity_ids:
-            raise StoreError(f"duplicate entity_id {entity_id!r}")
-
         entity = Entity(
             entity_id=entity_id,
             group=group,
@@ -170,9 +167,12 @@ class SignalStoreBuilder:
             n_rows=int(array.shape[0]),
             attrs=attrs or {},
         )
+        if entity.entity_id in self._entity_ids:
+            raise StoreError(f"duplicate entity_id {entity.entity_id!r}")
+
         self._signal.write(array.tobytes())
         self._entities.append(entity)
-        self._entity_ids.add(entity_id)
+        self._entity_ids.add(entity.entity_id)
         self._rows += entity.n_rows
         self._offsets.append(self._rows)
         return entity

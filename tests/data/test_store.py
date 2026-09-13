@@ -6,6 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+from typing import Any
 
 import numpy as np
 import pytest
@@ -127,6 +128,15 @@ def test_entity_at_maps_rows_back(store: SignalStore) -> None:
 def test_duplicate_entity_id_is_rejected(tmp_path: Path) -> None:
     builder = SignalStore.builder(tmp_path / "dupe", channels=1)
     builder.add("a", np.zeros((10, 1), "float32"), group="g")
+    with pytest.raises(StoreError, match="duplicate entity_id"):
+        builder.add("a", np.zeros((10, 1), "float32"), group="g")
+
+
+def test_duplicate_entity_id_uses_the_persisted_normalized_value(tmp_path: Path) -> None:
+    bytes_id: Any = bytearray(b"a")
+    builder = SignalStore.builder(tmp_path / "normalized-dupe", channels=1)
+    builder.add(bytes_id, np.zeros((10, 1), "float32"), group="g")
+
     with pytest.raises(StoreError, match="duplicate entity_id"):
         builder.add("a", np.zeros((10, 1), "float32"), group="g")
 
