@@ -31,8 +31,8 @@ from typing import Any, Protocol, cast
 import numpy as np
 import torch
 from lightning import Callback, LightningModule, Trainer
-from torch.utils.data import DataLoader
 
+from dsio.batches import BatchLoader, LoaderBatch
 from dsio.eval.metrics import compute
 
 
@@ -77,7 +77,7 @@ def rankme(embeddings: torch.Tensor, epsilon: float = 1e-7) -> float:
 
 
 @torch.no_grad()
-def embed(module: Encodable, loader: DataLoader[Any]) -> tuple[np.ndarray, np.ndarray]:
+def embed(module: Encodable, loader: BatchLoader[LoaderBatch]) -> tuple[np.ndarray, np.ndarray]:
     """Encode a loader into features and labels, leaving the module as it was found.
 
     Restoring the training flag matters: a probe that leaves the module in eval mode
@@ -92,8 +92,9 @@ def embed(module: Encodable, loader: DataLoader[Any]) -> tuple[np.ndarray, np.nd
         for batch in loader:
             x = batch["x"].to(module.device)
             features.append(module.encode(x).detach().cpu().numpy())
-            if "y" in batch:
-                labels.append(np.asarray(batch["y"]))
+            target = batch.get("y")
+            if target is not None:
+                labels.append(np.asarray(target))
     finally:
         module.train(was_training)
     return (
@@ -118,8 +119,8 @@ class OnlineProbe(Callback):
 
     def __init__(
         self,
-        train_loader: DataLoader[Any],
-        val_loader: DataLoader[Any],
+        train_loader: BatchLoader[LoaderBatch],
+        val_loader: BatchLoader[LoaderBatch],
         *,
         every_n_epochs: int = 1,
         metrics: tuple[str, ...] = ("accuracy", "roc_auc"),
@@ -184,7 +185,7 @@ class RankMeMonitor(Callback):
     """
 
     def __init__(
-        self, loader: DataLoader[Any], *, every_n_epochs: int = 1, prefix: str = "quality"
+        self, loader: BatchLoader[LoaderBatch], *, every_n_epochs: int = 1, prefix: str = "quality"
     ) -> None:
         super().__init__()
         self.loader = loader

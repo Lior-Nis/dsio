@@ -48,11 +48,13 @@ what the dataset behind the loader hands the ``(x, target)`` pair. Contrastive o
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 import torch
 from lightning import LightningModule
 from torch import nn
+
+from dsio.batches import BatchInputs, PredictionBatch, TrainingBatch
 
 Stage = Literal["train", "val", "test"]
 
@@ -79,7 +81,6 @@ class DsioModule(LightningModule):
         preprocessor: nn.Module | None = None,
         lr: float = 1e-3,
         weight_decay: float = 0.0,
-        target_key: str = "y",
     ) -> None:
         super().__init__()
         for name, component in (("backbone", backbone), ("head", head), ("loss", loss)):
@@ -93,7 +94,6 @@ class DsioModule(LightningModule):
 
         self.lr = lr
         self.weight_decay = weight_decay
-        self.target_key = target_key
         self.save_hyperparameters(ignore=["backbone", "head", "loss", "transform", "preprocessor"])
 
     # --- the chain --------------------------------------------------------------
@@ -115,10 +115,10 @@ class DsioModule(LightningModule):
 
     # --- one step, three stages -------------------------------------------------
 
-    def _common_step(self, batch: dict[str, Any], stage: Stage) -> torch.Tensor:
+    def _common_step(self, batch: TrainingBatch, stage: Stage) -> torch.Tensor:
         """The single implementation every stage shares."""
         x = batch["x"]
-        target = batch[self.target_key]
+        target = batch["y"]
         prediction = self(x)
         value = self.loss(prediction, target)
         if value.ndim > 0:
@@ -137,16 +137,16 @@ class DsioModule(LightningModule):
                 self.log(f"{stage}/{name}", diagnostic, batch_size=x.shape[0], on_epoch=True)
         return value
 
-    def training_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: TrainingBatch, batch_idx: int) -> torch.Tensor:
         return self._common_step(batch, "train")
 
-    def validation_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: TrainingBatch, batch_idx: int) -> torch.Tensor:
         return self._common_step(batch, "val")
 
-    def test_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
+    def test_step(self, batch: TrainingBatch, batch_idx: int) -> torch.Tensor:
         return self._common_step(batch, "test")
 
-    def predict_step(self, batch: dict[str, Any], batch_idx: int) -> dict[str, torch.Tensor]:
+    def predict_step(self, batch: BatchInputs, batch_idx: int) -> PredictionBatch:
         """Return predictions *with* the row positions they belong to.
 
         Returning bare logits would make alignment a property of DataLoader ordering, which
@@ -157,7 +157,6 @@ class DsioModule(LightningModule):
         return {
             "row": batch["row"],
             "prediction": prediction.detach(),
-            self.target_key: batch[self.target_key].detach(),
         }
 
     def configure_optimizers(self) -> torch.optim.Optimizer:

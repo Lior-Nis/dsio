@@ -37,13 +37,21 @@ each row's pair index. See :class:`~dsio.model.components.NTXent` and
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NewType, cast, overload
 
 import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
+from dsio.batches import (
+    BatchLoader,
+    LoaderBatch,
+    TrainingBatch,
+    TrainingItem,
+    WindowBatch,
+    WindowItem,
+)
 from dsio.contracts import sha256_of_bytes
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex, assert_index_matches_store
@@ -56,9 +64,10 @@ from dsio.runs.seeding import dataloader_kwargs
 #: accepts ``generator`` — this widened signature just states what was already true, and
 #: ``WindowDataset`` below is the first caller that actually passes one.
 MaskStrategy = Callable[[torch.Tensor, torch.Generator | None], torch.Tensor]
+_TargetDataset = NewType("_TargetDataset", Dataset[TrainingItem])
 
 
-class WindowDataset(Dataset[dict[str, Any]]):
+class WindowDataset(Dataset[WindowItem]):
     """Windows of one store, restricted to a set of index positions.
 
     ``positions`` are offsets into ``index``, which is what a
@@ -66,7 +75,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
     so predictions can be realigned by identity rather than by trusting loader ordering.
 
     ``mask``, when given, turns this into a pretext dataset: ``__getitem__`` returns the
-    masked window as ``x`` and, under ``target_key``, the original window with every
+    masked window as ``x`` and, under ``y``, the original window with every
     *visible* position replaced by NaN — the sentinel a mask-aware loss selects on before
     it computes anything, so it never sees a position the model was allowed to look at.
     ``labels`` is ignored (a pretext window has no label to speak of; the target *is* the
@@ -142,7 +151,6 @@ class WindowDataset(Dataset[dict[str, Any]]):
         channels_first: bool = True,
         payload_dtype: torch.dtype | None = None,
         mask: MaskStrategy | None = None,
-        target_key: str = "y",
         normalize_target: bool = True,
         mask_seed: int | None = None,
     ) -> None:
@@ -170,14 +178,13 @@ class WindowDataset(Dataset[dict[str, Any]]):
         self.channels_first = channels_first
         self.payload_dtype = payload_dtype
         self.mask = mask
-        self.target_key = target_key
         self.normalize_target = normalize_target
         self.mask_seed = mask_seed
 
     def __len__(self) -> int:
         return int(self.positions.size)
 
-    def __getitem__(self, i: int) -> dict[str, Any]:
+    def __getitem__(self, i: int) -> WindowItem:
         position = int(self.positions[i])
         start = int(self.index.starts[position])
         window = self.store.read(start, self.index.spec.length)
@@ -191,7 +198,7 @@ class WindowDataset(Dataset[dict[str, Any]]):
         x = raw.float() if self.payload_dtype is None else raw.to(self.payload_dtype)
         # row is carried regardless of which branch below runs: predictions are aligned to
         # folds by this identity, not by trusting the order a DataLoader hands batches back.
-        item: dict[str, Any] = {"row": position}
+        item = WindowItem(x=x, row=position)
         if self.mask is not None:
             # One window at a time, so the mask strategy sees a batch of one. The target
             # carries the true value at every hidden position and NaN everywhere else —
@@ -215,11 +222,10 @@ class WindowDataset(Dataset[dict[str, Any]]):
                 mean = x.mean(dim=-1, keepdim=True)
                 std = x.std(dim=-1, keepdim=True) + 1e-6
                 target_source = (x - mean) / std
-            item[self.target_key] = apply_mask(
+            item["y"] = apply_mask(
                 target_source.unsqueeze(0), ~hidden, value=float("nan")
             ).squeeze(0)
         else:
-            item["x"] = x
             if self.labels is not None:
                 value = self.labels[position]
                 item["y"] = torch.as_tensor(value)
@@ -240,7 +246,6 @@ def train_dataset(
     channels_first: bool = True,
     payload_dtype: torch.dtype | None = None,
     mask: MaskStrategy | None = None,
-    target_key: str = "y",
     normalize_target: bool = True,
     mask_seed: int | None = None,
 ) -> WindowDataset:
@@ -269,7 +274,6 @@ def train_dataset(
         channels_first=channels_first,
         payload_dtype=payload_dtype,
         mask=mask,
-        target_key=target_key,
         normalize_target=normalize_target,
         mask_seed=mask_seed,
     )
@@ -283,7 +287,6 @@ def val_dataset(
     labels: np.ndarray | None = None,
     channels_first: bool = True,
     payload_dtype: torch.dtype | None = None,
-    target_key: str = "y",
 ) -> WindowDataset:
     """Build a dataset that can never be masked, because there is no ``mask=`` keyword to
     pass here at all — the mistake this closes is not "someone remembered not to", it is
@@ -304,7 +307,58 @@ def val_dataset(
         labels=labels,
         channels_first=channels_first,
         payload_dtype=payload_dtype,
-        target_key=target_key,
+    )
+
+
+def labelled_dataset(
+    store: SignalStore,
+    index: WindowIndex,
+    positions: np.ndarray | None = None,
+    *,
+    labels: np.ndarray,
+    channels_first: bool = True,
+    payload_dtype: torch.dtype | None = None,
+) -> _TargetDataset:
+    """Build windows whose label is statically guaranteed to be present."""
+    return _TargetDataset(
+        cast(
+            "Dataset[TrainingItem]",
+            val_dataset(
+                store,
+                index,
+                positions,
+                labels=labels,
+                channels_first=channels_first,
+                payload_dtype=payload_dtype,
+            ),
+        )
+    )
+
+
+def masked_dataset(
+    store: SignalStore,
+    index: WindowIndex,
+    positions: np.ndarray | None = None,
+    *,
+    mask: MaskStrategy,
+    channels_first: bool = True,
+    normalize_target: bool = True,
+    mask_seed: int | None = None,
+) -> _TargetDataset:
+    """Build masked windows whose reconstruction target is guaranteed to be present."""
+    return _TargetDataset(
+        cast(
+            "Dataset[TrainingItem]",
+            train_dataset(
+                store,
+                index,
+                positions,
+                channels_first=channels_first,
+                mask=mask,
+                normalize_target=normalize_target,
+                mask_seed=mask_seed,
+            ),
+        )
     )
 
 
@@ -350,12 +404,11 @@ class TwoViewCollate:
     build_loaders` builds.
     """
 
-    def __init__(self, augment: nn.Module, target_key: str = "y", seed: int | None = None) -> None:
+    def __init__(self, augment: nn.Module, seed: int | None = None) -> None:
         self.augment = augment
-        self.target_key = target_key
         self.seed = seed
 
-    def __call__(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+    def __call__(self, items: list[WindowItem]) -> TrainingBatch:
         if not items:
             raise ValueError("cannot collate an empty batch")
         x = torch.stack([item["x"] for item in items])
@@ -363,7 +416,7 @@ class TwoViewCollate:
         batch = x.shape[0]
         views = self._augment_twice(x, row)
         pair = (torch.arange(2 * batch, device=views.device) + batch) % (2 * batch)
-        return {"x": views, self.target_key: pair, "row": row.repeat(2)}
+        return {"x": views, "y": pair, "row": row.repeat(2)}
 
     def _augment_twice(self, x: torch.Tensor, row: torch.Tensor) -> torch.Tensor:
         if self.seed is None:
@@ -376,16 +429,42 @@ class TwoViewCollate:
             return torch.cat([self.augment(x), self.augment(x)], dim=0)
 
 
+@overload
 def make_loader(
-    dataset: WindowDataset,
+    dataset: Dataset[WindowItem],
     *,
     batch_size: int = 32,
     shuffle: bool = False,
     num_workers: int = 0,
     seed: int = 42,
     drop_last: bool = False,
-    collate_fn: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
-) -> DataLoader[dict[str, Any]]:
+    collate_fn: None = None,
+) -> BatchLoader[WindowBatch]: ...
+
+
+@overload
+def make_loader(
+    dataset: Dataset[WindowItem],
+    *,
+    batch_size: int = 32,
+    shuffle: bool = False,
+    num_workers: int = 0,
+    seed: int = 42,
+    drop_last: bool = False,
+    collate_fn: Callable[[list[WindowItem]], TrainingBatch],
+) -> BatchLoader[TrainingBatch]: ...
+
+
+def make_loader(
+    dataset: Dataset[WindowItem],
+    *,
+    batch_size: int = 32,
+    shuffle: bool = False,
+    num_workers: int = 0,
+    seed: int = 42,
+    drop_last: bool = False,
+    collate_fn: Callable[[list[WindowItem]], TrainingBatch] | None = None,
+) -> BatchLoader[LoaderBatch]:
     """Build a DataLoader whose *shuffle order* does not depend on the worker count.
 
     Seeding the process is not enough: each worker gets its own RNG, so without an explicit
@@ -412,12 +491,38 @@ def make_loader(
     if num_workers > 0:
         kwargs["persistent_workers"] = True
         kwargs["prefetch_factor"] = 2
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        drop_last=drop_last,
-        collate_fn=collate_fn,
-        **kwargs,
+    return cast(
+        "BatchLoader[LoaderBatch]",
+        DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            drop_last=drop_last,
+            collate_fn=collate_fn,
+            **kwargs,
+        ),
+    )
+
+
+def make_target_loader(
+    dataset: _TargetDataset,
+    *,
+    batch_size: int = 32,
+    shuffle: bool = False,
+    num_workers: int = 0,
+    seed: int = 42,
+    drop_last: bool = False,
+) -> BatchLoader[TrainingBatch]:
+    """Build a loader that statically preserves a target-bearing dataset contract."""
+    return cast(
+        "BatchLoader[TrainingBatch]",
+        make_loader(
+            cast("Dataset[WindowItem]", dataset),
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            seed=seed,
+            drop_last=drop_last,
+        ),
     )

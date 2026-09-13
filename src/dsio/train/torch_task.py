@@ -26,18 +26,20 @@ artifact path and digest, and verified on load.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 from pydantic import Field, model_validator
 
+from dsio.batches import PredictionBatch
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.contracts import DsioModel, sha256_of
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
-from dsio.dataset.dataset import WindowDataset, make_loader
+from dsio.dataset.dataset import WindowDataset, labelled_dataset, make_loader, make_target_loader
 from dsio.eval.contract import PREDICTIONS_FILE, EvalError, Fold, FoldPrediction
 from dsio.eval.metrics import METRICS, MetricError, compute
 from dsio.model.module import DsioModule
@@ -377,8 +379,14 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         directory = run.artifacts_dir
         payload_dtype = payload_dtype_of(task)
 
-        train_loader = make_loader(
-            WindowDataset(store, index, fold.train, payload_dtype=payload_dtype),
+        train_loader = make_target_loader(
+            labelled_dataset(
+                store,
+                index,
+                fold.train,
+                labels=window_labels,
+                payload_dtype=payload_dtype,
+            ),
             batch_size=task.batch_size,
             shuffle=True,
             num_workers=task.num_workers,
@@ -388,8 +396,14 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         val_loader = (
             None
             if validation is None
-            else make_loader(
-                WindowDataset(store, index, validation, payload_dtype=payload_dtype),
+            else make_target_loader(
+                labelled_dataset(
+                    store,
+                    index,
+                    validation,
+                    labels=window_labels,
+                    payload_dtype=payload_dtype,
+                ),
                 batch_size=task.batch_size,
                 num_workers=task.num_workers,
                 seed=config.seed,
@@ -410,7 +424,12 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
             num_workers=task.num_workers,
             seed=config.seed,
         )
-        batches = trainer.predict(module, predict_loader)
+        raw_batches = trainer.predict(module, predict_loader)
+        if raw_batches is None:
+            raise ValueError(f"{fold.name}: the predict loop returned no result")
+        if raw_batches and isinstance(raw_batches[0], list):
+            raise ValueError(f"{fold.name}: expected one prediction loader, got nested results")
+        batches = cast("Sequence[PredictionBatch]", raw_batches)
         result = _assemble(batches, fold, window_labels)
 
         # Guard 1, carried over from the deleted `cross_validate`: predictions that do
@@ -527,7 +546,7 @@ def _write_predictions(
 
 
 def _assemble(
-    batches: Any, fold: Fold, window_labels: np.ndarray
+    batches: Sequence[PredictionBatch], fold: Fold, window_labels: np.ndarray
 ) -> FoldPrediction:
     """Reassemble predicted batches into fold order, keyed by the row each carried.
 

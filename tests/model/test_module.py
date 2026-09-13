@@ -150,9 +150,8 @@ def test_predict_step_reports_the_rows_it_predicted(batch: torch.Tensor) -> None
     rows = torch.tensor([7, 3, 11, 5])
     targets = torch.zeros(4).long()
     out = module.predict_step({"x": batch, "y": targets, "row": rows}, 0)
-    assert set(out) == {"row", "prediction", "y"}
+    assert set(out) == {"row", "prediction"}
     assert torch.equal(out["row"], rows)
-    assert torch.equal(out["y"], targets)
     assert out["prediction"].shape == (4, 2)
 
 

@@ -30,13 +30,19 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from pydantic import Field, model_validator
-from torch.utils.data import DataLoader
 
+from dsio.batches import BatchLoader, TrainingBatch
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowIndex, WindowSpec, load_or_build
-from dsio.dataset.dataset import TwoViewCollate, make_loader, train_dataset, val_dataset
+from dsio.dataset.dataset import (
+    TwoViewCollate,
+    make_loader,
+    make_target_loader,
+    masked_dataset,
+    val_dataset,
+)
 from dsio.eval.contract import Fold
 from dsio.model.masking import MASKS
 from dsio.model.module import DsioModule, export_encoder
@@ -180,7 +186,7 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
 
 def build_loaders(
     task: SslPretrainTask, store: SignalStore, index: WindowIndex, fold: Fold, seed: int
-) -> tuple[DataLoader[dict[str, Any]], DataLoader[dict[str, Any]] | None]:
+) -> tuple[BatchLoader[TrainingBatch], BatchLoader[TrainingBatch] | None]:
     """The training and validation loaders, shaped by whichever of ``mask``/``augmentor``
     the task set — see :class:`SslPretrainTask`'s docstring for the two contracts.
 
@@ -206,8 +212,8 @@ def build_loaders(
 
     if task.mask is not None:
         mask = MASKS.get(task.mask.name)(**task.mask.params)
-        train_loader = make_loader(
-            train_dataset(
+        train_loader = make_target_loader(
+            masked_dataset(
                 store, index, fold.train, mask=mask, normalize_target=task.normalize_target
             ),
             batch_size=task.batch_size,
@@ -221,8 +227,8 @@ def build_loaders(
         val_loader = (
             None
             if validation is None
-            else make_loader(
-                train_dataset(
+            else make_target_loader(
+                masked_dataset(
                     store,
                     index,
                     validation,

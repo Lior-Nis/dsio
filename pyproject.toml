@@ -133,7 +133,7 @@ addopts = "-m 'not live'"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src/dsio"]
+files = ["src/dsio", "tests/typing"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
