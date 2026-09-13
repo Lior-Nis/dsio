@@ -68,7 +68,7 @@ def spine_baseline(
 @stage_hook("spine_baseline")
 def _stage_if_default(config: RunConfig) -> None:
     """Stage the synthetic starter corpus — only called on the execute path, never
-    from `resolve()` or `--dry-run` (see `dsio.cli.run_cmd`), and only when
+    from `resolve()` or `--dry-run` (see `dsio.application`), and only when
     `store`/`labels`/`split` are still `spine_baseline`'s defaults, so a caller who
     overrode any of them to point at their own data is never touched by this."""
     from dsio.train.torch_task import TorchTask

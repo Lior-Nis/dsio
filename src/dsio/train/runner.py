@@ -54,7 +54,7 @@ def check(config: RunConfig) -> None:
 def execute(config: RunConfig, run: Run) -> dict[str, float]:
     """Seed every RNG a runner can touch, then dispatch ``config`` to its runner.
 
-    ``dsio run`` (``src/dsio/cli/run_cmd.py``) also calls ``seed_everything`` up front,
+    ``dsio run`` (through :mod:`dsio.application`) also calls ``seed_everything`` up front,
     before ``start_run`` captures provenance, to capture the seeds actually applied for
     the run record -- that call stays, since ``execute`` returns only metrics and has
     nowhere to hand the seeds dict back. Seeding here as well is what makes a *direct*

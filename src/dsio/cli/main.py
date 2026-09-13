@@ -13,18 +13,6 @@ import typer
 from dsio.cli import run_cmd
 from dsio.cli.envelope import emit, failure
 
-# I7: MLflow prints a "View run"/"View experiment" banner straight to stdout the moment a
-# run is created (`mlflow.tracking._tracking_service.client.MlflowTrackingServiceClient.
-# _log_url`, called from `create_run`), interleaving with `cli/envelope.py`'s one JSON
-# object -- `dsio run ... > out.json` then produces a file `json.load` cannot parse.
-# `cli/envelope.py` exists specifically to make stdout machine-readable (decision 6 makes
-# "a shell loop or an agent" the mandated cross-validation workflow), so this is a hard
-# guarantee, not a preference: set unconditionally, ahead of any ambient environment
-# variable, rather than `setdefault`. Set at CLI import time, not inside `dsio.train.
-# tracking`, so a library caller of `run_torch`/`run_ssl_pretrain` directly (a notebook, a
-# script) still gets MLflow's normal banner -- only the CLI's stdout is a contract.
-os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] = "true"
-
 app = typer.Typer(
     name="dsio",
     help="Reproducible ML/DL experimentation.",
@@ -38,11 +26,10 @@ def _dsio() -> None:
     """Reproducible ML/DL experimentation."""
 
 
-# A Typer app with exactly one registered command collapses into that command directly,
-# which would silence the ``run`` keyword and swallow it as the preset argument instead.
-# The callback above forces Typer to keep building a command group, so ``dsio run`` stays
-# the explicit, literal invocation the spec calls for.
-app.registered_commands.extend(run_cmd.app.registered_commands)
+# Register through Typer's public API. The callback above keeps the one-command app as a
+# group, so ``dsio run`` remains an explicit subcommand rather than collapsing into the
+# command and swallowing ``run`` as its preset argument.
+app.command("run")(run_cmd.run)
 
 
 def main() -> None:
@@ -58,6 +45,11 @@ def main() -> None:
     user gets a traceback. Duck-typing on the interface survives that.
     """
     command = typer.main.get_command(app)
+    # MLflow prints a run URL to stdout when a REST-backed run is created. Set this only
+    # at actual CLI execution so importing the CLI remains side-effect free while the
+    # command's single-JSON-envelope contract stays intact. Overwrite ambient values: a
+    # false value would allow the banner to corrupt stdout.
+    os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] = "true"
     try:
         command(standalone_mode=False)
     except Exception as exc:  # noqa: BLE001 - the boundary that renders every error
