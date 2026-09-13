@@ -303,14 +303,14 @@ def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
     own first two lines -- then raises, before any of its own artifact/tag logging runs.
     That run must still end up `FAILED`, not stuck `RUNNING`.
     """
-    import dsio.train.torch_task as torch_task
+    import dsio.train.tracking as tracking
 
     def fake_stamp_provenance(run: object, mlflow_logger: object) -> None:
         mlflow_run_id = mlflow_logger.run_id  # type: ignore[attr-defined]
         run.mlflow_run_id = mlflow_run_id  # type: ignore[attr-defined]
         raise RuntimeError("boom: crash mid-provenance-stamp, after the run was created")
 
-    monkeypatch.setattr(torch_task, "stamp_provenance", fake_stamp_provenance)
+    monkeypatch.setattr(tracking, "stamp_provenance", fake_stamp_provenance)
 
     config = RunConfig(name="prov-crash", seed=0, task=make_task(corpus))
     run = start_run(

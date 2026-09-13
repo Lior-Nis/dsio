@@ -51,14 +51,19 @@ from dsio.model.registry import (
 )
 from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.artifacts import ArtifactRef, load_artifact
+from dsio.train.assembly import Component as Component
+from dsio.train.assembly import accepted_shape_arguments, build_optional_component
 from dsio.train.runner import preflight, runner
 from dsio.train.tracking import (
-    build_mlflow_logger,
     finite_metrics,
     log_run_artifacts,
     require_mlflow,
-    stamp_provenance,
+    tracked_run,
 )
+from dsio.train.trainer import TrainerConfig as TrainerConfig
+from dsio.train.trainer import build_callbacks as build_callbacks
+from dsio.train.trainer import build_trainer
+from dsio.train.trainer import sanitise_metric as sanitise_metric
 
 if TYPE_CHECKING:
     import torch
@@ -92,18 +97,6 @@ def _fold_invariant_config_hash(config: RunConfig) -> str:
     return sha256_of(identity)
 
 
-class Component(DsioModel):
-    """A registered component plus its keyword arguments.
-
-    Name and parameters travel together so a config records exactly what was built. The
-    alternative — a name here and a parameter block somewhere else — is how a config
-    directory fills with files that differ only in one exponent.
-    """
-
-    name: str
-    params: dict[str, Any] = Field(default_factory=dict)
-
-
 class EncoderRef(DsioModel):
     """A pinned pretrained encoder, plus what to do with it.
 
@@ -131,24 +124,6 @@ class EncoderRef(DsioModel):
 
     def as_artifact_ref(self) -> ArtifactRef:
         return ArtifactRef(run_id=self.run_id, path=self.path, digest=self.digest)
-
-
-class TrainerConfig(DsioModel):
-    """Lightning trainer settings, restricted to what changes a result or its cost."""
-
-    max_epochs: int = Field(default=10, ge=1)
-    accelerator: str = "auto"
-    devices: int | str = "auto"
-    precision: str = "32-true"
-    gradient_clip_val: float | None = Field(default=None, ge=0.0)
-    accumulate_grad_batches: int = Field(default=1, ge=1)
-    early_stopping_patience: int | None = Field(default=None, ge=1)
-    monitor: str = "val/loss"
-    monitor_mode: Literal["min", "max"] = "min"
-    checkpoint: bool = True
-    log_every_n_steps: int = Field(default=10, ge=1)
-    enable_progress_bar: bool = False
-    deterministic: bool = True
 
 
 @TASKS.register("torch")
@@ -262,14 +237,14 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
     any lazily-built buffer survive it, so fold 2 would start from fold 1's normalisation.
     """
     factory = BACKBONES.get(task.backbone.name)
-    shape = _accepted(factory, {"channels": channels, "length": length})
+    shape = accepted_shape_arguments(factory, {"channels": channels, "length": length})
     backbone = factory(**{**shape, **task.backbone.params})
     out_dim = getattr(backbone, "out_dim", None)
     head_params = dict(task.head.params)
     if out_dim is not None:
         head_params.setdefault("in_dim", out_dim)
 
-    transform = _optional(task.transform, TRANSFORMS)
+    transform = build_optional_component(task.transform, TRANSFORMS)
     if task.encoder is not None:
         load_encoder(task.encoder, backbone=backbone, transform=transform)
 
@@ -278,36 +253,10 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
         head=HEADS.get(task.head.name)(**head_params),
         loss=LOSSES.get(task.loss.name)(**task.loss.params),
         transform=transform,
-        preprocessor=_optional(task.preprocessor, PREPROCESSORS),
+        preprocessor=build_optional_component(task.preprocessor, PREPROCESSORS),
         lr=task.lr,
         weight_decay=task.weight_decay,
     )
-
-
-def _optional(component: Component | None, registry: Any) -> Any:
-    return None if component is None else registry.get(component.name)(**component.params)
-
-
-def _accepted(factory: Any, shape: dict[str, Any]) -> dict[str, Any]:
-    """Keep only the shape arguments this factory actually takes.
-
-    Framework-supplied shape and user-supplied params are filtered differently on purpose.
-    A backbone that pools over time is genuinely length-agnostic, and making it declare a
-    ``length`` it ignores would be a lie that later reads as a constraint. User params stay
-    strict and unfiltered, so a typo in a config still fails loudly instead of vanishing
-    into a catch-all.
-    """
-    import inspect
-
-    try:
-        signature = inspect.signature(factory)
-    except (TypeError, ValueError):  # pragma: no cover - builtins have no signature
-        return shape
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values()):
-        # A factory that takes **kwargs has told us nothing, so pass everything and let it
-        # decide. Registering the class itself gives a real signature and avoids this.
-        return shape
-    return {key: value for key, value in shape.items() if key in signature.parameters}
 
 
 def load_encoder(
@@ -380,84 +329,6 @@ def payload_dtype_of(task: TorchTask) -> torch.dtype | None:
     return {"long": torch.long}[task.payload_dtype]
 
 
-def sanitise_metric(name: str) -> str:
-    """Make a metric name safe inside a checkpoint filename template.
-
-    A ``/`` inside a format field becomes a directory separator, so ``val/loss`` in a
-    template silently creates nested directories that look like a corrupted run. Lightning
-    offers no escaping, so the substitution happens here.
-    """
-    return name.replace("/", "_").replace("\\", "_").replace("=", "-")
-
-
-def build_callbacks(
-    trainer: TrainerConfig, directory: Path, *, has_validation: bool
-) -> list[Any]:
-    """Construct the checkpoint/early-stopping callbacks a fold needs, letting any
-    construction failure propagate.
-
-    Wrapping this in a bare ``except`` that logs a warning means a ModelCheckpoint which
-    fails to construct silently disables checkpointing for a multi-hour run, and the loss of
-    the weights is discovered days later. A misconfigured callback is a configuration bug and
-    must stop the run.
-
-    Takes a bare :class:`TrainerConfig`, not a task, so both runners that read one --
-    ``run_torch``'s ``TorchTask`` and ``run_ssl_pretrain``'s ``SslPretrainTask`` -- can
-    share this one construction (I1: pretraining used to read none of
-    ``checkpoint``/``early_stopping_patience``/``monitor``/``monitor_mode`` at all, so
-    ``SslPretrainTask``'s own deliberate ``TrainerConfig(monitor="val/loss")`` default did
-    nothing).
-
-    ``has_validation`` gates anything that monitors ``trainer.monitor``: with no
-    validation loader, that metric is never logged (``DsioModule._common_step`` only logs
-    under its own ``stage``), so ``EarlyStopping`` would raise on the metric it can never
-    find, and a metric-ranked ``ModelCheckpoint`` would silently save nothing every
-    epoch. ``checkpoint=True`` still gets a real ``ModelCheckpoint`` in that case -- it
-    just keeps the most recent epoch instead of ranking by a metric that does not exist --
-    rather than being dropped to an empty list the way a fold with no validation set used
-    to be: an empty callback list combined with Lightning's own ``enable_checkpointing``
-    default (``True`` unless a caller says otherwise) is exactly how Lightning ended up
-    installing its *own* default ``ModelCheckpoint`` regardless of what
-    ``checkpoint=False`` asked for.
-    """
-    from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-
-    callbacks: list[Any] = []
-    if trainer.checkpoint:
-        if has_validation:
-            monitor = trainer.monitor
-            callbacks.append(
-                ModelCheckpoint(
-                    dirpath=directory,
-                    filename=(
-                        "epoch{epoch:02d}-" + sanitise_metric(monitor) + "{" + monitor + ":.4f}"
-                    ),
-                    monitor=monitor,
-                    mode=trainer.monitor_mode,
-                    save_top_k=1,
-                    auto_insert_metric_name=False,
-                )
-            )
-        else:
-            callbacks.append(
-                ModelCheckpoint(
-                    dirpath=directory,
-                    filename="epoch{epoch:02d}",
-                    save_top_k=1,
-                    auto_insert_metric_name=False,
-                )
-            )
-    if has_validation and trainer.early_stopping_patience is not None:
-        callbacks.append(
-            EarlyStopping(
-                monitor=trainer.monitor,
-                mode=trainer.monitor_mode,
-                patience=trainer.early_stopping_patience,
-            )
-        )
-    return callbacks
-
-
 # --- run ----------------------------------------------------------------------------
 
 
@@ -469,45 +340,12 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
     fit -> predict -> write artifacts -> stamp provenance. Cross-validation is this
     function called N times, from a shell loop or an agent -- not a loop in here.
     """
-    from lightning import Trainer
-
-    # Fails before the store, module or trainer exist -- the same guarantee `check_torch`
-    # gives the CLI's pre-flight path, reasserted here for any caller (every test in this
-    # module, and any future caller) that reaches `execute()` without going through it.
-    # MLflow first, per decision 7: a run that cannot write to it should not even resolve
-    # a fold first.
-    tracking_uri = require_mlflow()
-
-    task = config.task
-    assert isinstance(task, TorchTask)
-
-    # The MLflow run is created here, as early as `require_mlflow` allows -- before the
-    # store, a module or a `Trainer` exist -- and its provenance (the resolved config,
-    # the reproduce script, the dirty-tree diff, the `config_hash` tag) is logged
-    # immediately. This is decision 7's replacement for `RunLedger.start`'s "the record
-    # is written before any work begins": there, the write was to a local `run.json`;
-    # here, it is to MLflow, which is now the thing whose absence makes a run unrecorded.
-    mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
-
-    # Everything from here on is wrapped so that any failure -- not just one Lightning's
-    # own `Trainer` catches internally (`trainer.fit`/`trainer.predict` already finalize
-    # the logger to "failed" on an exception raised during either call), but also a crash
-    # during `stamp_provenance` itself (`client.log_artifact`/`set_tag` are network
-    # calls, and MLflow can go away mid-run just as easily as before it) -- leaves the
-    # MLflow run visibly FAILED rather than either FINISHED or orphaned RUNNING forever.
-    # Lightning's own teardown marks the run FINISHED the moment `trainer.predict`
-    # *returns*, before the guards below and `compute()` have even run; without the
-    # `except` below, a fold that fails to assemble or score would look like a completed
-    # run in MLflow, and a fold that fails *while being stamped* would look like one
-    # still in progress, forever -- neither is the "a crash does not leave a run looking
-    # successful" guarantee decision 7 asks for. `stamp_provenance` is what actually
-    # creates the MLflow run (`mlflow_logger.experiment`'s lazy `create_run`, on first
-    # access); `run.mlflow_run_id` is only set once that access has succeeded, so the
-    # `except` below uses it -- not a bare re-access of `mlflow_logger.run_id`, which
-    # would itself attempt to lazily create a *second* run if the first creation is what
-    # failed -- to decide whether there is a run to terminate at all.
-    try:
-        stamp_provenance(run, mlflow_logger)
+    # `tracked_run` keeps MLflow reachability first and stamps provenance before any
+    # store, model or Trainer work. It also marks an existing run failed if anything in
+    # this task-specific body crashes, including after Lightning has finalized success.
+    with tracked_run(config, run) as mlflow_logger:
+        task = config.task
+        assert isinstance(task, TorchTask)
 
         require_fold(task.splits_root, task.split, task.fold)
 
@@ -558,33 +396,11 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
             )
         )
 
-        trainer = Trainer(
-            max_epochs=task.trainer.max_epochs,
-            accelerator=task.trainer.accelerator,
-            devices=task.trainer.devices,
-            precision=task.trainer.precision,  # type: ignore[arg-type]
-            gradient_clip_val=task.trainer.gradient_clip_val,
-            accumulate_grad_batches=task.trainer.accumulate_grad_batches,
-            log_every_n_steps=task.trainer.log_every_n_steps,
-            enable_progress_bar=task.trainer.enable_progress_bar,
-            enable_model_summary=False,
-            # "warn" rather than True: several ATen kernels have no deterministic
-            # variant, and a hard failure would make whole model families unrunnable.
-            # The warning is the signal that this run's numbers will not reproduce
-            # bit-for-bit.
-            deterministic="warn" if task.trainer.deterministic else False,
-            default_root_dir=directory,
-            logger=mlflow_logger,
-            # I1: without this, Lightning installs its *own* default `ModelCheckpoint`
-            # regardless of `task.trainer.checkpoint` -- `checkpoint=False` (e.g.
-            # `spine_baseline`) silently got a checkpoint anyway, doubly-nested under
-            # this run's own artifact directory, which then reached MLflow through
-            # `log_run_artifacts`'s bulk upload even though `log_model=False`
-            # (`build_mlflow_logger`) exists specifically to keep an undigested model out.
-            enable_checkpointing=task.trainer.checkpoint,
-            callbacks=build_callbacks(
-                task.trainer, directory, has_validation=validation is not None
-            ),
+        trainer = build_trainer(
+            task.trainer,
+            directory,
+            mlflow_logger,
+            build_callbacks(task.trainer, directory, has_validation=validation is not None),
         )
         trainer.fit(module, train_loader, val_loader)
 
@@ -655,10 +471,6 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         # land in the same MLflow run as everything else this fold produced.
         mlflow_logger.log_metrics(finite_metrics(dict(values)))
         log_run_artifacts(run, mlflow_logger)
-    except BaseException:
-        if run.mlflow_run_id is not None:
-            mlflow_logger.experiment.set_terminated(mlflow_logger.run_id, "FAILED")
-        raise
     return dict(values)
 
 

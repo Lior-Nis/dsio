@@ -151,6 +151,20 @@ def build_mlflow_logger(config: RunConfig, run: Run, tracking_uri: str) -> MLFlo
     )
 
 
+@contextmanager
+def tracked_run(config: RunConfig, run: Run) -> Iterator[MLFlowLogger]:
+    """Stamp a run before work and mark an existing MLflow run failed on any crash."""
+    tracking_uri = require_mlflow()
+    mlflow_logger = build_mlflow_logger(config, run, tracking_uri)
+    try:
+        stamp_provenance(run, mlflow_logger)
+        yield mlflow_logger
+    except BaseException:
+        if run.mlflow_run_id is not None:
+            mlflow_logger.experiment.set_terminated(run.mlflow_run_id, "FAILED")
+        raise
+
+
 def finite_metrics(metrics: dict[str, float]) -> dict[str, float]:
     """Drop non-finite values before they reach MLflow.
 

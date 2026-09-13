@@ -161,6 +161,107 @@ def test_build_mlflow_logger_disables_model_logging(tmp_path: Path) -> None:
     assert logger._tracking_uri == uri
 
 
+def test_tracked_run_requires_builds_and_stamps_before_yield(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.train.tracking as tracking
+
+    events: list[str] = []
+    config = SimpleNamespace()
+    run = SimpleNamespace(mlflow_run_id=None)
+    logger = SimpleNamespace()
+
+    def fake_require_mlflow() -> str:
+        events.append("require")
+        return "file:/tracking"
+
+    def fake_build_mlflow_logger(active_config: object, active_run: object, uri: str) -> object:
+        assert active_config is config
+        assert active_run is run
+        assert uri == "file:/tracking"
+        events.append("build")
+        return logger
+
+    def fake_stamp_provenance(active_run: object, active_logger: object) -> None:
+        assert active_run is run
+        assert active_logger is logger
+        events.append("stamp")
+        run.mlflow_run_id = "mlflow-run"
+
+    monkeypatch.setattr(tracking, "require_mlflow", fake_require_mlflow)
+    monkeypatch.setattr(tracking, "build_mlflow_logger", fake_build_mlflow_logger)
+    monkeypatch.setattr(tracking, "stamp_provenance", fake_stamp_provenance)
+
+    with tracking.tracked_run(config, run) as active:  # type: ignore[arg-type]
+        assert active is logger
+        events.append("body")
+
+    assert events == ["require", "build", "stamp", "body"]
+
+
+def test_tracked_run_marks_an_existing_run_failed_without_reading_logger_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.train.tracking as tracking
+
+    terminations: list[tuple[str, str]] = []
+
+    class Experiment:
+        def set_terminated(self, run_id: str, status: str) -> None:
+            terminations.append((run_id, status))
+
+    class Logger:
+        experiment = Experiment()
+
+        @property
+        def run_id(self) -> str:
+            raise AssertionError("failure handling must use the ID already recorded on Run")
+
+    run = SimpleNamespace(mlflow_run_id=None)
+    logger = Logger()
+    monkeypatch.setattr(tracking, "require_mlflow", lambda: "file:/tracking")
+    monkeypatch.setattr(tracking, "build_mlflow_logger", lambda *_args: logger)
+
+    def fake_stamp_provenance(active_run: object, _logger: object) -> None:
+        active_run.mlflow_run_id = "existing-run"  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(tracking, "stamp_provenance", fake_stamp_provenance)
+
+    with pytest.raises(KeyboardInterrupt):
+        with tracking.tracked_run(object(), run):  # type: ignore[arg-type]
+            raise KeyboardInterrupt
+
+    assert terminations == [("existing-run", "FAILED")]
+
+
+def test_tracked_run_does_not_touch_logger_when_provenance_created_no_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.train.tracking as tracking
+
+    class Logger:
+        @property
+        def experiment(self) -> object:
+            raise AssertionError("no MLflow run exists to terminate")
+
+        @property
+        def run_id(self) -> str:
+            raise AssertionError("failure handling must not create a second run")
+
+    run = SimpleNamespace(mlflow_run_id=None)
+    monkeypatch.setattr(tracking, "require_mlflow", lambda: "file:/tracking")
+    monkeypatch.setattr(tracking, "build_mlflow_logger", lambda *_args: Logger())
+
+    def fail_before_run_creation(_run: object, _logger: object) -> None:
+        raise RuntimeError("run creation failed")
+
+    monkeypatch.setattr(tracking, "stamp_provenance", fail_before_run_creation)
+
+    with pytest.raises(RuntimeError, match="run creation failed"):
+        with tracking.tracked_run(object(), run):  # type: ignore[arg-type]
+            raise AssertionError("the body must not run before provenance is stamped")
+
+
 # --- metrics filtering: rehomed from the deleted `Run.log_metrics` ----------------------
 
 
