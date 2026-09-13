@@ -247,16 +247,6 @@ def test_a_pretext_item_still_carries_its_row(store: SignalStore, index) -> None
     assert [dataset[i]["row"] for i in range(3)] == [5, 9, 2]
 
 
-def test_a_pretext_target_lands_under_the_configured_key(store: SignalStore, index) -> None:
-    """The target key is already configurable on the module; the dataset just has to use
-    whichever one the module was built with, so no module-side change is needed."""
-    dataset = WindowDataset(
-        store, index, positions=np.array([3]), mask=CausalMask(ratio=0.5), target_key="orig"
-    )
-    item = dataset[0]
-    assert "orig" in item and "y" not in item
-
-
 def test_normalize_target_prevents_a_loud_channel_from_dominating(tmp_path: Path) -> None:
     """The property the deleted MaskedReconstruction.step()'s norm_target guarded, now
     enforced on the dataset side: reconstructing raw amplitude makes a loss dominated by
@@ -589,12 +579,6 @@ def test_two_view_collate_duplicates_the_row_for_each_view() -> None:
     items = _items(3)
     batch = TwoViewCollate(nn.Identity())(items)
     assert torch.equal(batch["row"], torch.tensor([0, 1, 2, 0, 1, 2]))
-
-
-def test_two_view_collate_writes_under_the_configured_target_key() -> None:
-    items = _items(2)
-    batch = TwoViewCollate(nn.Identity(), target_key="pair")(items)
-    assert "pair" in batch and "y" not in batch
 
 
 def test_two_view_collate_rejects_an_empty_batch() -> None:

@@ -37,11 +37,13 @@ train-only slots shown above, `augmentor?` and `spectral_augmentor?`, no longer 
 `model/module.py`'s chain is `x -> preprocessor? -> transform -> backbone -> head`, and
 `DsioModule.__init__` takes `backbone, head, loss, transform, preprocessor` as its
 *component* slots — see that module's own docstring ("No stochastic slot, so nothing here
-can augment a validation batch") — plus `lr, weight_decay, target_key, predict`, which are
-not chain slots at all: they are exactly the arguments `save_hyperparameters(ignore=...)`
-excludes from Lightning's own checkpoint hyperparameters, because the five components are
-already captured structurally (registered name plus params) and do not need a second,
-redundant record. `SslPretrainTask` separately still carries an `augmentor` field, unrelated
+can augment a validation batch") — plus the non-component settings `lr, weight_decay`.
+`save_hyperparameters(ignore=...)` records those scalars while excluding the five component
+instances, which are already captured structurally (registered name plus params) and do not
+need a second, redundant record. Batch targets now have one static key, `y`; the pre-1.0
+`target_key` customization was removed so dataset, model, and prediction contracts can be
+checked end to end. Custom callers must emit and consume `y`. `SslPretrainTask` separately
+still carries an `augmentor` field, unrelated
 to the deleted model slot — see that task's own docstring for what it does now (building a
 two-view contrastive batch at collate time, `dsio.dataset.dataset.TwoViewCollate`) instead
 of being a slot on `DsioModule`. Plan 2b's Task 6b moved stochastic augmentation to the
