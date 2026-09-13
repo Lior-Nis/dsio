@@ -82,26 +82,46 @@ class Fold:
         parts = {"train": self.train, "test": self.test}
         if self.val is not None:
             parts["val"] = self.val
-        for label, positions in parts.items():
-            if positions.size and np.unique(positions).size != positions.size:
-                raise EvalError(f"{self.name}: {label} lists the same row more than once")
-        names = sorted(parts)
-        for i, left in enumerate(names):
-            for right in names[i + 1 :]:
-                shared = np.intersect1d(parts[left], parts[right])
-                if shared.size:
-                    raise EvalError(
-                        f"{self.name}: {shared.size} row(s) appear in both {left} and "
-                        f"{right}, first at position {int(shared[0])}"
-                    )
-        if self.test.size == 0:
-            raise EvalError(f"{self.name}: test is empty; there is nothing to score")
-        if self.train.size == 0 and not self.evaluation_only:
-            raise EvalError(
-                f"{self.name}: train is empty; there is nothing to fit. If this is an "
-                "evaluation of something already trained — a benchmark pass, a shipped "
-                "model, an agent — set evaluation_only=True to say so."
-            )
+        _validate_unique_positions(self.name, parts)
+        _validate_disjoint_positions(self.name, parts)
+        _validate_non_empty_positions(
+            self.name, self.train, self.test, evaluation_only=self.evaluation_only
+        )
+
+
+def _validate_unique_positions(name: str, parts: dict[str, np.ndarray]) -> None:
+    for label, positions in parts.items():
+        if positions.size and np.unique(positions).size != positions.size:
+            raise EvalError(f"{name}: {label} lists the same row more than once")
+
+
+def _validate_disjoint_positions(name: str, parts: dict[str, np.ndarray]) -> None:
+    names = sorted(parts)
+    for i, left in enumerate(names):
+        for right in names[i + 1 :]:
+            shared = np.intersect1d(parts[left], parts[right])
+            if shared.size:
+                raise EvalError(
+                    f"{name}: {shared.size} row(s) appear in both {left} and "
+                    f"{right}, first at position {int(shared[0])}"
+                )
+
+
+def _validate_non_empty_positions(
+    name: str,
+    train: np.ndarray,
+    test: np.ndarray,
+    *,
+    evaluation_only: bool,
+) -> None:
+    if test.size == 0:
+        raise EvalError(f"{name}: test is empty; there is nothing to score")
+    if train.size == 0 and not evaluation_only:
+        raise EvalError(
+            f"{name}: train is empty; there is nothing to fit. If this is an "
+            "evaluation of something already trained — a benchmark pass, a shipped "
+            "model, an agent — set evaluation_only=True to say so."
+        )
 
 
 @dataclass(frozen=True)
@@ -126,4 +146,3 @@ class FoldPrediction:
             raise EvalError(
                 f"y_true has {len(self.y_true)} rows but y_score has {len(self.y_score)}"
             )
-

@@ -253,6 +253,26 @@ def test_generated_temporal_split_resolves(market: SignalStore, index) -> None:
     assert len(parts["train"]) + len(parts["test"]) < len(index)  # the band was discarded
 
 
+def test_resolving_a_temporal_split_reads_coordinates_once(
+    market: SignalStore, index, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    examples = SignalExamples(market, index)
+    split = _temporal_folds(examples, TemporalSpec(n_splits=1), name="wf")[0]
+    real_times = examples.times
+    calls = 0
+
+    def counted_times() -> tuple[np.ndarray, np.ndarray] | None:
+        nonlocal calls
+        calls += 1
+        return real_times()
+
+    monkeypatch.setattr(examples, "times", counted_times)
+
+    resolve(examples, split, split.fold(0))
+
+    assert calls == 1
+
+
 def test_a_temporal_split_needs_a_dataset_with_a_clock(market: SignalStore, index) -> None:
     """Returning None from times() is what makes purged splitting unavailable rather than
     silently wrong on data that has an order but no meaningful clock."""
