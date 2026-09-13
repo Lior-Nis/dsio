@@ -9,7 +9,43 @@ import pytest
 
 lightning = pytest.importorskip("lightning")
 
-from dsio.train.trainer import TrainerConfig, build_trainer  # noqa: E402
+from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer  # noqa: E402
+
+
+@pytest.mark.parametrize("has_validation", [True, False])
+def test_build_callbacks_forwards_exact_checkpoint_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    has_validation: bool,
+) -> None:
+    import lightning.pytorch.callbacks as callback_module
+
+    captured: dict[str, Any] = {}
+    checkpoint = object()
+
+    def fake_checkpoint(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return checkpoint
+
+    monkeypatch.setattr(callback_module, "ModelCheckpoint", fake_checkpoint)
+    config = TrainerConfig(monitor="val/accuracy", monitor_mode="max")
+
+    callbacks = build_callbacks(config, tmp_path, has_validation=has_validation)
+
+    expected = {
+        "dirpath": tmp_path,
+        "filename": "epoch{epoch:02d}",
+        "save_top_k": 1,
+        "auto_insert_metric_name": False,
+    }
+    if has_validation:
+        expected.update(
+            filename="epoch{epoch:02d}-val_accuracy{val/accuracy:.4f}",
+            monitor="val/accuracy",
+            mode="max",
+        )
+    assert callbacks == [checkpoint]
+    assert captured == expected
 
 
 @pytest.mark.parametrize(

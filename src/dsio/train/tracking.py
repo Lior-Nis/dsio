@@ -15,6 +15,7 @@ MLflow, so it fires before ``task = config.task`` is even read where that costs 
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -180,9 +181,7 @@ def finite_metrics(metrics: dict[str, float]) -> dict[str, float]:
     return {
         key: float(value)
         for key, value in metrics.items()
-        if isinstance(value, int | float)
-        and float(value) == float(value)
-        and float(value) not in (float("inf"), float("-inf"))
+        if isinstance(value, int | float) and math.isfinite(float(value))
     }
 
 
