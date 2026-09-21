@@ -145,6 +145,7 @@ forbidden_modules = [
     "dsio.splits",
     "dsio.model",
     "dsio.train",
+    "dsio.tracking",
     "dsio.runs",
 
 ]

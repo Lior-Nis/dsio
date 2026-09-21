@@ -38,24 +38,33 @@ Define orchestration in the consumer project and call DSio functions normally:
 from prefect import flow, task
 
 from dsio.contracts import sha256_of
+from dsio.tracking import experiment
 
 
 @task
-def identify_dataset(dataset: dict[str, object]) -> str:
-    return sha256_of(dataset)
+def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[str, str]:
+    return sha256_of(dataset), parent_run_id
 
 
 @flow
-def train_experiment() -> str:
-    return identify_dataset({"name": "algae", "revision": 1})
+def train_experiment() -> tuple[str, str]:
+    with experiment("algae-training") as parent:
+        digest, observed_parent_id = identify_dataset(
+            {"name": "algae", "revision": 1}, parent.info.run_id
+        )
+        if not digest:
+            raise ValueError("dataset identity is required")
+        return digest, observed_parent_id
 
 
 if __name__ == "__main__":
     print(train_experiment())
 ```
 
-No DSio runner or wrapper is involved. Prefect executes the project's flow through its
-normal Python entry point.
+No DSio runner or flow wrapper is involved. Each flow execution explicitly creates a fresh
+native MLflow parent Run. Tasks receive its Run ID as ordinary data, and required output
+validation stays inside the context so MLflow records failure instead of false success.
+Prefect executes the project's flow through its normal Python entry point.
 
 ## Shape
 
@@ -152,8 +161,11 @@ Decisions and their reasons live in `docs/adr/`.
 
 ## Tracking
 
-MLflow is the source of truth for run evidence (see the accepted generic-spine spec): a run
-fails if it cannot reach it.
+MLflow is the source of truth for run evidence (see the accepted generic-spine spec).
+`dsio.tracking.experiment(...)` adds only the flow-level lifecycle invariant: a fresh parent
+Run per execution, `FINISHED` after clean exit, `FAILED` after an error, and `KILLED` after
+cancellation. Creation or finalization failures fail the flow closed.
+
 Start the local stack before running anything that trains:
 
 ```bash
