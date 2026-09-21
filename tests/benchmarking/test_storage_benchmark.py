@@ -196,3 +196,42 @@ def test_reused_work_root_fails_with_an_actionable_error(tmp_path: Path) -> None
     assert completed.returncode != 0
     assert "work root must be empty" in completed.stderr
     assert (work_root / "existing").read_text() == "do not overwrite"
+
+
+def test_zarr_recovery_handles_fill_only_arrays(tmp_path: Path) -> None:
+    import zarr
+
+    source = tmp_path / "zeros.zarr"
+    zarr.create_array(
+        store=str(source),
+        name="accs",
+        data=np.zeros((128, 3), dtype=np.float32),
+        zarr_format=3,
+    )
+    output = tmp_path / "zeros.json"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "benchmarks.storage",
+            "--real-only",
+            "--real-zarr",
+            str(source),
+            "--window",
+            "8",
+            "--reads",
+            "4",
+            "--workers",
+            "1",
+            "--candidates",
+            "zarr-v3",
+            "--output",
+            str(output),
+        ],
+        check=True,
+    )
+
+    recovery = json.loads(output.read_text())["workloads"][0]["candidates"][0]["recovery"]
+    assert recovery["partial_opened"] is False
+    assert recovery["partial_accepted_as_complete"] is False
+    assert recovery["retry_succeeded"] is True

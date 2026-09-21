@@ -226,7 +226,8 @@ def _simulate_interruption(candidate: str, path: Path) -> None:
             item for item in path.rglob("*") if item.is_file() and item.name != "zarr.json"
         )
         if not chunks:
-            raise RuntimeError("Zarr build produced no data chunk to interrupt")
+            (path / "zarr.json").unlink()
+            return
         chunks[-1].unlink()
         return
     raise ValueError(f"unknown benchmark candidate {candidate!r}")
