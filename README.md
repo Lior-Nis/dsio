@@ -39,13 +39,18 @@ from prefect import flow, task
 from mlflow import MlflowClient
 
 from dsio.contracts import sha256_of
-from dsio.tracking import attempt, experiment
+from dsio.tracking import attempt, experiment, record_provenance
 
 
 @task
 def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[str, str]:
     with attempt(parent_run_id) as child:
         digest = sha256_of(dataset)
+        record_provenance(
+            child.info.run_id,
+            {"dataset": dataset, "seed": 7},
+            components={"identity": "dsio.contracts:sha256_of"},
+        )
         MlflowClient().log_param(child.info.run_id, "dataset_digest", digest)
         return digest, child.info.run_id
 
@@ -173,6 +178,9 @@ Prefect task attempt, tagged with its task and retry identity. Both contexts per
 `FINISHED`, `FAILED`, or `KILLED` and fail closed when required lifecycle evidence cannot be
 written. Child logging always targets `child.info.run_id` explicitly; DSio does not introduce
 an evidence wrapper or depend on MLflow's ambient active Run inside concurrent tasks.
+`record_provenance(...)` writes the node's safe normalized configuration and deterministic
+identity as native MLflow evidence; projects still own the configuration itself and explicitly
+declare secret and ephemeral fields to omit.
 
 Start the local stack before running anything that trains:
 

@@ -69,6 +69,7 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     assert "dsio/__init__.py" in members
     assert "dsio/tracking/__init__.py" in members
     assert "dsio/tracking/attempt.py" in members
+    assert "dsio/tracking/provenance.py" in members
     assert set(requirements) == set(REQUIRED_DEPENDENCIES)
     for name, expected_specifier in REQUIRED_DEPENDENCIES.items():
         requirement = requirements[name]
@@ -261,12 +262,17 @@ from prefect import flow, task
 from prefect.testing.utilities import prefect_test_harness
 from mlflow import MlflowClient
 from dsio.contracts import sha256_of
-from dsio.tracking import attempt, experiment
+from dsio.tracking import attempt, experiment, record_provenance
 
 @task
 def identify_dataset(dataset, parent_run_id):
     with attempt(parent_run_id) as child:
         digest = sha256_of(dataset)
+        record_provenance(
+            child.info.run_id,
+            {'dataset': dataset, 'seed': 7},
+            components={'identity': 'dsio.contracts:sha256_of'},
+        )
         MlflowClient().log_param(child.info.run_id, 'dataset_digest', digest)
         return digest, child.info.run_id
 
@@ -285,6 +291,9 @@ client = MlflowClient()
 print('DSIO_RESULT=' + digest)
 print('DSIO_PARENT_STATUS=' + client.get_run(parent_run_id).info.status)
 print('DSIO_CHILD_STATUS=' + client.get_run(child_run_id).info.status)
+print('DSIO_CHILD_IDENTITY_LENGTH=' + str(
+    len(client.get_run(child_run_id).data.tags['dsio.execution_identity'])
+))
 print('DSIO_CHILD_PARENT_MATCH=' + str(
     client.get_run(child_run_id).data.tags['mlflow.parentRunId'] == parent_run_id
 ))
@@ -300,4 +309,5 @@ print('DSIO_CHILD_PARENT_MATCH=' + str(
     assert f"DSIO_RESULT={EXPECTED_DIGEST}" in flow_result.stdout
     assert "DSIO_PARENT_STATUS=FINISHED" in flow_result.stdout
     assert "DSIO_CHILD_STATUS=FINISHED" in flow_result.stdout
+    assert "DSIO_CHILD_IDENTITY_LENGTH=64" in flow_result.stdout
     assert "DSIO_CHILD_PARENT_MATCH=True" in flow_result.stdout
