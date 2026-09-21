@@ -39,7 +39,13 @@ from prefect import flow, task
 from mlflow import MlflowClient
 
 from dsio.contracts import sha256_of
-from dsio.tracking import attempt, experiment, record_provenance
+from dsio.tracking import (
+    attempt,
+    evidence_uri,
+    experiment,
+    record_provenance,
+    resolve_evidence,
+)
 
 
 @task
@@ -52,6 +58,11 @@ def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[st
             components={"identity": "dsio.contracts:sha256_of"},
         )
         MlflowClient().log_param(child.info.run_id, "dataset_digest", digest)
+        MlflowClient().log_dict(
+            child.info.run_id,
+            {"dataset_digest": digest},
+            "outputs/dataset.json",
+        )
         return digest, child.info.run_id
 
 
@@ -67,7 +78,11 @@ def train_experiment() -> tuple[str, str]:
 
 
 if __name__ == "__main__":
-    print(train_experiment())
+    digest, child_run_id = train_experiment()
+    identity = MlflowClient().get_run(child_run_id).data.params["dsio.execution_identity"]
+    prior = resolve_evidence(identity, required_artifacts={"outputs/dataset.json"})
+    if prior is not None:
+        print(evidence_uri(prior.info.run_id, "outputs/dataset.json"))
 ```
 
 No DSio runner or flow wrapper is involved. Each flow execution explicitly creates a fresh
@@ -75,6 +90,11 @@ native MLflow parent Run. Tasks receive its Run ID as ordinary data and open one
 Run per Prefect attempt. Evidence is logged with the explicit child Run ID; required output
 validation stays inside the parent context so MLflow records failure instead of false success.
 Prefect executes the project's flow through its normal Python entry point.
+`resolve_evidence(...)` treats missing or invalid evidence as a cache miss and returns only a
+native successful MLflow `Run` whose immutable identity, provenance, and required artifacts
+agree. `evidence_uri(...)` emits an exact `runs:/<run-id>/<artifact>` reference; aliases and
+stages are not accepted. Pure serializable tasks can pass `prefect_cache_key` directly as
+Prefect's `cache_key_fn`, while evidence-producing tasks continue to resolve through MLflow.
 
 ## Shape
 
