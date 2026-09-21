@@ -58,12 +58,12 @@ Exact environment strings and raw measurements are in:
 
 | Workload | Candidate | Build MB/s | Ordered MB/s | Random windows/s | 1/2/4-worker windows/s | Peak RSS MB | Disk MB / files |
 |---|---|---:|---:|---:|---:|---:|---:|
-| smooth signal | flat binary | 4,065 | 1,405 | 206,713 | 211,852 / 379,251 / 829,430 | 119 | 24.00 / 1 |
-| smooth signal | Arrow IPC | 204 | 119 | 20,637 | 20,004 / 34,483 / 67,553 | 156 | 24.00 / 1 |
-| smooth signal | Zarr v3 | 62 | 17 | 2,934 | 2,748 / 5,380 / 10,854 | 159 | 21.17 / 978 |
-| fixed items | flat binary | 2,819 | 1,407 | 104,119 | 217,713 / 448,132 / 881,462 | 197 | 24.00 / 1 |
-| fixed items | Arrow IPC | 185 | 99 | 16,910 | 19,020 / 34,508 / 65,517 | 197 | 24.00 / 1 |
-| fixed items | Zarr v3 | 57 | 14 | 2,101 | 2,624 / 5,803 / 8,937 | 197 | 13.77 / 978 |
+| smooth signal | flat binary | 1,029 | 823 | 95,117 | 152,304 / 453,802 / 842,418 | 118 | 24.00 / 1 |
+| smooth signal | Arrow IPC | 202 | 119 | 18,374 | 18,410 / 37,696 / 63,535 | 156 | 24.00 / 1 |
+| smooth signal | Zarr v3 | 63 | 18 | 2,863 | 2,811 / 5,777 / 11,611 | 159 | 21.17 / 978 |
+| fixed items | flat binary | 2,705 | 1,096 | 109,634 | 140,986 / 404,429 / 790,730 | 197 | 24.00 / 1 |
+| fixed items | Arrow IPC | 200 | 106 | 20,084 | 17,811 / 34,311 / 65,654 | 197 | 24.00 / 1 |
+| fixed items | Zarr v3 | 62 | 19 | 3,064 | 2,921 / 5,887 / 11,094 | 198 | 13.77 / 978 |
 
 ### Representative FORGE corpus
 
