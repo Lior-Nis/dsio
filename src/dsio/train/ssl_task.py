@@ -34,6 +34,7 @@ from pydantic import Field, model_validator
 from dsio.batches import BatchLoader, TrainingBatch
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
+from dsio.data.splits.folds import load_folds, require_fold, split_path
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowIndex, WindowSpec, load_or_build
 from dsio.dataset.dataset import (
@@ -47,7 +48,6 @@ from dsio.eval.contract import Fold
 from dsio.model.masking import MASKS
 from dsio.model.module import DsioModule, export_encoder
 from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
-from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.artifacts import save_artifact
 from dsio.train.assembly import (
     Component,

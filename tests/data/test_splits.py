@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 
 from dsio.data.adapters import SignalExamples, entity_examples
+from dsio.data.splits.models import SCHEMA, SplitError, SplitFile, SplitFold
+from dsio.data.splits.resolve import assert_no_row_overlap, resolve
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowSpec, build_index
-from dsio.splits.models import SCHEMA, SplitError, SplitFile, SplitFold
-from dsio.splits.resolve import assert_no_row_overlap, resolve
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_duplicates_within_a_part_are_rejected() -> None:
 
 def test_split_with_neither_groups_nor_time_is_rejected() -> None:
     """A fold must divide something; empty is not a valid partition."""
-    with pytest.raises(ValueError, match="group parts, temporal bounds, or both"):
+    with pytest.raises(ValueError, match="group parts, sample assignments, temporal bounds"):
         SplitFile(store="s", name="bad", folds=[SplitFold(index=0, parts={})])
 
 

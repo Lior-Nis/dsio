@@ -78,6 +78,11 @@ def _check_dropping_subset(examples: Examples, size: int) -> None:
             "distinguishes this subpopulation from the whole corpus, and a split computed "
             "on it will resolve against the corpus. Use dsio.data.examples.derive()."
         )
+    expected_ids = np.asarray(examples.sample_ids)[mask].tolist()
+    if np.asarray(part.sample_ids).tolist() != expected_ids:
+        raise ContractViolation(
+            f"{examples.name}: subset() did not preserve sample identity alignment"
+        )
 
     try:
         assert_consistent(part)

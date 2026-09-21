@@ -20,12 +20,12 @@ pytest.importorskip("sklearn")
 
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
+from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
-from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.artifacts import ArtifactRef, load_artifact  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
@@ -227,9 +227,9 @@ def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
     from lightning import Trainer
 
     from dsio.data.adapters import SignalExamples
+    from dsio.data.splits.folds import load_folds, split_path
     from dsio.data.store import data_root
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import load_folds, split_path
     from dsio.train.ssl_task import build_loaders, build_module
 
     task = pretrain_task(corpus, method)

@@ -5,7 +5,7 @@ is unreachable, the run fails, and it fails **before** any expensive work: befor
 is opened, the window index built, the module constructed or a ``Trainer`` created.
 
 ``require_mlflow`` is called in two places per task kind, the same way ``require_fold``
-(``dsio.splits.folds``) is: once from the explicit preflight (``check_torch``/``check_ssl``
+(``dsio.data.splits.folds``) is: once from the explicit preflight (``check_torch``/``check_ssl``
 in ``torch_task.py``/``ssl_task.py``), and again at the very top of the runner itself
 (``run_torch``/``run_ssl_pretrain``), which every direct caller of ``execute()`` reaches.
 ``SslPretrainTask``'s fold check

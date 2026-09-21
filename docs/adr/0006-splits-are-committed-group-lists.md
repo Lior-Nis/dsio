@@ -1,7 +1,21 @@
-# 6. Splits are committed YAML lists of group IDs
+# 6. Splits are governed manifests with exact assignments and group evidence
 
 Status: accepted (2026-08-17)
 Amends: ADR 0004, item 6, which recommended *Repeatable Splitting* by hash of a stable ID.
+
+Amended (2026-09-22): The accepted generic spine reverses the 2026-08-20 decision to push
+generation into each project. Generation now lives at `dsio.data.splits.generate()` behind a
+closed DSIO-owned dispatcher. Established grouped algorithms delegate to the required,
+locked scikit-learn dependency; purged walk-forward retains DSIO's existing temporal math.
+Projects cannot register splitters at runtime.
+
+The committed format is now `dsio.split/3`. `SplitFile` remains the one manifest model and
+adds dataset derivation, algorithm/version, normalized parameters, seed, dependency versions,
+validation names, exact stable sample assignments, coverage policy, and a content digest.
+Group lists remain beside exact assignments as human-reviewable leakage evidence. The package
+moved from `dsio.splits` to `dsio.data.splits`, matching split ownership in the accepted
+architecture. The historical reasoning below still explains why groups and temporal leakage
+checks matter; statements that generation is project-owned are superseded by this amendment.
 
 Amended (2026-08-20): Generation moved out of the package. `SplitSpec`, `StratifyKey`,
 `BalanceReport` and the `stratified_kfold` scheme described below no longer exist in

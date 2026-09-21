@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from dsio.contracts import sha256_of_bytes
+from dsio.contracts import sha256_of
 from dsio.data.examples import ROOT_DERIVATION, ExamplesError, derive
 from dsio.data.views import assert_index_matches_store, window_times
 
@@ -31,6 +31,7 @@ class TableExamples:
         self,
         *,
         name: str,
+        sample_ids: Sequence[str] | np.ndarray | None = None,
         groups: Sequence[Any] | np.ndarray,
         attributes: Mapping[str, Sequence[Any] | np.ndarray] | None = None,
         times: tuple[np.ndarray, np.ndarray] | None = None,
@@ -39,9 +40,13 @@ class TableExamples:
     ) -> None:
         self._name = name
         self._groups = np.asarray(groups)
-        self._attributes = {
-            key: np.asarray(value) for key, value in (attributes or {}).items()
-        }
+        self._sample_ids = np.asarray(
+            [str(index) for index in range(self._groups.size)]
+            if sample_ids is None
+            else sample_ids,
+            dtype=str,
+        )
+        self._attributes = {key: np.asarray(value) for key, value in (attributes or {}).items()}
         self._times = times
         self._digest = digest or self._derive_digest()
         self._derivation = derivation
@@ -54,11 +59,16 @@ class TableExamples:
         is the right granularity here: a split file binds to how the rows are grouped, and
         rebuilding it because an unrelated column changed would be noise.
         """
-        payload = self._groups.tobytes() + b"".join(
-            key.encode() + np.asarray(value).tobytes()
-            for key, value in sorted(self._attributes.items())
-        )
-        return sha256_of_bytes(payload)[:16]
+        return sha256_of(
+            {
+                "sample_ids": self._sample_ids.tolist(),
+                "groups": self._groups.tolist(),
+                "attributes": {
+                    key: np.asarray(value).tolist()
+                    for key, value in sorted(self._attributes.items())
+                },
+            }
+        )[:16]
 
     @property
     def name(self) -> str:
@@ -74,6 +84,10 @@ class TableExamples:
 
     def __len__(self) -> int:
         return int(self._groups.size)
+
+    @property
+    def sample_ids(self) -> np.ndarray:
+        return self._sample_ids
 
     @property
     def groups(self) -> np.ndarray:
@@ -98,6 +112,7 @@ class TableExamples:
         mask = np.asarray(mask, dtype=bool)
         return TableExamples(
             name=self._name,
+            sample_ids=self._sample_ids[mask],
             groups=self._groups[mask],
             attributes={key: value[mask] for key, value in self._attributes.items()},
             times=None if self._times is None else (self._times[0][mask], self._times[1][mask]),
@@ -168,6 +183,18 @@ class SignalExamples:
 
     def __len__(self) -> int:
         return len(self.index)
+
+    @property
+    def sample_ids(self) -> np.ndarray:
+        return np.asarray(
+            [
+                f"{entity_id}:{int(start)}:{self.index.digest}"
+                for entity_id, start in zip(
+                    self.index.entity_ids.tolist(), self.index.starts.tolist(), strict=True
+                )
+            ],
+            dtype=str,
+        )
 
     @property
     def groups(self) -> np.ndarray:
@@ -241,9 +268,8 @@ def entity_examples(store: Any) -> TableExamples:
     digest = store.manifest().signal_sha256[:16]
     return TableExamples(
         name=str(store.path.name),
+        sample_ids=[entity.entity_id for entity in entities],
         groups=[entity.group for entity in entities],
-        attributes={
-            key: [entity.attrs.get(key, np.nan) for entity in entities] for key in names
-        },
+        attributes={key: [entity.attrs.get(key, np.nan) for entity in entities] for key in names},
         digest=digest,
     )

@@ -1,4 +1,4 @@
-"""Apply a split file to a dataset.
+"""Apply a governed split manifest to a dataset.
 
 Splits are resolved **on the fly**: one dataset, one small YAML of group ids, and a boolean
 mask per part. Nothing is copied, so a fold costs a mask rather than a dataset.
@@ -21,8 +21,9 @@ from typing import Any
 import numpy as np
 
 from dsio.data.examples import Examples
-from dsio.splits.models import SplitError, SplitFile, SplitFold
-from dsio.splits.temporal import apply as apply_temporal
+from dsio.data.splits.models import SplitError, SplitFile, SplitFold
+from dsio.data.splits.temporal import apply as apply_temporal
+from dsio.data.splits.validation import validate
 
 
 def resolve(
@@ -115,7 +116,7 @@ def resolve_masks(
 ) -> dict[str, np.ndarray]:
     """Boolean mask per part, over the dataset's examples, for one fold of ``split``.
 
-    The mask form is what :func:`dsio.splits.folds.folds_from_splits` turns into a
+    The mask form is what :func:`dsio.data.splits.folds.folds_from_splits` turns into a
     :class:`~dsio.eval.contract.Fold`'s integer positions; a subset has forgotten where
     its examples came from, so the mask is kept as the intermediate form.
     :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
@@ -127,9 +128,14 @@ def resolve_masks(
     """
     _validate_split_binding(examples, split)
     _validate_group_assignments(examples, split, fold, require_total=require_total)
+    if fold.assignments:
+        validate(examples, split)
 
     groups = np.asarray([str(g) for g in examples.groups])
-    parts = set(fold.parts) | set(fold.temporal.spans if fold.temporal else ())
+    sample_ids = np.asarray([str(sample_id) for sample_id in examples.sample_ids])
+    parts = (
+        set(fold.parts) | set(fold.assignments) | set(fold.temporal.spans if fold.temporal else ())
+    )
     times = _temporal_coordinates(examples, split, fold)
 
     out: dict[str, np.ndarray] = {}
@@ -139,8 +145,15 @@ def resolve_masks(
         # decide it. That is what makes a purely temporal split expressible.
         if fold.parts and part in fold.parts:
             mask &= np.isin(groups, list(fold.parts[part]))
+        if fold.assignments and part in fold.assignments:
+            mask &= np.isin(sample_ids, fold.assignments[part])
         if fold.temporal is not None and times is not None and part in fold.temporal.spans:
-            mask &= apply_temporal(fold.temporal, *times, part=part)
+            mask &= apply_temporal(
+                fold.temporal,
+                *times,
+                part=part,
+                test_part=split.required_roles[1],
+            )
         out[part] = mask
     return out
 
@@ -159,9 +172,7 @@ def assert_no_row_overlap(parts: dict[str, Any]) -> None:
                 "covered_rows(). This check is specific to modalities whose examples "
                 "overlap in an underlying buffer, such as windowed signal."
             )
-    covered: dict[str, np.ndarray] = {
-        part: subset.covered_rows() for part, subset in parts.items()
-    }
+    covered: dict[str, np.ndarray] = {part: subset.covered_rows() for part, subset in parts.items()}
     names = sorted(covered)
     for i, left in enumerate(names):
         for right in names[i + 1 :]:

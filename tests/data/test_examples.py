@@ -15,9 +15,9 @@ import pytest
 
 from dsio.data.adapters import TableExamples
 from dsio.data.examples import Examples, ExamplesError, assert_consistent, check, group_attribute
-from dsio.splits.folds import folds_from_splits
-from dsio.splits.models import SplitFile, SplitFold
-from dsio.splits.resolve import resolve
+from dsio.data.splits.folds import folds_from_splits
+from dsio.data.splits.models import SplitFile, SplitFold
+from dsio.data.splits.resolve import resolve
 
 
 @pytest.fixture
@@ -206,8 +206,8 @@ def test_a_table_cannot_prove_row_overlap_and_says_why(table: TableExamples) -> 
     Pinning the exception type to ``SplitError`` (an ``AttributeError`` is not one) and
     matching the guard's own explanatory phrase closes that gap.
     """
-    from dsio.splits.models import SplitError
-    from dsio.splits.resolve import assert_no_row_overlap
+    from dsio.data.splits.models import SplitError
+    from dsio.data.splits.resolve import assert_no_row_overlap
 
     splits = _table_kfold(table)
     parts = resolve(table, splits[0], splits[0].fold(0))

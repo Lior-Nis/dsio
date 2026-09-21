@@ -1,4 +1,4 @@
-"""Temporal splits: walk-forward with purging and embargo.
+"""Temporal split mechanics: walk-forward with purging and embargo.
 
 A group list cannot express a temporal split, because the unit being divided is *time*, not
 subject. And a naive time cut is wrong in two specific ways that López de Prado named, both
@@ -199,8 +199,6 @@ def describe(
     eating the dataset, and that is a decision to make knowingly rather than discover from
     a training curve.
     """
-    counts = {
-        part: int(apply(bounds, t_start, t_end, part=part).sum()) for part in bounds.spans
-    }
+    counts = {part: int(apply(bounds, t_start, t_end, part=part).sum()) for part in bounds.spans}
     counts["discarded"] = int(t_start.size - sum(counts.values()))
     return counts

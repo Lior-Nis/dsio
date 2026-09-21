@@ -18,11 +18,11 @@ pytest.importorskip("lightning")
 
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
+from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
-from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
     Component,
@@ -154,7 +154,7 @@ def test_preflight_catches_a_typo_before_any_data_is_read(corpus: Path) -> None:
 def test_preflight_requires_the_split_files_to_exist(corpus: Path) -> None:
     """Splits are provenance; their absence is an error, not licence to invent some."""
     config = RunConfig(name="nosplit", task=make_task(corpus, split="never_made"))
-    with pytest.raises(Exception, match="commit a split file"):
+    with pytest.raises(Exception, match="generate and save the governed manifest"):
         check(config)
 
 
@@ -633,8 +633,8 @@ def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> N
 def test_no_group_is_both_trained_on_and_tested(corpus: Path, tmp_path: Path) -> None:
     """The leakage guarantee, verified at the level the runner actually consumes."""
     from dsio.data.adapters import SignalExamples
+    from dsio.data.splits.folds import load_folds, split_path
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import load_folds, split_path
 
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)
@@ -654,8 +654,8 @@ def test_running_one_fold_writes_only_that_folds_predictions(
     the property fold-as-process needs so that N single-fold runs can be pooled later
     without one run's predictions silently covering another's positions."""
     from dsio.data.adapters import SignalExamples
+    from dsio.data.splits.folds import load_folds, split_path
     from dsio.data.views import load_or_build
-    from dsio.splits.folds import load_folds, split_path
 
     config = RunConfig(name="subset", seed=0, task=make_task(corpus, fold=1))
     run = start_run(

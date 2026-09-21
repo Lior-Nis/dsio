@@ -14,18 +14,18 @@ import numpy as np
 import pytest
 
 from dsio.data.adapters import SignalExamples, entity_examples
-from dsio.data.store import SignalStore
-from dsio.data.views import WindowSpec, build_index
-from dsio.eval.contract import Fold
-from dsio.splits.folds import (
+from dsio.data.splits.folds import (
     _assert_test_parts_are_disjoint,
     folds_from_splits,
     load_folds,
     require_fold,
     split_path,
 )
-from dsio.splits.models import SplitError, SplitFile, SplitFold
-from dsio.splits.temporal import TemporalSpec, describe, walk_forward
+from dsio.data.splits.models import SplitError, SplitFile, SplitFold
+from dsio.data.splits.temporal import TemporalSpec, describe, walk_forward
+from dsio.data.store import SignalStore
+from dsio.data.views import WindowSpec, build_index
+from dsio.eval.contract import Fold
 
 
 @pytest.fixture
@@ -287,7 +287,7 @@ def test_folds_load_from_a_committed_file(store: SignalStore, index, tmp_path: P
 
 
 def test_missing_split_files_say_how_to_make_them(tmp_path: Path) -> None:
-    with pytest.raises(SplitError, match="commit a split file"):
+    with pytest.raises(SplitError, match="generate and save the governed manifest"):
         split_path(tmp_path, "nothing")
 
 
