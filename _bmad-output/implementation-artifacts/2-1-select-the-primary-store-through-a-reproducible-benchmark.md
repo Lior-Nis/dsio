@@ -4,7 +4,7 @@ baseline_commit: 3bb74c7eec8c059c7e716874032b8e8b0c00fa86
 
 # Story 2.1: Select the Primary Store Through a Reproducible Benchmark
 
-Status: review
+Status: done
 
 ## Story
 
@@ -38,7 +38,18 @@ so that the library makes one evidence-based storage choice instead of exposing 
 - [x] Verify and review (AC: 1-6)
   - [x] Add fast tests for benchmark configuration/report completeness and interrupted-write classification; never assert one candidate is faster in CI.
   - [x] Run focused tests, a smoke benchmark, full pytest, Ruff, mypy, import-linter, lock validation, build, and diff checks.
-  - [ ] Complete independent blind, edge-case, and acceptance reviews before merge.
+  - [x] Complete independent blind, edge-case, and acceptance reviews before merge.
+
+### Review Findings
+
+- [x] [Review][High] Synchronize distinct worker processes and measure aggregate throughput with one parent-observed wall interval instead of assuming overlap.
+- [x] [Review][Medium] Compare every sequential, random, and per-worker checksum with a source-derived oracle, not only with other candidates.
+- [x] [Review][Medium] Regenerate checked evidence against clean reconstructible commits and record Numcodecs plus explicit Zstandard settings.
+- [x] [Review][Medium] Apply positive real-row limits before materializing both 2-D and higher-dimensional Zarr inputs.
+- [x] [Review][Medium] Record RSS as unavailable on platforms without `resource` instead of failing import.
+- [x] [Review][Medium] Model incomplete publication by damaging actual built outputs and verify fail-closed classification and clean retry.
+- [x] [Review][Medium] Refuse non-empty work roots, duplicate inputs, and normalized workload-name collisions.
+- [x] [Review][Medium] Handle fill-only Zarr arrays whose valid store contains no physical data chunk.
 
 ## Dev Notes
 
@@ -102,6 +113,7 @@ Codex (GPT-5)
 
 - 2026-09-21: Created from merged Epic 1 at `3bb74c7`; inspected the accepted spine, Epic 2, current store/read path, ADR 0005, historical benchmark scripts, dependency lock, and locally available FORGE corpus.
 - 2026-09-21: Full pre-review gate passed with 679 tests, Ruff, mypy over 61 source files, four import contracts, lock validation, build, and diff checks.
+- 2026-09-22: Blind, edge-case, and acceptance reviewers approved after all accepted findings were patched; the final gate passed with 682 tests.
 
 ### Completion Notes List
 
@@ -110,6 +122,9 @@ Codex (GPT-5)
 - Revalidated flat binary against Arrow IPC and Zarr v3 on two synthetic profiles and a 2,000,000-row FORGE subset; claims remain scoped to recorded local conditions.
 - Removed the one-item runtime backend registry and selector while preserving lazy per-process memory maps and store validation.
 - Pre-review gate: 679 tests passed and 3 live tests were intentionally deselected; all static, architecture, lock, build, and diff checks passed.
+- Review patches replaced assumed concurrency with synchronized measured concurrency, added source-oracle validation, made evidence reconstructible, hardened real-input and recovery boundaries, and covered fill-only Zarr stores.
+- Final post-review gate: 682 tests passed and 3 live tests were intentionally deselected; Ruff, mypy, four import contracts, lock validation, build, and diff checks passed.
+- Independent blind, edge-case, and acceptance reviewers approved with no remaining actionable findings.
 
 ### File List
 
@@ -139,3 +154,4 @@ Codex (GPT-5)
 
 - 2026-09-21: Created Story 2.1 and marked it ready for development.
 - 2026-09-21: Implemented the reproducible benchmark and selected-store simplification; moved the story to review after the complete gate passed.
+- 2026-09-22: Applied all review findings, received unanimous approval, and marked Story 2.1 done.
