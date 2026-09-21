@@ -107,12 +107,20 @@ class SignalStoreBuilder:
         """Flush the payload and publish its index, metadata, and manifest."""
         if self._closed:
             raise StoreError("builder is already closed")
-        if not self._entities:
-            self._signal.close()
-            self._closed = True
-            raise StoreError("cannot build a store with no entities")
-
         try:
+            if not self._entities:
+                raise StoreError("cannot build a store with no entities")
+            self.attrs = validated_attrs(self.attrs, "store attrs")
+            self._entities = [
+                entity.model_copy(
+                    update={
+                        "attrs": validated_attrs(
+                            entity.attrs, f"entity {entity.entity_id!r} attrs"
+                        )
+                    }
+                )
+                for entity in self._entities
+            ]
             self._signal.flush()
             os.fsync(self._signal.fileno())
         finally:

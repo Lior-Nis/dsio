@@ -28,6 +28,7 @@ from dsio.data.store.layout import (
     StoredSample,
     StoreError,
     StoreManifest,
+    validated_attrs,
 )
 
 
@@ -130,7 +131,7 @@ class SignalStore:
             "sample_id": entity.entity_id,
             "data": data,
             "group": entity.group,
-            "attrs": dict(entity.attrs),
+            "attrs": validated_attrs(entity.attrs, f"sample {entity.entity_id!r} attrs"),
         }
 
     def read_entity(self, entity_id: str) -> np.ndarray:
@@ -201,12 +202,28 @@ class SignalStore:
         if not path.is_file():
             raise StoreError(f"store {self.path.name!r} has no {ENTITIES_FILE}")
         try:
-            return [
-                Entity.model_validate(json.loads(line))
-                for line in path.read_text().splitlines()
-                if line.strip()
-            ]
-        except (OSError, UnicodeError, json.JSONDecodeError, ValidationError) as exc:
+            entities: list[Entity] = []
+            for line in path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                entity = Entity.model_validate(json.loads(line))
+                entities.append(
+                    entity.model_copy(
+                        update={
+                            "attrs": validated_attrs(
+                                entity.attrs, f"entity {entity.entity_id!r} attrs"
+                            )
+                        }
+                    )
+                )
+            return entities
+        except (
+            OSError,
+            UnicodeError,
+            json.JSONDecodeError,
+            ValidationError,
+            StoreError,
+        ) as exc:
             raise StoreError(f"cannot read entity metadata {path}: {exc}") from exc
 
     def _read_manifest(self) -> StoreManifest:
@@ -225,8 +242,11 @@ class SignalStore:
                 "with the current SignalStore.builder"
             )
         try:
-            return StoreManifest.model_validate(data)
-        except ValidationError as exc:
+            manifest = StoreManifest.model_validate(data)
+            return manifest.model_copy(
+                update={"attrs": validated_attrs(manifest.attrs, "manifest attrs")}
+            )
+        except (ValidationError, StoreError) as exc:
             raise StoreError(f"cannot read manifest {path}: {exc}") from exc
 
     def _validate_layout(self, manifest: StoreManifest) -> None:

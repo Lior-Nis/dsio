@@ -268,6 +268,49 @@ def test_builder_rejects_non_json_store_attrs_before_touching_disk(tmp_path: Pat
     assert not path.exists()
 
 
+def test_builder_rejects_cyclic_attrs_at_both_boundaries(tmp_path: Path) -> None:
+    cyclic: dict[str, Any] = {}
+    cyclic["self"] = cyclic
+    store_path = tmp_path / "bad-store"
+
+    with pytest.raises(StoreError, match="store attrs.*cycle"):
+        SignalStore.builder(store_path, channels=1, attrs=cyclic)
+    assert not store_path.exists()
+
+    builder = SignalStore.builder(tmp_path / "bad-sample", channels=1)
+    with pytest.raises(StoreError, match="entity 'bad' attrs.*cycle"):
+        builder.add("bad", np.ones((2, 1), dtype=np.float32), group="g", attrs=cyclic)
+    assert (builder.path / SIGNAL_FILE).stat().st_size == 0
+    builder.add("good", np.ones((2, 1), dtype=np.float32), group="g")
+    builder.close()
+
+
+def test_open_rejects_non_json_entity_attrs_even_with_a_matching_digest(
+    tmp_path: Path,
+) -> None:
+    store = _build_store(tmp_path / "samples")
+    entities_path = store.path / ENTITIES_FILE
+    entities = [json.loads(line) for line in entities_path.read_text().splitlines()]
+    entities[0]["attrs"]["not_json"] = float("nan")
+    entities_path.write_text("".join(json.dumps(entity) + "\n" for entity in entities))
+    _update_manifest_digest(store, ENTITIES_FILE)
+
+    with pytest.raises(StoreError, match="entities.jsonl.*finite JSON"):
+        SignalStore(store.path)
+
+
+def test_close_revalidates_mutated_attrs_before_publication(tmp_path: Path) -> None:
+    builder = SignalStore.builder(tmp_path / "samples", channels=1)
+    entity = builder.add("sample", np.ones((2, 1), dtype=np.float32), group="g")
+    entity.attrs["not_json"] = float("inf")
+
+    with pytest.raises(StoreError, match="entity 'sample' attrs.*finite JSON"):
+        builder.close()
+
+    assert builder._signal.closed
+    assert not (builder.path / MANIFEST_FILE).exists()
+
+
 def test_spawned_loader_workers_reopen_without_serializing_payload(tmp_path: Path) -> None:
     store = _build_store(tmp_path / "samples", rows=200_000)
     assert len(pickle.dumps(store)) < 64 * 1024

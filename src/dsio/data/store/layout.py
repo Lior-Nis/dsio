@@ -74,19 +74,28 @@ def validated_attrs(attrs: dict[str, Any] | None, field: str) -> dict[str, Any]:
         return {}
     if not isinstance(attrs, dict):
         raise StoreError(f"{field} must be a JSON object")
-    return _copy_json_object(attrs, field)
+    try:
+        return _copy_json_object(attrs, field, set())
+    except RecursionError:
+        raise StoreError(f"{field} is nested too deeply to be valid JSON metadata") from None
 
 
-def _copy_json_object(value: dict[Any, Any], field: str) -> dict[str, Any]:
-    copied: dict[str, Any] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            raise StoreError(f"{field} must use string JSON object keys, got {key!r}")
-        copied[key] = _copy_json_value(item, f"{field}.{key}")
-    return copied
+def _copy_json_object(
+    value: dict[Any, Any], field: str, active: set[int]
+) -> dict[str, Any]:
+    _enter_container(value, field, active)
+    try:
+        copied: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise StoreError(f"{field} must use string JSON object keys, got {key!r}")
+            copied[key] = _copy_json_value(item, f"{field}.{key}", active)
+        return copied
+    finally:
+        active.remove(id(value))
 
 
-def _copy_json_value(value: Any, field: str) -> Any:
+def _copy_json_value(value: Any, field: str, active: set[int]) -> Any:
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -94,7 +103,21 @@ def _copy_json_value(value: Any, field: str) -> Any:
             return value
         raise StoreError(f"{field} must be a finite JSON number")
     if isinstance(value, list):
-        return [_copy_json_value(item, f"{field}[{index}]") for index, item in enumerate(value)]
+        _enter_container(value, field, active)
+        try:
+            return [
+                _copy_json_value(item, f"{field}[{index}]", active)
+                for index, item in enumerate(value)
+            ]
+        finally:
+            active.remove(id(value))
     if isinstance(value, dict):
-        return _copy_json_object(value, field)
+        return _copy_json_object(value, field, active)
     raise StoreError(f"{field} contains non-JSON value {type(value).__name__}")
+
+
+def _enter_container(value: object, field: str, active: set[int]) -> None:
+    identity = id(value)
+    if identity in active:
+        raise StoreError(f"{field} contains a cycle and is not valid JSON metadata")
+    active.add(identity)
