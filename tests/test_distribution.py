@@ -51,7 +51,7 @@ def test_training_spine_is_part_of_the_required_distribution() -> None:
     names = {Requirement(item).name.lower() for item in data["project"]["dependencies"]}
     assert "mlflow-skinny" not in names
     assert "typer" not in names
-    assert data["project"]["requires-python"] == ">=3.12"
+    assert data["project"]["requires-python"] == ">=3.12,<3.15"
 
 
 def test_distribution_has_no_accelerator_extras_or_console_script() -> None:

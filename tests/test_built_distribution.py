@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_DEPENDENCIES = {
@@ -77,7 +78,7 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     names = {Requirement(item).name.lower() for item in raw_requirements}
     assert "mlflow-skinny" not in names
     assert not any("pytorch-cpu" in requirement for requirement in raw_requirements)
-    assert metadata["Requires-Python"] == ">=3.12"
+    assert SpecifierSet(metadata["Requires-Python"]) == SpecifierSet(">=3.12,<3.15")
     assert not entry_points
     forbidden_prefixes = ("tests/", "project/", "dsio/torch/", "dsio/cli/")
     assert not any(name.startswith(forbidden_prefixes) for name in members)
@@ -225,6 +226,7 @@ print(json.dumps({
         "HOME": str(home),
         "PREFECT_HOME": str(prefect_home),
         "PREFECT_SERVER_ANALYTICS_ENABLED": "false",
+        "DO_NOT_TRACK": "1",
         "MLFLOW_TRACKING_URI": f"file:{mlflow_store}",
         "DSIO_IMPORT_ENV_ROOT": str(environment),
         "DSIO_IMPORT_STATE_ROOT": str(state),

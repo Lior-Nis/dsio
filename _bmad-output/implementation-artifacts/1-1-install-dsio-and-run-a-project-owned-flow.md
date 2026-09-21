@@ -91,7 +91,7 @@ so that my project owns its workflow without cloning DSio or adopting a parallel
 
 ### Technical Requirements
 
-- Keep Python `>=3.12` and the current Hatchling build backend.
+- Keep Python `>=3.12,<3.15` and the current Hatchling build backend; the upper bound matches the required Prefect release's supported range.
 - Use `prefect>=3.8,<4`; as of 2026-09-21 the locked/current stable release is 3.8.6 and supports Python `>=3.10,<3.15`.
 - Publish `torch>=2.7,<3`, `lightning>=2.5,<3`, `torchmetrics>=1.7,<2`, and full `mlflow>=3,<4` as unconditional dependencies. Exact versions belong in `uv.lock`.
 - Do not encode CPU versus CUDA as a DSio feature or extra. The DSio wheel declares `torch`; the consuming project selects a compatible wheel and index.
@@ -198,7 +198,7 @@ Codex (GPT-5)
 - 2026-09-21: Removed the CLI/application/preset orchestration layer and its behavior-specific tests while preserving lower-level config and legacy runner internals for later stories.
 - 2026-09-21: Reframed active guidance around a pinned library and project-owned Prefect flow; added artifact, isolated-install, inert-import, and consumer-flow contract tests. Focused gate: 40 passed.
 - 2026-09-21: BMad adversarial review completed across blind, edge-case, and acceptance layers. Six acceptance gaps were resolved; three pre-existing provenance issues were recorded for later work.
-- 2026-09-21: Independent Codex and OpenCode review hardened exact wheel metadata, isolated package resolution and Prefect settings from the host, extended inert-import mutation checks to the installed environment, and clarified active README claims.
+- 2026-09-21: Independent Codex and OpenCode review hardened exact wheel metadata and Python compatibility, isolated package resolution and Prefect settings from the host, extended inert-import mutation checks to the installed environment, and clarified active README claims.
 
 ### Completion Notes List
 

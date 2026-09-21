@@ -6,20 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-from prefect import flow, task
-from prefect.testing.utilities import prefect_test_harness
-
-from dsio.contracts import sha256_of
-
-
-@task
-def identify_dataset(dataset: dict[str, object]) -> str:
-    return sha256_of(dataset)
-
-
-@flow
-def project_flow() -> str:
-    return identify_dataset({"name": "algae", "revision": 1})
 
 
 def test_project_owned_flow_calls_public_dsio_function(
@@ -31,6 +17,20 @@ def test_project_owned_flow_calls_public_dsio_function(
             monkeypatch.delenv(name)
     monkeypatch.setenv("PREFECT_HOME", str(tmp_path / "prefect"))
     monkeypatch.setenv("PREFECT_SERVER_ANALYTICS_ENABLED", "false")
+    monkeypatch.setenv("DO_NOT_TRACK", "1")
+
+    from prefect import flow, task
+    from prefect.testing.utilities import prefect_test_harness
+
+    from dsio.contracts import sha256_of
+
+    @task
+    def identify_dataset(dataset: dict[str, object]) -> str:
+        return sha256_of(dataset)
+
+    @flow
+    def project_flow() -> str:
+        return identify_dataset({"name": "algae", "revision": 1})
 
     with prefect_test_harness():
         result = project_flow()
