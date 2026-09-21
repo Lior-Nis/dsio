@@ -4,7 +4,7 @@ baseline_commit: 8d946f9c
 
 # Story 2.3: Generate a Governed Split Manifest
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -40,11 +40,11 @@ so that assignments are deterministic, validated, reviewable, and replayable acr
   - [x] Use scikit-learn for established grouped algorithms and record its locked version; keep temporal logic native.
   - [x] Normalize all role/group/sample ordering and validate the finished manifest against its source examples.
   - [x] Reject unknown names with the governed experimental-admission instruction and expose no registration API.
-- [ ] Verify and review (AC: 1-7)
+- [x] Verify and review (AC: 1-7)
   - [x] Add test-first determinism, replay, provenance, invariant, temporal, dispatcher-closure, and serialization coverage.
   - [x] Run focused split, examples, dataset, evaluation, training, and distribution tests.
   - [x] Run full pytest, Ruff, mypy, import-linter, lock validation, build, and diff checks.
-  - [ ] Complete independent blind, edge-case, and acceptance reviews before merge.
+  - [x] Complete independent blind, edge-case, and acceptance reviews before merge.
 
 ## Dev Notes
 
@@ -108,6 +108,7 @@ Codex (GPT-5)
 - 2026-09-22: Fix verification caught an in-band non-finite hash sentinel and extra temporal span roles; replaced the sentinel with recursive type tagging and required temporal spans to match governed roles exactly.
 - 2026-09-22: Final edge verification hardened object-value hashing against equal-key order, recursive/deep containers, unsupported NumPy extended scalars, and mutable/immutable set collisions.
 - 2026-09-22: Reviewed revision passed 749 tests (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
+- 2026-09-22: Final blind, edge-case, and acceptance verification approved; final gate passed 751 tests (3 deselected) plus every static, architecture, lock, build, and diff check.
 
 ### Completion Notes List
 
@@ -154,3 +155,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 2.3 and started implementation.
 - 2026-09-22: Added governed split generation, exact replay evidence, and the `dsio.data.splits` package migration; candidate passed the complete local quality gate.
+- 2026-09-22: Closed all independent review findings and marked Story 2.3 done.
