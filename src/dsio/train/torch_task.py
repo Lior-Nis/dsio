@@ -1,9 +1,9 @@
 """The torch runner: one process, one fold (decision 6).
 
-``dsio run`` trains one config against one fold and is linear top to bottom: build config
+One invocation trains one config against one fold and is linear top to bottom: build config
 -> build data -> build module -> ``Trainer.fit`` -> predict -> write artifacts -> stamp
-provenance. Cross-validation is running this entry point N times, from a shell loop or an
-agent, not a loop inside this file. A ``Trainer`` is created, fitted and discarded within
+provenance. A project-owned flow invokes this entry point N times for cross-validation,
+not a loop inside this file. A ``Trainer`` is created, fitted and discarded within
 one call to ``run_torch``; this file never learns how out-of-fold predictions across folds
 are accumulated or pooled -- that is a separate reader, over separate runs' artifacts.
 
@@ -88,8 +88,8 @@ def _fold_invariant_config_hash(config: RunConfig) -> str:
 
     Covers the task and the seed, and deliberately **not** ``name`` or ``tags``. Those
     label a run; they do not change the model that produced its predictions. Including
-    them would make ``dsio run p task.fold=$i --name exp-fold$i`` -- naming each fold's
-    run distinctly, which is a natural thing to do -- refuse to pool a perfectly valid
+    them would make naming each fold's run distinctly in a project-owned flow refuse to
+    pool a perfectly valid
     cross-validation. A guard that rejects the obvious workflow gets worked around, and a
     guard that is worked around protects nothing. ``seed`` stays in: it changes the
     weights, so two folds seeded differently really are two different training runs.
@@ -145,8 +145,8 @@ class TorchTask(TaskConfig):
             "`fold: int = 0`: pretraining has no 'all folds' alternative reading, so 0 is "
             "a real default there, but a default here would silently pick fold 0 whenever "
             "a caller meant every fold -- exactly the mistake fold-as-process (decision 6) "
-            "rules out. `dsio run` trains one fold per invocation; cross-validation is N "
-            "invocations from a shell loop or an agent, not a field on this task."
+            "rules out. One invocation trains one fold; cross-validation is N "
+            "invocations from a project-owned flow, not a field on this task."
         ),
     )
 

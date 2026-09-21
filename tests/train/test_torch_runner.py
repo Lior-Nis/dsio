@@ -113,8 +113,8 @@ def make_task(root: Path, **overrides) -> TorchTask:  # type: ignore[no-untyped-
 def test_naming_each_folds_run_distinctly_still_pools(corpus: Path) -> None:
     """The identity must ignore what merely labels a run.
 
-    `dsio run p task.fold=$i --name exp-fold$i` is a natural way to drive a shell loop, and
-    every one of those runs belongs to one cross-validation. If `name` or `tags` reached the
+    Naming each fold's run distinctly in a project-owned flow is natural, and every one of
+    those runs belongs to one cross-validation. If `name` or `tags` reached the
     hash, pooling a perfectly valid CV would be refused -- and a guard that rejects the
     obvious workflow gets worked around, which protects nothing at all.
     """
@@ -170,8 +170,8 @@ def test_preflight_rejects_a_fold_the_split_family_does_not_declare(corpus: Path
 def test_a_bad_fold_fails_the_same_way_even_without_preflight(
     corpus: Path, tmp_path: Path
 ) -> None:
-    """Every caller that reaches `execute()` gets the same guard the CLI's pre-flight
-    gives it, not just the one that remembered to call `check()` first -- every test
+    """Every caller that reaches `execute()` gets the same guard as explicit preflight,
+    not just the one that remembered to call `check()` first -- every test
     below this one calls `execute()` directly, exactly like this."""
     config = RunConfig(name="ghost-fold", task=make_task(corpus, fold=7))
     run = start_run(
@@ -216,8 +216,8 @@ def test_preflight_fails_when_mlflow_is_unreachable(
 def test_mlflow_unreachable_fails_the_same_way_even_without_preflight(
     corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every caller that reaches `execute()` gets the same guard the CLI's pre-flight
-    gives it -- the same property `test_a_bad_fold_fails_the_same_way_even_without_
+    """Every caller that reaches `execute()` gets the same guard as explicit preflight --
+    the same property `test_a_bad_fold_fails_the_same_way_even_without_
     preflight` proves for `require_fold`, above."""
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://localhost:59999")
     config = RunConfig(name="unreachable", task=make_task(corpus))
@@ -334,9 +334,9 @@ def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
 def test_two_folds_of_one_config_land_in_one_mlflow_experiment(
     corpus: Path, tmp_path: Path
 ) -> None:
-    """`build_mlflow_logger` sets `experiment_name=config.name`, which is what makes a
-    shell loop over folds (`dsio run p task.fold=$i`, same `name` every invocation)
-    group natively in MLflow, rather than scattering one experiment per run."""
+    """`build_mlflow_logger` sets `experiment_name=config.name`, which makes a
+    project-owned flow over folds with the same `name` group natively in MLflow rather
+    than scattering one experiment per run."""
     from mlflow.tracking import MlflowClient
 
     for fold in (0, 1):

@@ -5,7 +5,7 @@ absent runner extra. A stale module entry is not an absent extra and must fail l
 These tests pin both sides of that boundary.
 
 An empty tuple would make ``test_every_builtin_runner_module_is_importable`` pass
-vacuously (zero iterations) while leaving no task registered at all: ``dsio run``
+vacuously (zero iterations) while leaving no task registered at all: direct execution
 still works, but reading back any recorded config dies with ``UnknownComponentError:
 unknown task 'torch'``. ``test_builtin_runner_modules_is_not_empty`` below, and its
 twin in ``tests/config/test_preset_discovery.py``, exist so that failure mode cannot

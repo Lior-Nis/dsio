@@ -1,6 +1,6 @@
 # 18. This is a repository, not a template
 
-Status: accepted (2026-08-20)
+Status: superseded by ADR 0019 (2026-09-18)
 Supersedes: the Copier-template distribution model described in `copier.yml` and the root
 README.
 Implemented: yes, by Plan 2a. The `project → dsio` direction is now enforced by nothing —

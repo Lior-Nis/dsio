@@ -1,8 +1,9 @@
 # dsio — Lean Skeleton Design
 
-Status: accepted (2026-08-20) — implemented across Plans 2a, 2b, 3a and 3b; every
-decision this spec names (fold-as-process, MLflow as source of truth, the Lightning-only
-training path, and the rest) is now live in the shipped code, not merely proposed.
+Status: superseded (2026-09-18) by `2026-09-18-generic-experiment-spine.md`. This design
+remains an implementation-history record; its clone-and-merge distribution, fixed
+fold-as-process boundary, project CLI, and local-infrastructure assumptions are no longer
+the target architecture.
 Supersedes: `2026-08-15-dsio-design.md` (the template-and-spine design)
 
 ## Context

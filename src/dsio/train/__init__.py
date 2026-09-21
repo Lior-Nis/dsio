@@ -10,8 +10,8 @@ _OPTIONAL_RUNNER_PACKAGES = frozenset({"torch", "lightning", "mlflow"})
 def load_runners() -> list[str]:
     """Import built-in runner modules so their registrations happen.
 
-    Runners whose optional dependencies are absent are skipped: a clone without
-    torch and lightning should still be able to list presets and inspect runs.
+    Missing framework dependencies are tolerated here for compatibility with legacy
+    recorded-run inspection. New installations include the complete training stack.
     """
     import importlib
 
