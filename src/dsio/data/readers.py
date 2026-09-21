@@ -1,9 +1,4 @@
-"""Storage backends for a signal payload.
-
-The index semantics are identical regardless of where the bytes live; only the fetch
-differs. That separation is what lets the Zarr-versus-flat-binary decision (ADR 0005) stay
-inside this module, and it is the shape Megatron-LM uses — one ``.idx``, several
-``_BinReader`` implementations.
+"""Memory-mapped reads for a signal payload.
 
 Every reader is opened **per process**. This is not an optimisation. A ``np.memmap``
 created in a parent process and handed to a ``spawn``-based DataLoader worker is pickled
@@ -21,10 +16,6 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 
-class ReadError(RuntimeError):
-    """Raised when a read cannot be satisfied."""
-
-
 @runtime_checkable
 class SignalReader(Protocol):
     """Fetch a contiguous run of rows from a signal payload."""
@@ -35,12 +26,7 @@ class SignalReader(Protocol):
 
 
 class MmapReader:
-    """Memory-mapped local reads. The default, and by a wide margin the fastest.
-
-    Benchmarked at ~318k random 500-step windows/s single-process and ~2.9M at eight
-    workers, using 2.7 CPU-seconds per million windows — roughly 120x less CPU than a
-    chunked format. See ADR 0005.
-    """
+    """Memory-mapped local reads, selected by the scoped benchmark in ADR 0005."""
 
     def __init__(self, path: Path, dtype: np.dtype, channels: int, n_rows: int) -> None:
         self._array = np.memmap(path, dtype=dtype, mode="r", shape=(n_rows, channels))
@@ -54,22 +40,6 @@ class MmapReader:
         self._array = None  # type: ignore[assignment]
 
 
-BACKENDS: dict[str, type] = {"mmap": MmapReader}
-
-
-def open_reader(
-    backend: str, path: Path, dtype: np.dtype, channels: int, n_rows: int
-) -> SignalReader:
-    """Open a reader by backend name, failing on an unknown one rather than defaulting.
-
-    Silently falling back to mmap when a caller asked for something else would hide the
-    very condition they were working around.
-    """
-    try:
-        cls = BACKENDS[backend]
-    except KeyError:
-        raise ReadError(
-            f"unknown backend {backend!r}; the store is memory-mapped (ADR 0005). "
-            "A sharded streaming backend is the planned extension, not a fallback."
-        ) from None
-    return cls(path, dtype, channels, n_rows)
+def open_reader(path: Path, dtype: np.dtype, channels: int, n_rows: int) -> SignalReader:
+    """Open the benchmark-selected flat-binary reader."""
+    return MmapReader(path, dtype, channels, n_rows)

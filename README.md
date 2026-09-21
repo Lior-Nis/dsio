@@ -122,6 +122,10 @@ MLflow artifacts, and Prefect flows over parallel DSio models for the same conce
 produces an index of offsets, not a copy. Materialize only what is expensive *and*
 deterministic; index everything cheap and combinatorial.
 
+The flat-binary, memory-mapped payload was selected by the scoped reproducible benchmark in
+[ADR 0005](docs/adr/0005-canonical-store-is-flat-binary.md); its results are local-workload
+evidence, not a universal claim about storage formats.
+
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree
 gate belongs at model-registry promotion, and **is not implemented**: there is no

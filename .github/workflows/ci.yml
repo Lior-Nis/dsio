@@ -19,7 +19,7 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --locked
+        run: uv sync --locked --group benchmark
 
       - name: Build distributions
         run: uv build

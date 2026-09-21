@@ -1,151 +1,139 @@
 # 5. The canonical signal store is flat binary, memory-mapped
 
-Status: accepted (2026-08-15)
-Supersedes: the "canonical store format" open question in the design spec.
+Status: accepted (revalidated 2026-09-21)
 
 ## Context
 
-The design spec left one question open: what backs a canonical store of continuous signal
-`[T, C]` from which windows are read at arbitrary offsets? That is the SSL access pattern —
-masked and contrastive pretraining sample random offsets thousands of times per second.
+DSio needs one physical format for immutable, fixed-dtype numeric arrays read as contiguous
+windows. Choosing several backends would move format decisions into every consumer without
+evidence that the flexibility is useful. The choice therefore comes from a focused,
+repeatable local-filesystem benchmark.
 
-The spec's provisional default was Zarr v3, on the grounds that FORGE proved it at 229 GB.
-The stated hypothesis was that **Lance** might win, because it claims roughly 100× faster
-random access than Parquet *and* carries zero-copy dataset versioning in the format itself,
-which would collapse the store and the manifest into one thing.
+This decision covers the measured DSio workload: C-contiguous `float32` arrays shaped
+`[rows, channels]`, local storage, immutable publication, and materialized contiguous
+windows. It is not a claim about object storage, sparse/tabular data, mixed dtypes, remote
+streaming, or N-dimensional sub-volume access.
 
-Both were tested against real data rather than argued about.
+## Reproducible benchmark
 
-## Method
+From the repository root, the complete synthetic benchmark is one locked command:
 
-Real FORGE accelerometer windows (`len500_stride200_fogstride100_anyfog_kaggle_defog.zarr`,
-230,555 × 500 × 3 float32) flattened back into one continuous signal of 115,277,500 × 3 —
-1.38 GB. Each candidate was written, warmed, and then timed on 2,000 random 500-step window
-reads. Every read is forced to materialise via `.sum()`: a numpy memmap slice is a *view*,
-and timing it without touching the bytes measures view construction and reports a number
-that is pure fiction. An earlier run made exactly that mistake and reported 1.3M win/s.
+```bash
+uv run --locked --group benchmark python -m benchmarks.storage \
+  --output benchmarks/storage/results/local-synthetic.json
+```
 
-## Results
+The checked-in run uses two deterministic 2,000,000-row, three-channel profiles, 500-row
+windows, 2,000 ordered reads, 2,000 seeded random reads, and spawn-based worker counts of
+one, two, and four. It compares:
 
-| Format | Random windows/s | Relative | Size |
-|---|---|---|---|
-| **np.memmap flat binary** | **317,866** | 1.00× | 1.38 GB |
-| Arrow IPC, memory-mapped | 247,942 | 0.78× | 1.38 GB |
-| Zarr v3, chunk 8192, uncompressed | 4,937 | 0.016× | 1.38 GB |
-| Lance | 4,268 | 0.013× | 1.39 GB |
-| Zarr v3, chunk 8192, blosc/lz4 | 3,627 | 0.011× | 0.44 GB |
-| Zarr v3, chunk 65536, blosc/lz4 | 2,336 | 0.007× | 0.41 GB |
+- flat C-contiguous binary through `numpy.memmap`;
+- Arrow IPC through PyArrow's memory-mapped file reader; and
+- Zarr v3 with 2,048-row chunks and explicit Zstandard level 0 compression.
 
-A second run gave Zarr its best case — chunks sized to the window, so read amplification is
-~1× instead of 16× — on 20M synthetic timesteps:
+Every read is materialized and hashed. A run fails unless every candidate checksum matches
+the checksum computed directly from the source for the same starts. Multi-worker jobs open
+their handles, report distinct process IDs, wait on a shared release, and use one parent
+wall-clock interval. Each candidate records build time and throughput,
+ordered/random/multi-worker read timings, process peak RSS where the platform exposes it,
+disk bytes, file count, package versions, source digest, seed, machine, Git state, and the
+observed behavior after truncating/removing bytes from a real built output. The JSON contains
+raw worker measurements rather than only summaries.
 
-| Format | Random windows/s |
-|---|---|
-| np.memmap | 390,634 |
-| Zarr chunk 2048, uncompressed | 4,728 |
-| Zarr chunk 1024, uncompressed | 4,144 |
-| Zarr chunk 512, uncompressed | 3,393 |
-| Zarr chunk 512, blosc/lz4 | 2,361 |
+The benchmark does not drop the operating-system page cache. A candidate is built before
+it is read, so these are warm-cache-oriented local results. Timing rank is intentionally not
+asserted in CI; tests assert workload determinism, candidate equivalence, report completeness,
+and recovery classification.
 
-## Findings
+## 2026-09-21 results
 
-**Memory-mapped formats are roughly 65–90× faster than chunked ones for this access
-pattern.** That is not a margin you tune away.
+Environment: Linux 6.17 x86-64, Python 3.12, NumPy 2.5.2, PyArrow 25.0.1,
+Zarr 3.4.0, and Numcodecs 0.17.0.
+Exact environment strings and raw measurements are in:
 
-**The cost is not decompression.** Uncompressed Zarr is only 1.4× faster than compressed
-Zarr, and chunk tuning moves it by less than 2×. The bottleneck is the chunked-array access
-path itself — per-call indexing machinery in Python — so neither a faster codec nor a better
-chunk shape rescues it.
+- `benchmarks/storage/results/2026-09-21-synthetic.json`
+- `benchmarks/storage/results/2026-09-21-forge-kaggle-defog.json`
 
-**The Lance hypothesis was wrong**, and it is worth being precise about why rather than
-just recording the number. Lance's `take()` gathers *rows* by index. Asking for 500
-consecutive rows is a 500-element row gather, not a contiguous slice, so its strength —
-random access across wide or multimodal records — is the wrong strength for narrow numeric
-signal read in runs. It is 74× slower than memmap here. Its built-in versioning was the real
-attraction, and that is simply not worth 74×.
+### Synthetic profiles
 
-**Compression buys 3.1×space** (1.38 GB → 0.44 GB). Real, but not the binding constraint:
-FORGE's 229 GB was mostly duplicated materialised windows, which the lazy-view design
-eliminates regardless of codec.
+| Workload | Candidate | Build MB/s | Ordered MB/s | Random windows/s | 1/2/4-worker windows/s | Peak RSS MB | Disk MB / files |
+|---|---|---:|---:|---:|---:|---:|---:|
+| smooth signal | flat binary | 1,029 | 823 | 95,117 | 152,304 / 453,802 / 842,418 | 118 | 24.00 / 1 |
+| smooth signal | Arrow IPC | 202 | 119 | 18,374 | 18,410 / 37,696 / 63,535 | 156 | 24.00 / 1 |
+| smooth signal | Zarr v3 | 63 | 18 | 2,863 | 2,811 / 5,777 / 11,611 | 159 | 21.17 / 978 |
+| fixed items | flat binary | 2,705 | 1,096 | 109,634 | 140,986 / 404,429 / 790,730 | 197 | 24.00 / 1 |
+| fixed items | Arrow IPC | 200 | 106 | 20,084 | 17,811 / 34,311 / 65,654 | 197 | 24.00 / 1 |
+| fixed items | Zarr v3 | 62 | 19 | 3,064 | 2,921 / 5,887 / 11,094 | 198 | 13.77 / 978 |
+
+### Representative FORGE corpus
+
+The real-corpus run used the first 2,000,000 flattened rows of FORGE's project-owned
+`kaggle_defog` accelerometer `accs` array, originally shaped `[230555, 500, 3]`. This retains
+real values and compression behavior but is a subset of materialized windows, not a claim
+about every FORGE session or the full 1.38 GB logical array.
+
+| Candidate | Build MB/s | Ordered MB/s | Random windows/s | 1/2/4-worker windows/s | Peak RSS MB | Disk MB / files |
+|---|---:|---:|---:|---:|---:|---:|
+| flat binary | 4,531 | 1,308 | 122,844 | 227,310 / 408,688 / 932,415 | 90 | 24.00 / 1 |
+| Arrow IPC | 175 | 117 | 18,188 | 18,501 / 33,471 / 65,265 | 155 | 24.00 / 1 |
+| Zarr v3 | 61 | 18 | 2,967 | 3,037 / 5,935 / 10,520 | 160 | 9.05 / 978 |
+
+The real workload can be rerun where that project-owned corpus is available:
+
+```bash
+uv run --locked --group benchmark python -m benchmarks.storage \
+  --real-only --real-zarr /path/to/corpus.zarr --real-key accs \
+  --real-name forge-kaggle-defog --real-row-limit 2000000 \
+  --output benchmarks/storage/results/local-forge.json
+```
+
+## Recovery and operational observations
+
+Flat binary and Arrow each produced one payload file; Zarr produced 978 files for each
+2,000,000-row workload. Flat binary needs only NumPy, Arrow adds PyArrow, and Zarr adds Zarr
+and its codec/storage dependencies. These are observable facts, not a subjective complexity
+score.
+
+The recovery probe builds each candidate through the measured builder, then models an
+interrupted publication by truncating the flat/Arrow payload or removing a Zarr data chunk.
+The incomplete flat and Arrow payloads could not be opened; incomplete Zarr opened but did
+not match the expected content digest. All candidates rebuilt successfully after the partial
+output was discarded. Thus no candidate removes the need for DSio's atomic publication,
+manifest, and digest checks.
+
+## Historical evidence
+
+The 2026-08 exploratory run used the full 1.38 GB logical FORGE array and reported 317,866
+random windows/s for flat binary, 247,942 for Arrow IPC, 2,336–4,937 for Zarr variants, and
+4,268 for Lance. A separate fork-worker run reported 405,034 / 2,866,337 windows/s for flat
+binary at one/eight workers, 262,615 / 1,901,997 for Arrow, and 3,054 / 26,104 for Zarr.
+
+Those results remain useful corroboration but came from hard-coded, undeclared scripts and
+are not treated as the reproducible record. The scripts were removed after their relevant
+candidate coverage and lessons were incorporated into `benchmarks.storage`.
 
 ## Decision
 
-The canonical continuous-signal store is a **flat binary payload plus a versioned index**,
-memory-mapped for local reads — Megatron-LM's `.bin`/`.idx` and nanoGPT's `train.bin`,
-arrived at by measurement rather than by imitation.
+The one canonical DSio payload is flat C-contiguous binary with a versioned DSio index and
+manifest, read locally through `numpy.memmap`.
 
-**Arrow IPC memory-mapped is the sanctioned alternative** where a schema, named columns, or
-mixed dtypes are needed. At 0.78× it costs little, and it is the substrate HuggingFace
-`datasets` already uses.
+Across the declared runs it had the highest ordered, random, and multi-worker throughput,
+the smallest dependency surface, and one payload file. Zarr materially reduced disk use on
+compressible data, but that trade cost substantial build/read throughput and hundreds of
+files. Arrow preserves a richer schema that DSio's homogeneous numeric payload does not
+need and was slower in these measured access paths.
 
-Zarr and Lance are **not** the canonical store. Zarr keeps a narrow role for genuinely
-N-dimensional data sampled as sub-volumes, where its chunking earns its cost; nothing in the
-v1 modalities qualifies. Versioning stays in the manifest layer, where ADR 0002 already put
-it.
-
-## Does it hold with DataLoader workers?
-
-The bake-off above measured one reader. Training uses N worker processes reading
-concurrently, and the two candidates have different bottlenecks — Zarr's cost is CPU-side
-Python work, which parallelises across processes, while memmap is page-cache memcpy, which
-contends on memory bandwidth. So the ranking was not obviously stable.
-
-Measured with the `fork` start method, which is what a PyTorch DataLoader uses on Linux, on
-a 24-core machine. Aggregate windows/s, with pool startup excluded from the timing:
-
-| Format | 1 worker | 2 | 4 | 8 | CPU-seconds per 1M windows |
-|---|---|---|---|---|---|
-| np.memmap | 405,034 | 811,832 | 1,466,876 | 2,866,337 | **2.7** |
-| Arrow IPC mmap | 262,615 | 511,889 | 909,825 | 1,901,997 | **4.0** |
-| Zarr v3 | 3,054 | 6,745 | 13,621 | 26,104 | **~320** |
-
-All three scale close to linearly (7–8.5× at 8 workers), so **the ranking is stable** and
-Zarr stays roughly two orders of magnitude behind.
-
-**The decisive number is the last column, not the throughput.** Zarr burns ~120× more CPU
-per window. Expressed as cores needed to sustain a fixed 50,000 windows/s — a modest
-pretraining feed — that is **0.14 cores for memmap, 0.2 for Arrow, and 16 for Zarr**. Those
-sixteen cores are not spare: they are the cores you wanted for augmentation, collation, and
-the masking sampler. A reader that consumes the machine to feed the GPU has not solved the
-problem, and this is a far stronger argument than raw throughput.
-
-### The correctness half: handles must be per-worker
-
-Opening lazily inside the worker is not an optimisation, it is required.
-
-A `np.memmap` created in the parent and handed to a **spawn**-based worker is pickled *by
-value* — it serialises the array rather than the mapping. Linux DataLoaders default to
-`fork` and inherit the mapping harmlessly, so this bug hides until someone runs on macOS or
-Windows, or sets `multiprocessing_context="spawn"` to dodge a CUDA fork issue. FORGE hit the
-same class of bug with Zarr and fixed it the same way: a per-worker handle opened on first
-use (`data/dataset/base.py:374-391`).
-
-Two properties that make memmap behave well here, and are worth stating because they are not
-obvious:
-
-- **Read-only mappings share the page cache across processes**, so eight workers reading one
-  file do not multiply resident memory. Per-worker decode buffers do.
-- **The canonical store is immutable once built**, so readers never contend with a writer.
-  Concurrency control is needed only in the manifest layer, which already has it.
-
-Seeding must also be per-worker — `dsio.runs.seeding.dataloader_kwargs()` supplies the
-seeded generator and `worker_init_fn`, without which shuffle order depends on worker count.
+DSio therefore exposes no backend selector or runtime storage registry. A future workload
+that invalidates these conditions must first extend and rerun this benchmark; a changed
+physical implementation remains behind the stable store boundary rather than becoming a
+project-side branch.
 
 ## Consequences
 
-The `StorageBackend` ABC from ADR 0004 is now load-bearing rather than tidy. These numbers
-are **warm page cache**, which is the honest workstation case and the optimistic cloud case
-— you cannot mmap S3. The remote backend will use ranged reads against the same index
-semantics, exactly as Megatron's `_BinReader` has mmap, plain-file, and S3 implementations
-behind one `.idx`. Local and remote will not have comparable throughput, and the design must
-not pretend otherwise: the answer for cloud is a node-local NVMe cache, not a faster reader.
-
-Compression becomes a per-store option rather than a default, off for anything in the
-training hot path.
-
-## Caveats
-
-Warm cache; `drop_caches` needs root. Narrow signal (3 channels) — Lance may well win on
-wide or multimodal records, and this result should not be generalised to those. Single
-process, no dataloader workers. The benchmark lives at
-`scratchpad/bakeoff.py` and should be re-run if the access pattern changes.
+- Readers remain lazy and per-process so spawn workers reopen mappings instead of pickling
+  payload bytes.
+- The store remains immutable after atomic publication and is rejected when index,
+  manifest, shape, or digest checks fail.
+- Compression, remote/object storage, mixed schemas, and arbitrary N-dimensional chunks
+  are not silently promised by this decision.
+- Performance claims in DSio documentation must cite the measured workload and result file.
