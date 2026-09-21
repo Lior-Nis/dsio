@@ -2,31 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 from collections.abc import Iterator
 from contextlib import contextmanager
-from uuid import uuid4
 
 import mlflow
 from mlflow import MlflowClient
 from mlflow.entities import Run
 from mlflow.exceptions import MlflowException
 from mlflow.tracking.fluent import ActiveRun
-from prefect.exceptions import CancelledRun, TerminationSignal
 
-_CANCELLATION_ERRORS = (
-    asyncio.CancelledError,
-    concurrent.futures.CancelledError,
-    CancelledRun,
-    TerminationSignal,
-    KeyboardInterrupt,
+from dsio.tracking._lifecycle import (
+    TrackingError,
+    create_run,
+    is_cancellation,
+    status_for,
 )
-_CREATION_TOKEN_TAG = "dsio_creation_token"
-
-
-class TrackingError(RuntimeError):
-    """A required MLflow lifecycle operation did not complete."""
 
 
 @contextmanager
@@ -49,7 +39,7 @@ def experiment(experiment_name: str, *, run_name: str | None = None) -> Iterator
         parent = mlflow.start_run(run_id=run_id)
         yield parent
     except BaseException as error:
-        status = _status_for(error)
+        status = status_for(error)
         if parent is None:
             message = (
                 f"Could not activate MLflow parent Run {run_id!r} for experiment "
@@ -59,7 +49,7 @@ def experiment(experiment_name: str, *, run_name: str | None = None) -> Iterator
                 _terminate_parent(client, run_id, experiment_name, status, require_active=False)
             except BaseException as cleanup_error:  # noqa: BLE001 - preserve cancellation
                 message += f"; marking the created Run {status} also failed: {cleanup_error}"
-            if _is_cancellation(error) or not isinstance(error, Exception):
+            if is_cancellation(error) or not isinstance(error, Exception):
                 error.add_note(message)
                 raise
             raise TrackingError(message) from error
@@ -69,7 +59,7 @@ def experiment(experiment_name: str, *, run_name: str | None = None) -> Iterator
                 client,
                 run_id,
                 experiment_name,
-                _status_for(error),
+                status_for(error),
                 require_active=True,
             )
         except TrackingError as tracking_error:
@@ -90,7 +80,7 @@ def experiment(experiment_name: str, *, run_name: str | None = None) -> Iterator
         except TrackingError:
             raise
         except BaseException as error:
-            status = _status_for(error)
+            status = status_for(error)
             recovery = _recover_parent_status(client, run_id, status)
             if recovery is not None:
                 error.add_note(
@@ -114,7 +104,7 @@ def _resolve_experiment(client: MlflowClient, experiment_name: str) -> str:
                 raise
             return stored.experiment_id
     except BaseException as error:
-        if _is_cancellation(error) or not isinstance(error, Exception):
+        if is_cancellation(error) or not isinstance(error, Exception):
             raise
         raise TrackingError(
             f"Could not resolve MLflow experiment {experiment_name!r}: {error}"
@@ -127,65 +117,13 @@ def _create_parent(
     experiment_name: str,
     run_name: str | None,
 ) -> Run:
-    token = uuid4().hex
-    try:
-        return client.create_run(
-            experiment_id,
-            run_name=run_name,
-            tags={_CREATION_TOKEN_TAG: token},
-        )
-    except BaseException as error:
-        status = _status_for(error)
-        reconciliation = _reconcile_creation(client, experiment_id, token, status)
-        message = (
-            f"Could not create MLflow parent Run for experiment {experiment_name!r}: {error}"
-        )
-        if reconciliation is not None:
-            message += f"; {reconciliation}"
-        if _is_cancellation(error) or not isinstance(error, Exception):
-            if reconciliation is not None:
-                error.add_note(message)
-            raise
-        raise TrackingError(message) from error
-
-
-def _reconcile_creation(
-    client: MlflowClient,
-    experiment_id: str,
-    token: str,
-    status: str,
-) -> str | None:
-    try:
-        runs = client.search_runs(
-            [experiment_id],
-            filter_string=f"tags.{_CREATION_TOKEN_TAG} = '{token}'",
-            max_results=2,
-        )
-    except BaseException as error:  # noqa: BLE001 - preserve the creation failure
-        return f"could not reconcile the uncertain create operation: {error}"
-    if not runs:
-        return None
-
-    failures: list[str] = []
-    for run in runs:
-        try:
-            client.set_terminated(run.info.run_id, status)
-        except BaseException as error:  # noqa: BLE001 - report every uncertain Run
-            failures.append(f"{run.info.run_id}: {error}")
-    if failures:
-        return "could not terminate reconciled Run(s): " + "; ".join(failures)
-    run_ids = ", ".join(run.info.run_id for run in runs)
-    return f"reconciled committed Run(s) {run_ids} as {status}"
-
-
-def _is_cancellation(error: BaseException) -> bool:
-    if isinstance(error, BaseExceptionGroup):
-        return all(_is_cancellation(child) for child in error.exceptions)
-    return isinstance(error, _CANCELLATION_ERRORS)
-
-
-def _status_for(error: BaseException) -> str:
-    return "KILLED" if _is_cancellation(error) else "FAILED"
+    return create_run(
+        client,
+        experiment_id,
+        run_name=run_name,
+        tags={},
+        description=f"MLflow parent Run for experiment {experiment_name!r}",
+    )
 
 
 def _recover_parent_status(client: MlflowClient, run_id: str, status: str) -> BaseException | None:
@@ -215,7 +153,7 @@ def _terminate_parent(
         try:
             client.set_terminated(run_id, status)
         except Exception as error:
-            if _is_cancellation(error):
+            if is_cancellation(error):
                 raise
             raise TrackingError(
                 f"Could not finish MLflow parent Run {run_id!r} for experiment "
@@ -233,7 +171,7 @@ def _terminate_parent(
     try:
         mlflow.end_run(status)
     except Exception as error:
-        if _is_cancellation(error):
+        if is_cancellation(error):
             raise
         recovery_error = _recover_parent_status(client, run_id, status)
         recovery = (

@@ -36,25 +36,29 @@ Define orchestration in the consumer project and call DSio functions normally:
 
 ```python
 from prefect import flow, task
+from mlflow import MlflowClient
 
 from dsio.contracts import sha256_of
-from dsio.tracking import experiment
+from dsio.tracking import attempt, experiment
 
 
 @task
 def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[str, str]:
-    return sha256_of(dataset), parent_run_id
+    with attempt(parent_run_id) as child:
+        digest = sha256_of(dataset)
+        MlflowClient().log_param(child.info.run_id, "dataset_digest", digest)
+        return digest, child.info.run_id
 
 
 @flow
 def train_experiment() -> tuple[str, str]:
     with experiment("algae-training") as parent:
-        digest, observed_parent_id = identify_dataset(
+        digest, child_run_id = identify_dataset(
             {"name": "algae", "revision": 1}, parent.info.run_id
         )
         if not digest:
             raise ValueError("dataset identity is required")
-        return digest, observed_parent_id
+        return digest, child_run_id
 
 
 if __name__ == "__main__":
@@ -62,8 +66,9 @@ if __name__ == "__main__":
 ```
 
 No DSio runner or flow wrapper is involved. Each flow execution explicitly creates a fresh
-native MLflow parent Run. Tasks receive its Run ID as ordinary data, and required output
-validation stays inside the context so MLflow records failure instead of false success.
+native MLflow parent Run. Tasks receive its Run ID as ordinary data and open one native child
+Run per Prefect attempt. Evidence is logged with the explicit child Run ID; required output
+validation stays inside the parent context so MLflow records failure instead of false success.
 Prefect executes the project's flow through its normal Python entry point.
 
 ## Shape
@@ -162,9 +167,12 @@ Decisions and their reasons live in `docs/adr/`.
 ## Tracking
 
 MLflow is the source of truth for run evidence (see the accepted generic-spine spec).
-`dsio.tracking.experiment(...)` adds only the flow-level lifecycle invariant: a fresh parent
-Run per execution, `FINISHED` after clean exit, `FAILED` after an error, and `KILLED` after
-cancellation. Creation or finalization failures fail the flow closed.
+`dsio.tracking.experiment(...)` adds the flow-level lifecycle invariant: a fresh parent Run
+per execution. `dsio.tracking.attempt(parent_run_id)` adds one native child Run for the current
+Prefect task attempt, tagged with its task and retry identity. Both contexts persist
+`FINISHED`, `FAILED`, or `KILLED` and fail closed when required lifecycle evidence cannot be
+written. Child logging always targets `child.info.run_id` explicitly; DSio does not introduce
+an evidence wrapper or depend on MLflow's ambient active Run inside concurrent tasks.
 
 Start the local stack before running anything that trains:
 
