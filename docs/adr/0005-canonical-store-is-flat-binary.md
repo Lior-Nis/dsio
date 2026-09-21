@@ -71,9 +71,9 @@ about every FORGE session or the full 1.38 GB logical array.
 
 | Candidate | Build MB/s | Ordered MB/s | Random windows/s | 1/2/4-worker windows/s | Peak RSS MB | Disk MB / files |
 |---|---:|---:|---:|---:|---:|---:|
-| flat binary | 1,014 | 1,402 | 107,944 | 107,618 / 341,623 / 434,912 | 94 | 24.00 / 1 |
-| Arrow IPC | 185 | 105 | 18,043 | 16,361 / 33,547 / 61,904 | 156 | 24.00 / 1 |
-| Zarr v3 | 52 | 17 | 2,848 | 2,751 / 5,828 / 12,528 | 164 | 9.05 / 978 |
+| flat binary | 4,731 | 1,410 | 104,554 | 207,534 / 415,690 / 841,190 | 89 | 24.00 / 1 |
+| Arrow IPC | 192 | 120 | 19,866 | 20,631 / 37,676 / 69,577 | 157 | 24.00 / 1 |
+| Zarr v3 | 62 | 17 | 2,715 | 2,618 / 5,649 / 11,447 | 159 | 9.05 / 978 |
 
 The real workload can be rerun where that project-owned corpus is available:
 
