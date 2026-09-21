@@ -8,8 +8,10 @@ import json
 import multiprocessing
 import os
 import platform
+import queue
 import subprocess
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,9 +21,11 @@ import numpy as np
 
 from benchmarks.storage.candidates import (
     CANDIDATES,
+    RSS_METHOD,
     build_candidate,
     candidate_path,
     measure_reads,
+    measure_reads_synchronized,
     recovery_observation,
 )
 
@@ -66,6 +70,8 @@ def run_benchmark(
     """Run declared workloads and return a JSON-serializable evidence document."""
     _validate_inputs(profiles, candidates, rows, channels, window, reads, workers)
     work_root = Path(work_root)
+    if work_root.exists() and any(work_root.iterdir()):
+        raise ValueError(f"benchmark work root must be empty: {work_root}")
     work_root.mkdir(parents=True, exist_ok=True)
     workloads: list[dict[str, Any]] = []
     sources: list[tuple[str, str, np.ndarray, dict[str, Any]]] = [
@@ -81,6 +87,9 @@ def run_benchmark(
         (name, "real", np.asarray(array, dtype=np.float32), details)
         for name, array, details in real_sources
     )
+    safe_names = [_safe_name(name) for name, _, _, _ in sources]
+    if len(safe_names) != len(set(safe_names)):
+        raise ValueError("workload names must be unique after filesystem normalization")
 
     for name, kind, source, origin in sources:
         if source.ndim != 2:
@@ -96,6 +105,27 @@ def run_benchmark(
         np.save(source_path, source, allow_pickle=False)
         sequential = _sequential_starts(len(source), window, reads)
         random = _random_starts(len(source), window, reads, seed)
+        worker_starts = {
+            count: [
+                _random_starts(len(source), window, reads, seed + worker)
+                for worker in range(count)
+            ]
+            for count in workers
+        }
+        expected = {
+            "sequential": _source_checksum(source, sequential, window),
+            "random": _source_checksum(source, random, window),
+            "multi_worker": [
+                {
+                    "workers": count,
+                    "checksums": [
+                        _source_checksum(source, starts, window)
+                        for starts in worker_starts[count]
+                    ],
+                }
+                for count in workers
+            ],
+        }
         results = [
             _run_candidate(
                 candidate,
@@ -106,11 +136,11 @@ def run_benchmark(
                 random,
                 window,
                 workers,
-                seed,
+                worker_starts,
             )
             for candidate in candidates
         ]
-        _assert_equivalent(name, results)
+        _assert_equivalent(name, results, expected)
         workloads.append(
             {
                 "name": name,
@@ -122,6 +152,7 @@ def run_benchmark(
                     "sha256": hashlib.sha256(source.tobytes()).hexdigest(),
                     "origin": origin,
                 },
+                "expected_checksums": expected,
                 "candidates": results,
             }
         )
@@ -160,7 +191,7 @@ def _run_candidate(
     random: list[int],
     window: int,
     workers: tuple[int, ...],
-    seed: int,
+    worker_starts: dict[int, list[list[int]]],
 ) -> dict[str, Any]:
     candidate_root = workload_root / candidate
     candidate_root.mkdir(parents=True, exist_ok=True)
@@ -196,9 +227,8 @@ def _run_candidate(
             shape=shape,
             dtype=dtype,
             window=window,
-            reads=len(random),
             workers=count,
-            seed=seed,
+            starts=worker_starts[count],
         )
         for count in workers
     ]
@@ -228,39 +258,55 @@ def _measure_workers(
     shape: tuple[int, int],
     dtype: str,
     window: int,
-    reads: int,
     workers: int,
-    seed: int,
+    starts: list[list[int]],
 ) -> dict[str, Any]:
-    jobs = [
-        _random_starts(shape[0], window, reads, seed + worker)
-        for worker in range(workers)
-    ]
     context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
-        futures = [
-            pool.submit(
-                measure_reads,
-                candidate,
-                path,
-                shape=shape,
-                dtype=dtype,
-                starts=starts,
-                window=window,
-            )
-            for starts in jobs
-        ]
-        raw = [future.result() for future in futures]
-    elapsed = max(item["elapsed_seconds"] for item in raw)
+    with context.Manager() as manager:
+        ready = manager.Queue()
+        start = manager.Event()
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+            futures = [
+                pool.submit(
+                    measure_reads_synchronized,
+                    candidate,
+                    path,
+                    shape=shape,
+                    dtype=dtype,
+                    starts=worker_starts,
+                    window=window,
+                    ready=ready,
+                    start=start,
+                )
+                for worker_starts in starts
+            ]
+            try:
+                pids = [ready.get(timeout=60) for _ in range(workers)]
+            except queue.Empty:
+                failures = [future.exception() for future in futures if future.done()]
+                raise RuntimeError(
+                    f"only {ready.qsize()} of {workers} benchmark workers became ready; "
+                    f"early failures: {failures}"
+                ) from None
+            if len(set(pids)) != workers:
+                raise RuntimeError(
+                    f"requested {workers} workers but observed PIDs {sorted(pids)}"
+                )
+            started = time.perf_counter()
+            start.set()
+            raw = [future.result() for future in futures]
+            elapsed = time.perf_counter() - started
     logical_bytes = sum(item["logical_bytes"] for item in raw)
+    peaks = [item["peak_rss_bytes"] for item in raw]
     return {
         "workers": workers,
+        "pids": pids,
         "elapsed_seconds": elapsed,
-        "windows": reads * workers,
+        "windows": sum(item["windows"] for item in raw),
         "logical_bytes": logical_bytes,
-        "windows_per_second": reads * workers / elapsed,
+        "windows_per_second": sum(item["windows"] for item in raw) / elapsed,
         "throughput_bytes_per_second": logical_bytes / elapsed,
-        "peak_rss_bytes_sum": sum(item["peak_rss_bytes"] for item in raw),
+        "peak_rss_bytes_sum": None if None in peaks else sum(peaks),
         "raw_workers": raw,
     }
 
@@ -284,23 +330,37 @@ def _random_starts(rows: int, window: int, reads: int, seed: int) -> list[int]:
     return [int(value) for value in rng.integers(0, rows - window + 1, size=reads)]
 
 
-def _assert_equivalent(workload: str, results: list[dict[str, Any]]) -> None:
+def _assert_equivalent(
+    workload: str,
+    results: list[dict[str, Any]],
+    expected: dict[str, Any],
+) -> None:
     for operation in ("sequential", "random"):
         checksums = {result[operation]["checksum"] for result in results}
-        if len(checksums) != 1:
+        if checksums != {expected[operation]}:
             raise RuntimeError(
-                f"candidate outputs differ for {workload!r} {operation} reads: {checksums}"
+                f"candidate outputs differ from source for {workload!r} "
+                f"{operation} reads: expected {expected[operation]}, got {checksums}"
             )
-    worker_counts = [item["workers"] for item in results[0]["multi_worker"]]
-    for index, workers in enumerate(worker_counts):
+    for index, expected_workers in enumerate(expected["multi_worker"]):
+        workers = expected_workers["workers"]
         checksums = {
             tuple(worker["checksum"] for worker in result["multi_worker"][index]["raw_workers"])
             for result in results
         }
-        if len(checksums) != 1:
+        expected_checksums = tuple(expected_workers["checksums"])
+        if checksums != {expected_checksums}:
             raise RuntimeError(
-                f"candidate outputs differ for {workload!r} at {workers} workers"
+                f"candidate outputs differ from source for {workload!r} at "
+                f"{workers} workers: expected {expected_checksums}, got {checksums}"
             )
+
+
+def _source_checksum(source: np.ndarray, starts: list[int], window: int) -> str:
+    digest = hashlib.sha256()
+    for start in starts:
+        digest.update(np.ascontiguousarray(source[start : start + window]).tobytes())
+    return digest.hexdigest()
 
 
 def _validate_inputs(
@@ -312,6 +372,13 @@ def _validate_inputs(
     reads: int,
     workers: tuple[int, ...],
 ) -> None:
+    for label, values in (
+        ("profiles", profiles),
+        ("candidates", candidates),
+        ("worker counts", workers),
+    ):
+        if len(values) != len(set(values)):
+            raise ValueError(f"duplicate {label} are not allowed")
     unknown_profiles = sorted(set(profiles) - set(PROFILES))
     unknown_candidates = sorted(set(candidates) - set(CANDIDATES))
     if unknown_profiles:
@@ -345,7 +412,7 @@ def _environment() -> dict[str, Any]:
         "git_commit": commit,
         "git_dirty": dirty,
         "git_dirty_scope": "tracked files only",
-        "rss_method": "resource.getrusage(RUSAGE_SELF).ru_maxrss",
+        "rss_method": RSS_METHOD,
         "cache_state": "uncontrolled; reads may use the operating-system page cache",
     }
 

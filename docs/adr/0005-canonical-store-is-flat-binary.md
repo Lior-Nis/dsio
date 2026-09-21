@@ -29,12 +29,15 @@ one, two, and four. It compares:
 
 - flat C-contiguous binary through `numpy.memmap`;
 - Arrow IPC through PyArrow's memory-mapped file reader; and
-- Zarr v3 with 2,048-row chunks and its default compressor.
+- Zarr v3 with 2,048-row chunks and explicit Zstandard level 0 compression.
 
-Every read is materialized and hashed. A run fails if candidates produce different bytes.
-Each candidate records build time and throughput, ordered/random/multi-worker read timings,
-process peak RSS, disk bytes, file count, package versions, source digest, seed, machine,
-Git state, and the observed behavior of a deliberately incomplete write. The JSON contains
+Every read is materialized and hashed. A run fails unless every candidate checksum matches
+the checksum computed directly from the source for the same starts. Multi-worker jobs open
+their handles, report distinct process IDs, wait on a shared release, and use one parent
+wall-clock interval. Each candidate records build time and throughput,
+ordered/random/multi-worker read timings, process peak RSS where the platform exposes it,
+disk bytes, file count, package versions, source digest, seed, machine, Git state, and the
+observed behavior after truncating/removing bytes from a real built output. The JSON contains
 raw worker measurements rather than only summaries.
 
 The benchmark does not drop the operating-system page cache. A candidate is built before
@@ -91,10 +94,12 @@ Flat binary and Arrow each produced one payload file; Zarr produced 978 files fo
 and its codec/storage dependencies. These are observable facts, not a subjective complexity
 score.
 
-An incomplete flat payload could not be opened with its declared full shape. Incomplete
-Arrow and Zarr outputs could be opened, but neither matched the expected shape-and-content
-digest. All candidates rebuilt successfully after the partial output was discarded. Thus
-no candidate removes the need for DSio's atomic publication, manifest, and digest checks.
+The recovery probe builds each candidate through the measured builder, then models an
+interrupted publication by truncating the flat/Arrow payload or removing a Zarr data chunk.
+The incomplete flat and Arrow payloads could not be opened; incomplete Zarr opened but did
+not match the expected content digest. All candidates rebuilt successfully after the partial
+output was discarded. Thus no candidate removes the need for DSio's atomic publication,
+manifest, and digest checks.
 
 ## Historical evidence
 

@@ -38,16 +38,26 @@ def main() -> None:
         args.reads = 16
         args.workers = [1, 2]
 
+    if args.real_row_limit is not None and args.real_row_limit <= 0:
+        parser.error("--real-row-limit must be positive")
+
     real_sources: tuple[tuple[str, np.ndarray, dict[str, object]], ...] = ()
     if args.real_zarr is not None:
         import zarr
 
         source = zarr.open(str(args.real_zarr), mode="r")[args.real_key]
+        if source.ndim < 2 or any(size <= 0 for size in source.shape):
+            parser.error(
+                f"real array must have at least two non-empty dimensions, got {source.shape}"
+            )
         original_shape = list(source.shape)
-        if args.real_row_limit is not None and source.ndim > 2:
-            rows_per_item = int(np.prod(source.shape[1:-1]))
-            item_limit = (args.real_row_limit + rows_per_item - 1) // rows_per_item
-            array = np.asarray(source[:item_limit])
+        if args.real_row_limit is not None:
+            if source.ndim == 2:
+                array = np.asarray(source[: args.real_row_limit])
+            else:
+                rows_per_item = int(np.prod(source.shape[1:-1]))
+                item_limit = (args.real_row_limit + rows_per_item - 1) // rows_per_item
+                array = np.asarray(source[:item_limit])
         else:
             array = np.asarray(source)
         array = array.reshape(-1, array.shape[-1])
