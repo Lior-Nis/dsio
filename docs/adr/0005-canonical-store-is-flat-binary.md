@@ -44,7 +44,8 @@ and recovery classification.
 
 ## 2026-09-21 results
 
-Environment: Linux 6.17 x86-64, Python 3.12, NumPy 2.5.2, PyArrow 25.0.1, Zarr 3.4.0.
+Environment: Linux 6.17 x86-64, Python 3.12, NumPy 2.5.2, PyArrow 25.0.1,
+Zarr 3.4.0, and Numcodecs 0.17.0.
 Exact environment strings and raw measurements are in:
 
 - `benchmarks/storage/results/2026-09-21-synthetic.json`
@@ -54,12 +55,12 @@ Exact environment strings and raw measurements are in:
 
 | Workload | Candidate | Build MB/s | Ordered MB/s | Random windows/s | 1/2/4-worker windows/s | Peak RSS MB | Disk MB / files |
 |---|---|---:|---:|---:|---:|---:|---:|
-| smooth signal | flat binary | 566 | 1,379 | 132,188 | 218,877 / 507,381 / 821,084 | 119 | 24.00 / 1 |
-| smooth signal | Arrow IPC | 215 | 123 | 19,033 | 20,210 / 39,045 / 67,459 | 156 | 24.00 / 1 |
-| smooth signal | Zarr v3 | 67 | 17 | 2,912 | 2,994 / 5,740 / 11,847 | 159 | 21.17 / 978 |
-| fixed items | flat binary | 637 | 1,345 | 203,680 | 186,339 / 479,006 / 860,249 | 197 | 24.00 / 1 |
-| fixed items | Arrow IPC | 211 | 123 | 20,174 | 20,181 / 40,064 / 72,928 | 197 | 24.00 / 1 |
-| fixed items | Zarr v3 | 67 | 17 | 2,791 | 2,916 / 6,077 / 13,266 | 197 | 13.77 / 978 |
+| smooth signal | flat binary | 4,065 | 1,405 | 206,713 | 211,852 / 379,251 / 829,430 | 119 | 24.00 / 1 |
+| smooth signal | Arrow IPC | 204 | 119 | 20,637 | 20,004 / 34,483 / 67,553 | 156 | 24.00 / 1 |
+| smooth signal | Zarr v3 | 62 | 17 | 2,934 | 2,748 / 5,380 / 10,854 | 159 | 21.17 / 978 |
+| fixed items | flat binary | 2,819 | 1,407 | 104,119 | 217,713 / 448,132 / 881,462 | 197 | 24.00 / 1 |
+| fixed items | Arrow IPC | 185 | 99 | 16,910 | 19,020 / 34,508 / 65,517 | 197 | 24.00 / 1 |
+| fixed items | Zarr v3 | 57 | 14 | 2,101 | 2,624 / 5,803 / 8,937 | 197 | 13.77 / 978 |
 
 ### Representative FORGE corpus
 
@@ -70,9 +71,9 @@ about every FORGE session or the full 1.38 GB logical array.
 
 | Candidate | Build MB/s | Ordered MB/s | Random windows/s | 1/2/4-worker windows/s | Peak RSS MB | Disk MB / files |
 |---|---:|---:|---:|---:|---:|---:|
-| flat binary | 4,717 | 1,378 | 208,402 | 207,116 / 264,576 / 377,655 | 91 | 24.00 / 1 |
-| Arrow IPC | 219 | 123 | 20,502 | 19,971 / 40,377 / 68,257 | 157 | 24.00 / 1 |
-| Zarr v3 | 67 | 18 | 2,962 | 2,954 / 5,916 / 11,627 | 162 | 9.05 / 978 |
+| flat binary | 1,014 | 1,402 | 107,944 | 107,618 / 341,623 / 434,912 | 94 | 24.00 / 1 |
+| Arrow IPC | 185 | 105 | 18,043 | 16,361 / 33,547 / 61,904 | 156 | 24.00 / 1 |
+| Zarr v3 | 52 | 17 | 2,848 | 2,751 / 5,828 / 12,528 | 164 | 9.05 / 978 |
 
 The real workload can be rerun where that project-owned corpus is available:
 
