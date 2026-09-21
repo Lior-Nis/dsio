@@ -69,6 +69,10 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     assert "dsio/__init__.py" in members
     assert "dsio/tracking/__init__.py" in members
     assert "dsio/tracking/attempt.py" in members
+    assert "dsio/tracking/cache.py" in members
+    assert "dsio/tracking/evidence/__init__.py" in members
+    assert "dsio/tracking/evidence/references.py" in members
+    assert "dsio/tracking/evidence/resolution.py" in members
     assert "dsio/tracking/provenance.py" in members
     assert set(requirements) == set(REQUIRED_DEPENDENCIES)
     for name, expected_specifier in REQUIRED_DEPENDENCIES.items():
@@ -262,7 +266,7 @@ from prefect import flow, task
 from prefect.testing.utilities import prefect_test_harness
 from mlflow import MlflowClient
 from dsio.contracts import sha256_of
-from dsio.tracking import attempt, experiment, record_provenance
+from dsio.tracking import attempt, evidence_uri, experiment, record_provenance, resolve_evidence
 
 @task
 def identify_dataset(dataset, parent_run_id):
@@ -274,6 +278,11 @@ def identify_dataset(dataset, parent_run_id):
             components={'identity': 'dsio.contracts:sha256_of'},
         )
         MlflowClient().log_param(child.info.run_id, 'dataset_digest', digest)
+        MlflowClient().log_dict(
+            child.info.run_id,
+            {'dataset_digest': digest},
+            'outputs/dataset.json',
+        )
         return digest, child.info.run_id
 
 @flow
@@ -297,6 +306,10 @@ print('DSIO_CHILD_IDENTITY_LENGTH=' + str(
 print('DSIO_CHILD_PARENT_MATCH=' + str(
     client.get_run(child_run_id).data.tags['mlflow.parentRunId'] == parent_run_id
 ))
+identity = client.get_run(child_run_id).data.params['dsio.execution_identity']
+resolved = resolve_evidence(identity, required_artifacts={'outputs/dataset.json'})
+print('DSIO_REUSED_RUN_MATCH=' + str(resolved.info.run_id == child_run_id))
+print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.json'))
 """
     flow_result = subprocess.run(
         [str(python), "-I", "-B", "-c", flow_probe],
@@ -311,3 +324,5 @@ print('DSIO_CHILD_PARENT_MATCH=' + str(
     assert "DSIO_CHILD_STATUS=FINISHED" in flow_result.stdout
     assert "DSIO_CHILD_IDENTITY_LENGTH=64" in flow_result.stdout
     assert "DSIO_CHILD_PARENT_MATCH=True" in flow_result.stdout
+    assert "DSIO_REUSED_RUN_MATCH=True" in flow_result.stdout
+    assert "DSIO_REUSED_URI=runs:/" in flow_result.stdout

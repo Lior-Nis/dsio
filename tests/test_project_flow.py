@@ -24,7 +24,13 @@ def test_project_owned_flow_calls_public_dsio_function(
     from prefect.testing.utilities import prefect_test_harness
 
     from dsio.contracts import sha256_of
-    from dsio.tracking import attempt, experiment, record_provenance
+    from dsio.tracking import (
+        attempt,
+        evidence_uri,
+        experiment,
+        record_provenance,
+        resolve_evidence,
+    )
 
     @task
     def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[str, str]:
@@ -36,6 +42,11 @@ def test_project_owned_flow_calls_public_dsio_function(
                 components={"identity": "dsio.contracts:sha256_of"},
             )
             MlflowClient().log_param(child.info.run_id, "dataset_digest", digest)
+            MlflowClient().log_dict(
+                child.info.run_id,
+                {"dataset_digest": digest},
+                "outputs/dataset.json",
+            )
             return digest, child.info.run_id
 
     @flow
@@ -56,5 +67,14 @@ def test_project_owned_flow_calls_public_dsio_function(
     assert child.data.params["dataset_digest"] == digest
     assert len(child.data.tags["dsio.execution_identity"]) == 64
     assert child.data.tags["dsio.version"]
+    resolved = resolve_evidence(
+        child.data.params["dsio.execution_identity"],
+        required_artifacts={"outputs/dataset.json"},
+    )
+    assert resolved is not None
+    assert resolved.info.run_id == child_run_id
+    assert evidence_uri(resolved.info.run_id, "outputs/dataset.json") == (
+        f"runs:/{child_run_id}/outputs/dataset.json"
+    )
     parent_run_id = child.data.tags["mlflow.parentRunId"]
     assert MlflowClient().get_run(parent_run_id).info.status == "FINISHED"
