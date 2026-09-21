@@ -35,7 +35,7 @@
 # - Re-run sprint planning to refresh statuses without downgrading existing progress.
 
 generated: "2026-09-21T18:15:08+03:00"
-last_updated: "2026-09-21T23:22:20+03:00"
+last_updated: "2026-09-21T23:55:00+03:00"
 project: DSio
 project_key: NOKEY
 tracking_system: file-system
@@ -51,8 +51,8 @@ development_status:
   1-6-rerun-downstream-work-without-recomputing-upstream-evidence: done
   epic-1-retrospective: optional
 
-  epic-2: backlog
-  2-1-select-the-primary-store-through-a-reproducible-benchmark: backlog
+  epic-2: in-progress
+  2-1-select-the-primary-store-through-a-reproducible-benchmark: review
   2-2-read-and-write-samples-through-one-store-interface: backlog
   2-3-generate-a-governed-split-manifest: backlog
   2-4-record-and-reload-split-evidence-in-mlflow: backlog

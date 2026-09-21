@@ -42,6 +42,11 @@ dev = [
     "types-pyyaml>=6.0",
     "scikit-learn>=1.9",
 ]
+benchmark = [
+    # Candidate readers used only by benchmarks/storage; neither is a DSio runtime backend.
+    "pyarrow>=25,<26",
+    "zarr>=3.1,<4",
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

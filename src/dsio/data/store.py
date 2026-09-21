@@ -248,9 +248,8 @@ class SignalStore:
     a parent and used inside DataLoader workers under either fork or spawn.
     """
 
-    def __init__(self, path: Path | str, *, backend: str = "mmap") -> None:
+    def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
-        self.backend = backend
         index_path = self.path / INDEX_FILE
         if not index_path.is_file():
             raise StoreError(f"no store at {self.path}: {INDEX_FILE} is missing")
@@ -268,9 +267,9 @@ class SignalStore:
         return SignalStoreBuilder(Path(path), **kwargs)
 
     @classmethod
-    def open(cls, name: str, *, root: Path | None = None, backend: str = "mmap") -> SignalStore:
+    def open(cls, name: str, *, root: Path | None = None) -> SignalStore:
         """Open a store by name under the data root."""
-        return cls((root or data_root()) / name, backend=backend)
+        return cls((root or data_root()) / name)
 
     @property
     def _reader(self) -> SignalReader:
@@ -283,7 +282,6 @@ class SignalStore:
         reader = self._readers.get(pid)
         if reader is None:
             reader = open_reader(
-                self.backend,
                 self.path / SIGNAL_FILE,
                 self.header.dtype,
                 self.header.channels,
