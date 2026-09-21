@@ -96,6 +96,7 @@ Codex (GPT-5)
 - 2026-09-22: Wrote the public store-interface tests first and confirmed 12 expected failures before implementation.
 - 2026-09-22: Focused store tests: 73 passed. Broader data/dataset/eval/model/train/distribution tests: 466 passed, 3 deselected.
 - 2026-09-22: Full gate: 694 passed, 3 deselected; Ruff, mypy (64 source files), four import contracts, lock validation, build, and diff checks passed.
+- 2026-09-22: Review found canonical-offset, constructor-validation, strict-schema, JSON-attrs, and builder-cleanup gaps. Added failing regressions, applied minimal boundary fixes, and reran the full gate: 716 passed, 3 deselected; all other gates remained green.
 
 ### Completion Notes List
 
@@ -103,6 +104,7 @@ Codex (GPT-5)
 - Added a versioned layout and per-sample digests, with bounded validation on open and explicit full verification retained.
 - Preserved lazy per-process memory mapping and proved deterministic spawn-worker reads without serializing payload bytes.
 - Split the former 397-line module into cohesive layout, builder, and reader modules while preserving public imports and row/window consumers.
+- Review hardening now rejects impossible index topology, invalid channels/dtypes, coercive schema versions, and non-JSON attributes before partial data can escape; legacy unversioned stores fail with an explicit rebuild instruction.
 
 ### File List
 
@@ -120,3 +122,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 2.2 and started implementation.
 - 2026-09-22: Implemented and verified the stable, content-checked store interface; moved to review.
+- 2026-09-22: Addressed all first-pass blind, edge-case, and acceptance findings and requested closure review.

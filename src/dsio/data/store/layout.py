@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -42,7 +43,7 @@ class Entity(DsioModel):
 class StoreManifest(DsioModel):
     """Committed description of one immutable store."""
 
-    schema_version: int
+    schema_version: int = Field(strict=True)
     name: str
     created_at: str
     dtype: str
@@ -65,3 +66,35 @@ class StoredSample(TypedDict):
     data: np.ndarray
     group: str
     attrs: dict[str, Any]
+
+
+def validated_attrs(attrs: dict[str, Any] | None, field: str) -> dict[str, Any]:
+    """Return an independent JSON-compatible copy or fail before publication."""
+    if attrs is None:
+        return {}
+    if not isinstance(attrs, dict):
+        raise StoreError(f"{field} must be a JSON object")
+    return _copy_json_object(attrs, field)
+
+
+def _copy_json_object(value: dict[Any, Any], field: str) -> dict[str, Any]:
+    copied: dict[str, Any] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise StoreError(f"{field} must use string JSON object keys, got {key!r}")
+        copied[key] = _copy_json_value(item, f"{field}.{key}")
+    return copied
+
+
+def _copy_json_value(value: Any, field: str) -> Any:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return value
+        raise StoreError(f"{field} must be a finite JSON number")
+    if isinstance(value, list):
+        return [_copy_json_value(item, f"{field}[{index}]") for index, item in enumerate(value)]
+    if isinstance(value, dict):
+        return _copy_json_object(value, field)
+    raise StoreError(f"{field} contains non-JSON value {type(value).__name__}")

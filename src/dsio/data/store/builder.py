@@ -13,7 +13,7 @@ import numpy as np
 import yaml
 
 from dsio.contracts import atomic_write, sha256_of_bytes, sha256_of_file
-from dsio.data.format import FORMAT_VERSION, IndexHeader, write_index
+from dsio.data.format import FORMAT_VERSION, DTypeCode, IndexFormatError, IndexHeader, write_index
 from dsio.data.store.layout import (
     ENTITIES_FILE,
     INDEX_FILE,
@@ -23,6 +23,7 @@ from dsio.data.store.layout import (
     Entity,
     StoreError,
     StoreManifest,
+    validated_attrs,
 )
 
 
@@ -38,11 +39,18 @@ class SignalStoreBuilder:
         source: str | None = None,
         attrs: dict[str, Any] | None = None,
     ) -> None:
+        if isinstance(channels, bool) or not isinstance(channels, int) or channels < 1:
+            raise StoreError(f"channels must be a positive integer, got {channels!r}")
+        try:
+            resolved_dtype = np.dtype(dtype)
+            DTypeCode.from_dtype(resolved_dtype)
+        except (TypeError, IndexFormatError) as exc:
+            raise StoreError(f"dtype {dtype!r} is not supported by the DSio store: {exc}") from exc
         self.path = Path(path)
         self.channels = channels
-        self.dtype = np.dtype(dtype)
+        self.dtype = resolved_dtype
         self.source = source
-        self.attrs = attrs or {}
+        self.attrs = validated_attrs(attrs, "store attrs")
         self._entities: list[Entity] = []
         self._entity_ids: set[str] = set()
         self._offsets: list[int] = [0]
@@ -69,6 +77,7 @@ class SignalStoreBuilder:
         """Append one identified sample; insertion order defines its stable position."""
         if self._closed:
             raise StoreError("builder is closed")
+        sample_attrs = validated_attrs(attrs, f"entity {entity_id!r} attrs")
         array = np.ascontiguousarray(signal, dtype=self.dtype)
         if array.ndim != 2 or array.shape[1] != self.channels:
             raise StoreError(
@@ -82,7 +91,7 @@ class SignalStoreBuilder:
             start_row=self._rows,
             n_rows=int(array.shape[0]),
             data_sha256=sha256_of_bytes(array.tobytes()),
-            attrs=attrs or {},
+            attrs=sample_attrs,
         )
         if entity.entity_id in self._entity_ids:
             raise StoreError(f"duplicate entity_id {entity.entity_id!r}")
@@ -99,12 +108,16 @@ class SignalStoreBuilder:
         if self._closed:
             raise StoreError("builder is already closed")
         if not self._entities:
+            self._signal.close()
+            self._closed = True
             raise StoreError("cannot build a store with no entities")
 
-        self._signal.flush()
-        os.fsync(self._signal.fileno())
-        self._signal.close()
-        self._closed = True
+        try:
+            self._signal.flush()
+            os.fsync(self._signal.fileno())
+        finally:
+            self._signal.close()
+            self._closed = True
 
         header = IndexHeader(
             version=FORMAT_VERSION,

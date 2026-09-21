@@ -42,10 +42,11 @@ class SignalStore:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.header, self.offsets = self._read_index()
+        manifest = self._read_manifest()
         self.entities = self._read_entities()
         self._by_id = {entity.entity_id: entity for entity in self.entities}
         self._readers: dict[int, SignalReader] = {}
-        self._validate_layout(self._read_manifest())
+        self._validate_layout(manifest)
 
     @classmethod
     def builder(cls, path: Path | str, **kwargs: Any) -> SignalStoreBuilder:
@@ -213,8 +214,19 @@ class SignalStore:
         if not path.is_file():
             raise StoreError(f"store {self.path.name!r} has no {MANIFEST_FILE}")
         try:
-            return StoreManifest.model_validate(yaml.safe_load(path.read_text()))
-        except (OSError, UnicodeError, yaml.YAMLError, ValidationError) as exc:
+            data = yaml.safe_load(path.read_text())
+        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            raise StoreError(f"cannot read manifest {path}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise StoreError(f"cannot read manifest {path}: expected a YAML mapping")
+        if "schema_version" not in data:
+            raise StoreError(
+                f"store {self.path.name!r} predates the versioned store schema; rebuild it "
+                "with the current SignalStore.builder"
+            )
+        try:
+            return StoreManifest.model_validate(data)
+        except ValidationError as exc:
             raise StoreError(f"cannot read manifest {path}: {exc}") from exc
 
     def _validate_layout(self, manifest: StoreManifest) -> None:
@@ -223,6 +235,7 @@ class SignalStore:
                 f"store {self.path.name!r} declares schema version "
                 f"{manifest.schema_version}, expected {STORE_SCHEMA_VERSION}"
             )
+        self._validate_index_topology()
         payload = self.path / SIGNAL_FILE
         if not payload.is_file():
             raise StoreError(f"store {self.path.name!r} has no {SIGNAL_FILE}")
@@ -298,6 +311,25 @@ class SignalStore:
                     f"{expected[:12]}; metadata is corrupt"
                 )
         _require_sha256(manifest.signal_sha256, "manifest signal digest")
+
+    def _validate_index_topology(self) -> None:
+        label = f"{self.path.name}/{INDEX_FILE}"
+        if self.header.channels < 1:
+            raise StoreError(f"{label} channels must be positive, got {self.header.channels}")
+        if self.header.n_entities < 1 or self.header.n_rows < 1:
+            raise StoreError(
+                f"{label} must describe at least one non-empty sample, got "
+                f"n_entities={self.header.n_entities}, n_rows={self.header.n_rows}"
+            )
+        if int(self.offsets[0]) != 0:
+            raise StoreError(f"{label} offsets must start at 0, got {int(self.offsets[0])}")
+        if int(self.offsets[-1]) != self.header.n_rows:
+            raise StoreError(
+                f"{label} final offset must equal n_rows={self.header.n_rows}, got "
+                f"{int(self.offsets[-1])}"
+            )
+        if np.any(self.offsets[1:] <= self.offsets[:-1]):
+            raise StoreError(f"{label} offsets must be strictly increasing")
 
     def __iter__(self) -> Iterator[Entity]:
         return iter(self.entities)

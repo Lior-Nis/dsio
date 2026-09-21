@@ -142,6 +142,7 @@ sample = store.read_sample("session-42")  # or store.read_sample(0)
 
 Opening validates the versioned layout and bounded metadata. Whole-sample reads validate that
 sample's payload digest; call `store.verify()` for an explicit full-store integrity scan.
+Unversioned stores created before this schema must be rebuilt with the current builder.
 
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree

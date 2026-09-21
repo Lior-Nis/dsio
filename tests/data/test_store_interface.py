@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import struct
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import yaml
 from torch.utils.data import DataLoader, Dataset
 
 from dsio.contracts import sha256_of_file
+from dsio.data.format import HEADER_SIZE
 from dsio.data.store import ENTITIES_FILE, MANIFEST_FILE, SIGNAL_FILE, SignalStore, StoreError
 
 
@@ -41,6 +43,22 @@ class _StoredSamples(Dataset[dict[str, Any]]):
 
     def __getitem__(self, position: int) -> dict[str, Any]:
         return self.store.read_sample(position)
+
+
+def _update_manifest_digest(store: SignalStore, filename: str) -> None:
+    manifest_path = store.path / MANIFEST_FILE
+    manifest = yaml.safe_load(manifest_path.read_text())
+    field = {"signal.idx": "index_sha256", ENTITIES_FILE: "entities_sha256"}[filename]
+    manifest[field] = sha256_of_file(str(store.path / filename))
+    manifest_path.write_text(yaml.safe_dump(manifest))
+
+
+def _replace_offsets(store: SignalStore, offsets: list[int]) -> None:
+    path = store.path / "signal.idx"
+    raw = bytearray(path.read_bytes())
+    raw[HEADER_SIZE:] = np.asarray(offsets, dtype=np.int64).tobytes()
+    path.write_bytes(raw)
+    _update_manifest_digest(store, "signal.idx")
 
 
 def test_samples_round_trip_by_identity_and_position(tmp_path: Path) -> None:
@@ -106,6 +124,34 @@ def test_open_rejects_an_unsupported_store_schema(tmp_path: Path) -> None:
         SignalStore(store.path)
 
 
+@pytest.mark.parametrize("version", [True, "1", 1.0])
+def test_store_schema_version_is_not_coerced(tmp_path: Path, version: object) -> None:
+    store = _build_store(tmp_path / "samples")
+    manifest_path = store.path / MANIFEST_FILE
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["schema_version"] = version
+    manifest_path.write_text(yaml.safe_dump(manifest))
+
+    with pytest.raises(StoreError, match="schema_version"):
+        SignalStore(store.path)
+
+
+def test_legacy_store_schema_is_rejected_with_a_rebuild_instruction(tmp_path: Path) -> None:
+    store = _build_store(tmp_path / "samples")
+    manifest_path = store.path / MANIFEST_FILE
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest.pop("schema_version")
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    entities_path = store.path / ENTITIES_FILE
+    entities = [json.loads(line) for line in entities_path.read_text().splitlines()]
+    for entity in entities:
+        entity.pop("data_sha256")
+    entities_path.write_text("".join(json.dumps(entity) + "\n" for entity in entities))
+
+    with pytest.raises(StoreError, match="predates.*rebuild"):
+        SignalStore(store.path)
+
+
 def test_open_rejects_malformed_entity_metadata(tmp_path: Path) -> None:
     store = _build_store(tmp_path / "samples")
     (store.path / ENTITIES_FILE).write_text("not-json\n")
@@ -127,6 +173,99 @@ def test_open_rejects_entity_topology_that_disagrees_with_the_index(tmp_path: Pa
 
     with pytest.raises(StoreError, match="beta.*start_row"):
         SignalStore(store.path)
+
+
+@pytest.mark.parametrize(
+    "offsets",
+    [
+        [1, 32, 38],
+        [0, 32, 37],
+        [0, 0, 38],
+        [0, 39, 38],
+    ],
+)
+def test_open_rejects_noncanonical_index_topology(
+    tmp_path: Path,
+    offsets: list[int],
+) -> None:
+    store = _build_store(tmp_path / "samples")
+    _replace_offsets(store, offsets)
+
+    with pytest.raises(StoreError, match="signal.idx.*offset"):
+        SignalStore(store.path)
+
+
+@pytest.mark.parametrize("channels", [0, -1, True, 1.5])
+def test_builder_rejects_invalid_channel_counts_before_touching_disk(
+    tmp_path: Path,
+    channels: object,
+) -> None:
+    path = tmp_path / "bad"
+    with pytest.raises(StoreError, match="channels.*positive integer"):
+        SignalStore.builder(path, channels=channels)  # type: ignore[arg-type]
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("dtype", ["complex64", "uint16", "bool"])
+def test_builder_rejects_unsupported_dtypes_before_touching_disk(
+    tmp_path: Path,
+    dtype: str,
+) -> None:
+    path = tmp_path / "bad"
+    with pytest.raises(StoreError, match="dtype.*supported"):
+        SignalStore.builder(path, channels=1, dtype=dtype)
+    assert not path.exists()
+
+
+def test_open_rejects_a_nonpositive_channel_header(tmp_path: Path) -> None:
+    store = _build_store(tmp_path / "samples")
+    index_path = store.path / "signal.idx"
+    raw = bytearray(index_path.read_bytes())
+    raw[16:20] = struct.pack("<I", 0)
+    index_path.write_bytes(raw)
+    _update_manifest_digest(store, "signal.idx")
+
+    with pytest.raises(StoreError, match="signal.idx.*channels"):
+        SignalStore(store.path)
+
+
+def test_empty_builder_closes_its_payload_on_failure(tmp_path: Path) -> None:
+    builder = SignalStore.builder(tmp_path / "empty", channels=1)
+
+    with pytest.raises(StoreError, match="no entities"):
+        builder.close()
+
+    assert builder._signal.closed
+
+
+@pytest.mark.parametrize(
+    "attrs",
+    [
+        {"bad": float("nan")},
+        {"bad": (1, 2)},
+        {1: "not a JSON object key"},
+        {"bad": np.array([1])},
+    ],
+)
+def test_builder_rejects_non_json_attrs_before_writing_sample(
+    tmp_path: Path,
+    attrs: dict[Any, Any],
+) -> None:
+    builder = SignalStore.builder(tmp_path / "samples", channels=1)
+
+    with pytest.raises(StoreError, match="attrs.*JSON"):
+        builder.add("bad", np.ones((2, 1), dtype=np.float32), group="g", attrs=attrs)
+
+    assert (builder.path / SIGNAL_FILE).stat().st_size == 0
+    builder.add("good", np.ones((2, 1), dtype=np.float32), group="g")
+    builder.close()
+
+
+def test_builder_rejects_non_json_store_attrs_before_touching_disk(tmp_path: Path) -> None:
+    path = tmp_path / "bad"
+    with pytest.raises(StoreError, match="store attrs.*JSON"):
+        SignalStore.builder(path, channels=1, attrs={"bad": float("inf")})
+    assert not path.exists()
 
 
 def test_spawned_loader_workers_reopen_without_serializing_payload(tmp_path: Path) -> None:
