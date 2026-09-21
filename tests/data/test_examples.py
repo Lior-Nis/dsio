@@ -156,6 +156,37 @@ def test_the_derived_digest_normalizes_non_finite_attribute_values() -> None:
     assert actual_nan.digest != sentinel_shaped_user_data.digest
 
 
+def test_the_derived_digest_is_unambiguous_for_nested_object_values() -> None:
+    left_nan, right_nan = float("nan"), float("nan")
+    left_mapping = {left_nan: "a", right_nan: "b"}
+    other_left_nan, other_right_nan = float("nan"), float("nan")
+    right_mapping = {other_right_nan: "b", other_left_nan: "a"}
+
+    left = TableExamples(name="x", groups=["a"], attributes={"v": [left_mapping]})
+    right = TableExamples(name="x", groups=["a"], attributes={"v": [right_mapping]})
+    mutable = TableExamples(name="x", groups=["a"], attributes={"v": [{"a", "b"}]})
+    frozen = TableExamples(name="x", groups=["a"], attributes={"v": [frozenset({"a", "b"})]})
+
+    assert left.digest == right.digest
+    assert mutable.digest != frozen.digest
+
+
+def test_unsupported_or_recursive_object_values_fail_as_examples_errors() -> None:
+    cycle: list[object] = []
+    cycle.append(cycle)
+    cyclic_values = np.empty(1, dtype=object)
+    cyclic_values[0] = cycle
+
+    with pytest.raises(ExamplesError, match="recursive container"):
+        TableExamples(name="x", groups=["a"], attributes={"v": cyclic_values})
+    with pytest.raises(ExamplesError, match="NumPy scalar"):
+        TableExamples(
+            name="x",
+            groups=["a"],
+            attributes={"v": np.asarray([np.longdouble("1.25")])},
+        )
+
+
 # --- the whole split layer, on data with no features at all -----------------------------------
 
 

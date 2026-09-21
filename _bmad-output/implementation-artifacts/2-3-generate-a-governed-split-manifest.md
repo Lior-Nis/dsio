@@ -106,6 +106,7 @@ Codex (GPT-5)
 - 2026-09-22: Local gate passed: 739 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
 - 2026-09-22: Independent review found temporal default overlap, forged-fold replay, order-sensitive derived identity, extra-role coverage, unsafe header lines, quadratic family validation, non-finite metadata hashing, lax temporal parameters, a reserved-name collision, and the documented string-path mismatch. All were reproduced and fixed with regressions.
 - 2026-09-22: Fix verification caught an in-band non-finite hash sentinel and extra temporal span roles; replaced the sentinel with recursive type tagging and required temporal spans to match governed roles exactly.
+- 2026-09-22: Final edge verification hardened object-value hashing against equal-key order, recursive/deep containers, unsupported NumPy extended scalars, and mutable/immutable set collisions.
 - 2026-09-22: Reviewed revision passed 749 tests (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
 
 ### Completion Notes List

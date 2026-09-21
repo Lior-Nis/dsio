@@ -19,6 +19,8 @@ from dsio.contracts import canonical_json, sha256_of
 from dsio.data.examples import ROOT_DERIVATION, ExamplesError, derive
 from dsio.data.views import assert_index_matches_store, window_times
 
+_MAX_DIGEST_VALUE_DEPTH = 32
+
 
 class TableExamples:
     """Rows of a table, with a grouping column and any number of attributes.
@@ -277,8 +279,15 @@ def entity_examples(store: Any) -> TableExamples:
     )
 
 
-def _canonical_digest_value(value: Any) -> Any:
+def _canonical_digest_value(
+    value: Any,
+    *,
+    _active: set[int] | None = None,
+    _depth: int = 0,
+) -> Any:
     """Type-tag arbitrary array values so no normalization sentinel can collide."""
+    if _depth > _MAX_DIGEST_VALUE_DEPTH:
+        raise ExamplesError(f"attribute value exceeds {_MAX_DIGEST_VALUE_DEPTH} nested containers")
     if value is None:
         return ["none"]
     if isinstance(value, bool):
@@ -298,22 +307,41 @@ def _canonical_digest_value(value: Any) -> Any:
     if isinstance(value, bytes):
         return ["bytes", value.hex()]
     if isinstance(value, np.generic):
-        return _canonical_digest_value(value.item())
-    if isinstance(value, list):
-        return ["list", [_canonical_digest_value(item) for item in value]]
-    if isinstance(value, tuple):
-        return ["tuple", [_canonical_digest_value(item) for item in value]]
-    if isinstance(value, dict):
-        items = [
-            [_canonical_digest_value(key), _canonical_digest_value(item)]
-            for key, item in value.items()
-        ]
-        items.sort(key=lambda pair: canonical_json(pair[0]))
-        return ["dict", items]
-    if isinstance(value, set | frozenset):
-        items = [_canonical_digest_value(item) for item in value]
-        items.sort(key=canonical_json)
-        return ["set", items]
+        item = value.item()
+        if isinstance(item, np.generic):
+            raise ExamplesError(
+                f"NumPy scalar {value.dtype} has no lossless deterministic digest encoding"
+            )
+        return _canonical_digest_value(item, _active=_active, _depth=_depth)
+    if isinstance(value, list | tuple | dict | set | frozenset):
+        active = set() if _active is None else _active
+        marker = id(value)
+        if marker in active:
+            raise ExamplesError("attribute value contains a recursive container")
+        active.add(marker)
+        try:
+
+            def encode(item: Any) -> Any:
+                return _canonical_digest_value(
+                    item,
+                    _active=active,
+                    _depth=_depth + 1,
+                )
+
+            if isinstance(value, list):
+                return ["list", [encode(item) for item in value]]
+            if isinstance(value, tuple):
+                return ["tuple", [encode(item) for item in value]]
+            if isinstance(value, dict):
+                items = [[encode(key), encode(item)] for key, item in value.items()]
+                items.sort(key=canonical_json)
+                return ["dict", items]
+            items = [encode(item) for item in value]
+            items.sort(key=canonical_json)
+            tag = "frozenset" if isinstance(value, frozenset) else "set"
+            return [tag, items]
+        finally:
+            active.remove(marker)
     raise ExamplesError(
         f"attribute value of type {type(value).__name__} has no deterministic digest encoding"
     )
