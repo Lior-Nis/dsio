@@ -126,6 +126,23 @@ The flat-binary, memory-mapped payload was selected by the scoped reproducible b
 [ADR 0005](docs/adr/0005-canonical-store-is-flat-binary.md); its results are local-workload
 evidence, not a universal claim about storage formats.
 
+Build and reopen that store through the same interface. A persisted entity is addressable by
+its stable identity or insertion position; both paths return the same data and metadata:
+
+```python
+from dsio.data.store import SignalStore
+
+with SignalStore.builder("stores/recordings", channels=3) as builder:
+    builder.add("session-42", signal, group="patient-7", attrs={"site": "north"})
+
+store = SignalStore("stores/recordings")
+sample = store.read_sample("session-42")  # or store.read_sample(0)
+# {"sample_id": str, "data": ndarray, "group": str, "attrs": dict}
+```
+
+Opening validates the versioned layout and bounded metadata. Whole-sample reads validate that
+sample's payload digest; call `store.verify()` for an explicit full-store integrity scan.
+
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree
 gate belongs at model-registry promotion, and **is not implemented**: there is no
