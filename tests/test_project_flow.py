@@ -24,23 +24,30 @@ def test_project_owned_flow_calls_public_dsio_function(
     from prefect.testing.utilities import prefect_test_harness
 
     from dsio.contracts import sha256_of
-    from dsio.tracking import experiment
+    from dsio.tracking import attempt, experiment
 
     @task
     def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[str, str]:
-        return sha256_of(dataset), parent_run_id
+        with attempt(parent_run_id) as child:
+            digest = sha256_of(dataset)
+            MlflowClient().log_param(child.info.run_id, "dataset_digest", digest)
+            return digest, child.info.run_id
 
     @flow
     def project_flow() -> tuple[str, str]:
         with experiment("algae-training") as parent:
-            digest, observed_parent_id = identify_dataset(
+            digest, child_run_id = identify_dataset(
                 {"name": "algae", "revision": 1}, parent.info.run_id
             )
             assert digest == "2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556"
-            return digest, observed_parent_id
+            return digest, child_run_id
 
     with prefect_test_harness():
-        digest, parent_run_id = project_flow()
+        digest, child_run_id = project_flow()
 
     assert digest == "2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556"
+    child = MlflowClient().get_run(child_run_id)
+    assert child.info.status == "FINISHED"
+    assert child.data.params["dataset_digest"] == digest
+    parent_run_id = child.data.tags["mlflow.parentRunId"]
     assert MlflowClient().get_run(parent_run_id).info.status == "FINISHED"

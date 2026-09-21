@@ -68,6 +68,7 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
 
     assert "dsio/__init__.py" in members
     assert "dsio/tracking/__init__.py" in members
+    assert "dsio/tracking/attempt.py" in members
     assert set(requirements) == set(REQUIRED_DEPENDENCIES)
     for name, expected_specifier in REQUIRED_DEPENDENCIES.items():
         requirement = requirements[name]
@@ -260,26 +261,33 @@ from prefect import flow, task
 from prefect.testing.utilities import prefect_test_harness
 from mlflow import MlflowClient
 from dsio.contracts import sha256_of
-from dsio.tracking import experiment
+from dsio.tracking import attempt, experiment
 
 @task
 def identify_dataset(dataset, parent_run_id):
-    return sha256_of(dataset), parent_run_id
+    with attempt(parent_run_id) as child:
+        digest = sha256_of(dataset)
+        MlflowClient().log_param(child.info.run_id, 'dataset_digest', digest)
+        return digest, child.info.run_id
 
 @flow
 def project_flow():
     with experiment('installed-wheel-flow') as parent:
-        digest, observed_parent_id = identify_dataset(
+        digest, child_run_id = identify_dataset(
             {'name': 'algae', 'revision': 1}, parent.info.run_id
         )
         assert digest == '2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556'
-        assert observed_parent_id == parent.info.run_id
-        return digest, parent.info.run_id
+        return digest, parent.info.run_id, child_run_id
 
 with prefect_test_harness():
-    digest, parent_run_id = project_flow()
+    digest, parent_run_id, child_run_id = project_flow()
+client = MlflowClient()
 print('DSIO_RESULT=' + digest)
-print('DSIO_PARENT_STATUS=' + MlflowClient().get_run(parent_run_id).info.status)
+print('DSIO_PARENT_STATUS=' + client.get_run(parent_run_id).info.status)
+print('DSIO_CHILD_STATUS=' + client.get_run(child_run_id).info.status)
+print('DSIO_CHILD_PARENT_MATCH=' + str(
+    client.get_run(child_run_id).data.tags['mlflow.parentRunId'] == parent_run_id
+))
 """
     flow_result = subprocess.run(
         [str(python), "-I", "-B", "-c", flow_probe],
@@ -291,3 +299,5 @@ print('DSIO_PARENT_STATUS=' + MlflowClient().get_run(parent_run_id).info.status)
     )
     assert f"DSIO_RESULT={EXPECTED_DIGEST}" in flow_result.stdout
     assert "DSIO_PARENT_STATUS=FINISHED" in flow_result.stdout
+    assert "DSIO_CHILD_STATUS=FINISHED" in flow_result.stdout
+    assert "DSIO_CHILD_PARENT_MATCH=True" in flow_result.stdout
