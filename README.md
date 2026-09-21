@@ -95,6 +95,10 @@ native successful MLflow `Run` whose immutable identity, provenance, and require
 agree. `evidence_uri(...)` emits an exact `runs:/<run-id>/<artifact>` reference; aliases and
 stages are not accepted. Pure serializable tasks can pass `prefect_cache_key` directly as
 Prefect's `cache_key_fn`, while evidence-producing tasks continue to resolve through MLflow.
+For a downstream-only rerun, validate source Runs in the project flow with
+`require_evidence(...)`, build exact artifact URIs, and pass them to only the downstream tasks
+the project chooses. Record those Run IDs and URIs as ordinary provenance inputs; DSio does
+not infer a rerun plan or invoke upstream work.
 
 ## Shape
 
