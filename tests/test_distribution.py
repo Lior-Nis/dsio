@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import re
 import tomllib
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_RUNTIME_DEPENDENCIES = {
-    "prefect",
-    "torch",
-    "lightning",
-    "torchmetrics",
-    "mlflow",
+    "prefect": ">=3.8,<4",
+    "torch": ">=2.7,<3",
+    "lightning": ">=2.5,<3",
+    "torchmetrics": ">=1.7,<2",
+    "mlflow": ">=3,<4",
 }
 OBSOLETE_ORCHESTRATION_PATHS = {
     "src/dsio/application.py",
@@ -20,6 +21,9 @@ OBSOLETE_ORCHESTRATION_PATHS = {
     "src/dsio/config/overrides.py",
     "src/dsio/config/presets.py",
     "src/dsio/cli/__init__.py",
+    "src/dsio/cli/envelope.py",
+    "src/dsio/cli/main.py",
+    "src/dsio/cli/run_cmd.py",
     "Dockerfile",
 }
 
@@ -28,17 +32,26 @@ def _project_metadata() -> dict:
     return tomllib.loads((ROOT / "pyproject.toml").read_text())
 
 
-def _requirement_name(requirement: str) -> str:
-    return re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].strip().lower()
-
-
 def test_training_spine_is_part_of_the_required_distribution() -> None:
     data = _project_metadata()
-    names = {_requirement_name(item) for item in data["project"]["dependencies"]}
+    requirements = {
+        requirement.name.lower(): requirement
+        for item in data["project"]["dependencies"]
+        if (requirement := Requirement(item)).name.lower() in REQUIRED_RUNTIME_DEPENDENCIES
+    }
 
-    assert REQUIRED_RUNTIME_DEPENDENCIES <= names
+    assert set(requirements) == set(REQUIRED_RUNTIME_DEPENDENCIES)
+    for name, expected_specifier in REQUIRED_RUNTIME_DEPENDENCIES.items():
+        requirement = requirements[name]
+        assert str(requirement.specifier) == str(Requirement(f"x{expected_specifier}").specifier)
+        assert requirement.marker is None
+        assert requirement.url is None
+        assert not requirement.extras
+
+    names = {Requirement(item).name.lower() for item in data["project"]["dependencies"]}
     assert "mlflow-skinny" not in names
     assert "typer" not in names
+    assert data["project"]["requires-python"] == ">=3.12"
 
 
 def test_distribution_has_no_accelerator_extras_or_console_script() -> None:

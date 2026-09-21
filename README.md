@@ -2,7 +2,8 @@
 
 A reusable ML/DL experimentation library.
 
-`dsio` owns generic data, split, training, evaluation, tracking, and inference components.
+`dsio` currently ships generic data, split, training, and evaluation components. The accepted
+architecture extends that spine with generic tracking and inference components.
 Consumer projects own their workflows as ordinary Prefect flows; DSio does not provide a
 second DAG model, CLI, scheduler, or deployment layer. PyTorch and Lightning are the single
 training path, and MLflow is the evidence store.
@@ -25,7 +26,7 @@ torch = { index = "pytorch-cpu" }
 Then add a pinned DSio release or immutable commit:
 
 ```bash
-uv add "dsio @ git+ssh://git@github.com/<org>/dsio.git@v0.1.0"
+uv add "dsio @ git+ssh://git@github.com/<org>/dsio.git@<tag-or-commit>"
 ```
 
 GPU projects select their appropriate PyTorch index instead. DSio's package metadata stays

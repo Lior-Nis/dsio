@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -22,9 +23,14 @@ def project_flow() -> str:
 
 
 def test_project_owned_flow_calls_public_dsio_function(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    for name in tuple(os.environ):
+        if name.startswith("PREFECT_"):
+            monkeypatch.delenv(name)
     monkeypatch.setenv("PREFECT_HOME", str(tmp_path / "prefect"))
+    monkeypatch.setenv("PREFECT_SERVER_ANALYTICS_ENABLED", "false")
 
     with prefect_test_harness():
         result = project_flow()

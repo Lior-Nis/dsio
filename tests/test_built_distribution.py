@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import tarfile
@@ -13,9 +12,16 @@ from email.parser import BytesParser
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_DEPENDENCIES = {"prefect", "torch", "lightning", "torchmetrics", "mlflow"}
+REQUIRED_DEPENDENCIES = {
+    "prefect": ">=3.8,<4",
+    "torch": ">=2.7,<3",
+    "lightning": ">=2.5,<3",
+    "torchmetrics": ">=1.7,<2",
+    "mlflow": ">=3,<4",
+}
 REMOVED_MEMBERS = {
     "dsio/application.py",
     "dsio/presets.py",
@@ -35,10 +41,6 @@ def _run(*command: str, cwd: Path = ROOT, env: dict[str, str] | None = None) -> 
     subprocess.run(command, cwd=cwd, env=env, check=True, text=True, capture_output=True)
 
 
-def _requirement_name(requirement: str) -> str:
-    return re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].strip().lower()
-
-
 @pytest.fixture(scope="module")
 def built_artifacts(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     output = tmp_path_factory.mktemp("distribution")
@@ -56,13 +58,26 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
         metadata = BytesParser().parsebytes(archive.read(metadata_name))
         entry_points = [name for name in members if name.endswith(".dist-info/entry_points.txt")]
 
-    requirements = metadata.get_all("Requires-Dist", [])
-    names = {_requirement_name(requirement) for requirement in requirements}
+    raw_requirements = metadata.get_all("Requires-Dist", [])
+    requirements = {
+        requirement.name.lower(): requirement
+        for item in raw_requirements
+        if (requirement := Requirement(item)).name.lower() in REQUIRED_DEPENDENCIES
+    }
 
     assert "dsio/__init__.py" in members
-    assert REQUIRED_DEPENDENCIES <= names
+    assert set(requirements) == set(REQUIRED_DEPENDENCIES)
+    for name, expected_specifier in REQUIRED_DEPENDENCIES.items():
+        requirement = requirements[name]
+        assert str(requirement.specifier) == str(Requirement(f"x{expected_specifier}").specifier)
+        assert requirement.marker is None
+        assert requirement.url is None
+        assert not requirement.extras
+
+    names = {Requirement(item).name.lower() for item in raw_requirements}
     assert "mlflow-skinny" not in names
-    assert not any("pytorch-cpu" in requirement for requirement in requirements)
+    assert not any("pytorch-cpu" in requirement for requirement in raw_requirements)
+    assert metadata["Requires-Python"] == ">=3.12"
     assert not entry_points
     forbidden_prefixes = ("tests/", "project/", "dsio/torch/", "dsio/cli/")
     assert not any(name.startswith(forbidden_prefixes) for name in members)
@@ -90,7 +105,8 @@ def test_sdist_excludes_repository_internal_material(
 
 
 def test_wheel_installs_with_dependencies_and_root_import_is_inert(
-    built_artifacts: tuple[Path, Path], tmp_path: Path,
+    built_artifacts: tuple[Path, Path],
+    tmp_path: Path,
 ) -> None:
     wheel, _ = built_artifacts
     environment = tmp_path / "environment"
@@ -103,21 +119,67 @@ def test_wheel_installs_with_dependencies_and_root_import_is_inert(
     work.mkdir(parents=True)
     temp.mkdir()
     home.mkdir(parents=True)
+    uv_cache = state / "uv-cache"
+    install_env = {
+        key: value for key, value in os.environ.items() if not key.startswith(("UV_", "PIP_"))
+    }
+    install_env["UV_CACHE_DIR"] = str(uv_cache)
 
-    _run("uv", "venv", "--python", sys.executable, str(environment))
+    _run(
+        "uv",
+        "venv",
+        "--no-config",
+        "--cache-dir",
+        str(uv_cache),
+        "--python",
+        sys.executable,
+        str(environment),
+        cwd=work,
+        env=install_env,
+    )
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     _run(
         "uv",
         "pip",
         "install",
+        "--no-config",
+        "--cache-dir",
+        str(uv_cache),
         "--python",
         str(python),
-        "--index",
+        "--default-index",
         "https://download.pytorch.org/whl/cpu",
         "torch>=2.7,<3",
+        cwd=work,
+        env=install_env,
     )
-    _run("uv", "pip", "install", "--python", str(python), str(wheel))
-    _run("uv", "pip", "check", "--python", str(python))
+    _run(
+        "uv",
+        "pip",
+        "install",
+        "--no-config",
+        "--cache-dir",
+        str(uv_cache),
+        "--python",
+        str(python),
+        "--default-index",
+        "https://pypi.org/simple",
+        str(wheel),
+        cwd=work,
+        env=install_env,
+    )
+    _run(
+        "uv",
+        "pip",
+        "check",
+        "--no-config",
+        "--cache-dir",
+        str(uv_cache),
+        "--python",
+        str(python),
+        cwd=work,
+        env=install_env,
+    )
 
     probe = """
 import json
@@ -126,17 +188,26 @@ import socket
 import sys
 
 state = pathlib.Path(__import__('os').environ['DSIO_IMPORT_STATE_ROOT'])
-before = {str(path.relative_to(state)) for path in state.rglob('*')}
+environment = pathlib.Path(__import__('os').environ['DSIO_IMPORT_ENV_ROOT'])
+
+def snapshot(root):
+    return {
+        str(path.relative_to(root)): (details.st_mode, details.st_size, details.st_mtime_ns)
+        for path in root.rglob('*')
+        if (details := path.stat())
+    }
+
+state_before = snapshot(state)
+environment_before = snapshot(environment)
 
 def refuse_service_call(*args, **kwargs):
     raise AssertionError(f'import attempted a service call: {args!r} {kwargs!r}')
 
 socket.socket.connect = refuse_service_call
 import dsio
-after = {str(path.relative_to(state)) for path in state.rglob('*')}
 print(json.dumps({
-    'before': sorted(before),
-    'after': sorted(after),
+    'state_unchanged': state_before == snapshot(state),
+    'environment_unchanged': environment_before == snapshot(environment),
     'origin': dsio.__file__,
     'heavy': sorted({
         name.split('.', 1)[0]
@@ -146,10 +217,16 @@ print(json.dumps({
 }))
 """
     env = {
-        **os.environ,
+        **{
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("PREFECT_", "MLFLOW_"))
+        },
         "HOME": str(home),
         "PREFECT_HOME": str(prefect_home),
+        "PREFECT_SERVER_ANALYTICS_ENABLED": "false",
         "MLFLOW_TRACKING_URI": f"file:{mlflow_store}",
+        "DSIO_IMPORT_ENV_ROOT": str(environment),
         "DSIO_IMPORT_STATE_ROOT": str(state),
         "PYTHONDONTWRITEBYTECODE": "1",
         "XDG_CACHE_HOME": str(state / "cache"),
@@ -169,7 +246,8 @@ print(json.dumps({
     )
     result = json.loads(completed.stdout)
 
-    assert result["before"] == result["after"]
+    assert result["state_unchanged"]
+    assert result["environment_unchanged"]
     assert result["heavy"] == []
     assert Path(result["origin"]).is_relative_to(environment)
 

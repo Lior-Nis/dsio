@@ -198,6 +198,7 @@ Codex (GPT-5)
 - 2026-09-21: Removed the CLI/application/preset orchestration layer and its behavior-specific tests while preserving lower-level config and legacy runner internals for later stories.
 - 2026-09-21: Reframed active guidance around a pinned library and project-owned Prefect flow; added artifact, isolated-install, inert-import, and consumer-flow contract tests. Focused gate: 40 passed.
 - 2026-09-21: BMad adversarial review completed across blind, edge-case, and acceptance layers. Six acceptance gaps were resolved; three pre-existing provenance issues were recorded for later work.
+- 2026-09-21: Independent Codex and OpenCode review hardened exact wheel metadata, isolated package resolution and Prefect settings from the host, extended inert-import mutation checks to the installed environment, and clarified active README claims.
 
 ### Completion Notes List
 
@@ -208,6 +209,7 @@ Codex (GPT-5)
 - Added built-artifact, isolated-install, inert-import, metadata, and consumer-flow regression coverage; updated CI to exercise the distribution boundary.
 - Final gate: 8 focused tests and 569 repository tests passed; Ruff, mypy, four import contracts, lock validation, build, and diff checks all passed.
 - Post-review gate passed unchanged at 569 tests; the installed wheel now executes the representative Prefect flow and the import probe monitors all isolated state roots.
+- Final independent-review gate: 8 focused tests and 569 repository tests passed; Ruff, mypy, all four import contracts, lock validation, build, and diff checks passed.
 
 ### File List
 
@@ -248,3 +250,4 @@ Codex (GPT-5)
 
 - 2026-09-21: Implemented Story 1.1 and moved it to review after the complete quality gate passed.
 - 2026-09-21: Resolved all review patches and moved Story 1.1 to done.
+- 2026-09-21: Resolved independent review findings and retained Story 1.1 as done.
