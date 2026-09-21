@@ -1,4 +1,4 @@
-"""Turn committed split files into folds the loop can run.
+"""Turn governed split manifests into folds the loop can run.
 
 This is the seam that joins the two halves of dsio: a dataset and its committed split
 files on one side, the fold loop and the artifact contract on the other. Neither side knows
@@ -17,9 +17,10 @@ from pathlib import Path
 import numpy as np
 
 from dsio.data.examples import Examples
+from dsio.data.splits.models import SplitError, SplitFile, SplitFold
+from dsio.data.splits.resolve import _resolve_validated_masks
+from dsio.data.splits.validation import validate
 from dsio.eval.contract import Fold
-from dsio.splits.models import SplitError, SplitFile, SplitFold
-from dsio.splits.resolve import resolve_masks
 
 TRAIN_PART = "train"
 TEST_PART = "test"
@@ -52,8 +53,15 @@ def folds_from_splits(
 
     folds: list[Fold] = []
     for split in splits:
+        if any(fold.assignments for fold in split.folds):
+            validate(examples, split)
         for split_fold in split.folds:
-            masks = resolve_masks(examples, split, split_fold, require_total=require_total)
+            masks = _resolve_validated_masks(
+                examples,
+                split,
+                split_fold,
+                require_total=require_total,
+            )
             for required in (train_part, test_part):
                 if required not in masks:
                     raise SplitError(
@@ -101,8 +109,7 @@ def split_path(root: Path | str, name: str) -> Path:
     candidate = Path(root) / name / "split.yaml"
     if not candidate.is_file():
         raise SplitError(
-            f"no split file at {candidate}; commit a split file there first — dsio "
-            "reads splits, it does not generate them"
+            f"no split file at {candidate}; generate and save the governed manifest first"
         )
     return candidate
 
@@ -112,7 +119,7 @@ def require_fold(root: Path | str, name: str, index: int) -> SplitFold:
 
     This is the check a task-level ``fold`` field needs at the point the split is
     resolved: purely from the committed YAML, with no store, index or ``Examples`` built
-    yet. The lookup and its message are :meth:`~dsio.splits.models.SplitFile.fold`'s, not
+    yet. The lookup and its message are :meth:`~dsio.data.splits.models.SplitFile.fold`'s, not
     a second copy of them.
     """
     return SplitFile.load(split_path(root, name)).fold(index)

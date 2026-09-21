@@ -148,7 +148,7 @@ class EmbeddingEncoder(nn.Module):
         Worth doing *once*, because ``int(ids.max())`` pulls a Python number off the
         device, which blocks the caller until the queue drains. Per step that is a
         synchronisation on every training iteration, which is the cost
-        :func:`~dsio.splits.resolve.assert_no_row_overlap` keeps out of the training path
+        :func:`~dsio.data.splits.resolve.assert_no_row_overlap` keeps out of the training path
         for the same reason. A vocabulary mismatch is a configuration error: it is wrong
         on the first batch or it is not wrong, since no later batch can hold an id the
         corpus does not contain. The first batch is the whole of what checking buys.

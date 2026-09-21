@@ -15,9 +15,9 @@ import pytest
 
 from dsio.data.adapters import TableExamples
 from dsio.data.examples import Examples, ExamplesError, assert_consistent, check, group_attribute
-from dsio.splits.folds import folds_from_splits
-from dsio.splits.models import SplitFile, SplitFold
-from dsio.splits.resolve import resolve
+from dsio.data.splits.folds import folds_from_splits
+from dsio.data.splits.models import SplitFile, SplitFold
+from dsio.data.splits.resolve import resolve
 
 
 @pytest.fixture
@@ -87,18 +87,13 @@ def test_group_attribute_averages_a_numeric_key(table: TableExamples) -> None:
 def test_group_attribute_refuses_a_categorical_that_varies_within_a_group() -> None:
     """Averaging a site code across a group that moved between sites produces a number
     that means nothing and balances nothing."""
-    mixed = TableExamples(
-        name="m", groups=["a", "a"], attributes={"site": ["X", "Y"]}
-    )
+    mixed = TableExamples(name="m", groups=["a", "a"], attributes={"site": ["X", "Y"]})
     with pytest.raises(ExamplesError, match="must be constant per group"):
         group_attribute(mixed, "site")
 
 
 def test_categorical_report_number_is_stable_across_processes() -> None:
-    command = (
-        "from dsio.data.examples import _as_number; "
-        "print(_as_number('categorical-site'))"
-    )
+    command = "from dsio.data.examples import _as_number; print(_as_number('categorical-site'))"
     values = [
         subprocess.check_output(
             [sys.executable, "-c", command],
@@ -143,6 +138,53 @@ def test_the_digest_reflects_the_grouping_not_the_features() -> None:
     c = TableExamples(name="x", groups=["a", "b", "b"], attributes={"k": [1.0, 2.0, 3.0]})
     assert a.digest == b.digest
     assert a.digest != c.digest
+
+
+def test_the_derived_digest_normalizes_non_finite_attribute_values() -> None:
+    values = [np.nan, np.inf, -np.inf]
+
+    first = TableExamples(name="x", groups=["a", "b", "c"], attributes={"v": values})
+    second = TableExamples(name="x", groups=["a", "b", "c"], attributes={"v": values})
+    sentinel_shaped_user_data = TableExamples(
+        name="x",
+        groups=["a"],
+        attributes={"v": [{"__dsio_nonfinite_float__": "nan"}]},
+    )
+    actual_nan = TableExamples(name="x", groups=["a"], attributes={"v": [np.nan]})
+
+    assert first.digest == second.digest
+    assert actual_nan.digest != sentinel_shaped_user_data.digest
+
+
+def test_the_derived_digest_is_unambiguous_for_nested_object_values() -> None:
+    left_nan, right_nan = float("nan"), float("nan")
+    left_mapping = {left_nan: "a", right_nan: "b"}
+    other_left_nan, other_right_nan = float("nan"), float("nan")
+    right_mapping = {other_right_nan: "b", other_left_nan: "a"}
+
+    left = TableExamples(name="x", groups=["a"], attributes={"v": [left_mapping]})
+    right = TableExamples(name="x", groups=["a"], attributes={"v": [right_mapping]})
+    mutable = TableExamples(name="x", groups=["a"], attributes={"v": [{"a", "b"}]})
+    frozen = TableExamples(name="x", groups=["a"], attributes={"v": [frozenset({"a", "b"})]})
+
+    assert left.digest == right.digest
+    assert mutable.digest != frozen.digest
+
+
+def test_unsupported_or_recursive_object_values_fail_as_examples_errors() -> None:
+    cycle: list[object] = []
+    cycle.append(cycle)
+    cyclic_values = np.empty(1, dtype=object)
+    cyclic_values[0] = cycle
+
+    with pytest.raises(ExamplesError, match="recursive container"):
+        TableExamples(name="x", groups=["a"], attributes={"v": cyclic_values})
+    with pytest.raises(ExamplesError, match="NumPy scalar"):
+        TableExamples(
+            name="x",
+            groups=["a"],
+            attributes={"v": np.asarray([np.longdouble("1.25")])},
+        )
 
 
 # --- the whole split layer, on data with no features at all -----------------------------------
@@ -206,8 +248,8 @@ def test_a_table_cannot_prove_row_overlap_and_says_why(table: TableExamples) -> 
     Pinning the exception type to ``SplitError`` (an ``AttributeError`` is not one) and
     matching the guard's own explanatory phrase closes that gap.
     """
-    from dsio.splits.models import SplitError
-    from dsio.splits.resolve import assert_no_row_overlap
+    from dsio.data.splits.models import SplitError
+    from dsio.data.splits.resolve import assert_no_row_overlap
 
     splits = _table_kfold(table)
     parts = resolve(table, splits[0], splits[0].fold(0))

@@ -144,6 +144,28 @@ Opening validates the versioned layout and bounded metadata. Whole-sample reads 
 sample's payload digest; call `store.verify()` for an explicit full-store integrity scan.
 Unversioned stores created before this schema must be rebuilt with the current builder.
 
+Generate replayable roles through DSIO's closed split dispatcher. The manifest records exact
+sample identities, group evidence, algorithm/dependency provenance, validations, and a digest:
+
+```python
+from dsio.data.splits import generate
+
+manifest = generate(
+    examples,
+    "group_kfold",
+    name="patient-5fold",
+    seed=42,
+    parameters={"n_splits": 5},
+)
+manifest.save("splits/patient-5fold/split.yaml")
+```
+
+Here, `examples` is the exact stable-identity collection the training loaders will consume;
+the manifest binds its assignments to that collection and its derivation.
+
+Supported names are owned by DSIO; projects cannot register splitters at runtime. Novel
+algorithms enter through DSIO's reviewed experimental-admission path.
+
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree
 gate belongs at model-registry promotion, and **is not implemented**: there is no
@@ -180,7 +202,7 @@ reshapes to `(B, C, H, W)`. The flattening is row-major and nothing else; the re
 exact inverse.
 
 What this buys over a directory of image files is `group=`. Split by patient, site or camera
-and `dsio.splits.resolve.assert_no_row_overlap` proves *at the pixel row* that no image landed
+and `dsio.data.splits.resolve.assert_no_row_overlap` proves *at the pixel row* that no image landed
 in two parts — the discipline medical and scientific imaging needs and a per-file split
 quietly skips, since two scans of one patient are near-identical and a model scored across
 them is scored on data it trained on. `tests/dataset/test_fixed_size_items.py` pins the whole

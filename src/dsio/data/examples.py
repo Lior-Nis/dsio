@@ -47,9 +47,7 @@ def derive(parent: str, mask: np.ndarray) -> str:
         # moving off the parent's derivation there would refuse a split against rows
         # identical to the ones it was computed on.
         return parent
-    payload = b"|".join(
-        (parent.encode(), str(mask.size).encode(), np.packbits(mask).tobytes())
-    )
+    payload = b"|".join((parent.encode(), str(mask.size).encode(), np.packbits(mask).tobytes()))
     return sha256_of_bytes(payload)[:16]
 
 
@@ -85,6 +83,11 @@ class Examples(Protocol):
         ...
 
     def __len__(self) -> int: ...
+
+    @property
+    def sample_ids(self) -> np.ndarray:
+        """Stable, unique identity for every example, aligned with every parallel array."""
+        ...
 
     @property
     def groups(self) -> np.ndarray:
@@ -170,6 +173,7 @@ def check(examples: object) -> Examples:
             "name",
             "digest",
             "derivation",
+            "sample_ids",
             "groups",
             "attribute_names",
             "attribute",
@@ -195,11 +199,17 @@ def assert_consistent(examples: Examples) -> None:
     perfectly plausible split whose leakage boundary is wrong.
     """
     size = len(examples)
+    sample_ids = np.asarray(examples.sample_ids)
+    if sample_ids.size != size:
+        raise ExamplesError(
+            f"{examples.name}: {sample_ids.size} sample identities for {size} examples"
+        )
+    identities = [str(value) for value in sample_ids.tolist()]
+    if len(set(identities)) != size:
+        raise ExamplesError(f"{examples.name}: duplicate sample identity")
     groups = np.asarray(examples.groups)
     if groups.size != size:
-        raise ExamplesError(
-            f"{examples.name}: {groups.size} group labels for {size} examples"
-        )
+        raise ExamplesError(f"{examples.name}: {groups.size} group labels for {size} examples")
     for name in examples.attribute_names():
         values = np.asarray(examples.attribute(name))
         if values.shape[0] != size:

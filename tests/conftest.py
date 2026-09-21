@@ -58,10 +58,10 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
     not just a config object that happens to validate.
     """
     from dsio.data.adapters import entity_examples
+    from dsio.data.splits.models import SplitFile, SplitFold
     from dsio.data.store import DATA_ROOT_ENV, SignalStore
     from dsio.data.views import WindowSpec
     from dsio.model.registry import LABELS, labels
-    from dsio.splits.models import SplitFile, SplitFold
     from dsio.train import load_runners
     from dsio.train.torch_task import Component, TorchTask, TrainerConfig
 

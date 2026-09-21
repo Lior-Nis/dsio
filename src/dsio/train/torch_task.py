@@ -37,6 +37,7 @@ from dsio.batches import PredictionBatch
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.contracts import DsioModel, sha256_of
 from dsio.data.adapters import SignalExamples
+from dsio.data.splits.folds import load_folds, require_fold, split_path
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowSpec, load_or_build
 from dsio.dataset.dataset import WindowDataset, labelled_dataset, make_loader, make_target_loader
@@ -51,7 +52,6 @@ from dsio.model.registry import (
     PREPROCESSORS,
     TRANSFORMS,
 )
-from dsio.splits.folds import load_folds, require_fold, split_path
 from dsio.train.artifacts import ArtifactRef, load_artifact
 from dsio.train.assembly import Component as Component
 from dsio.train.assembly import accepted_shape_arguments, build_optional_component

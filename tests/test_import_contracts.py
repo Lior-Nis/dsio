@@ -24,6 +24,5 @@ def test_all_declared_contracts_are_present():
     assert names == {
         "Foundation modules import no other dsio module",
         "Evaluation depends on no pipeline layer",
-        "The data layer never imports splits",
         "The spine never imports its own contract suites",
     }

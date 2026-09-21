@@ -13,6 +13,8 @@ torch = pytest.importorskip("torch")
 from torch import nn  # noqa: E402
 
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
+from dsio.data.splits.folds import folds_from_splits  # noqa: E402
+from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
 from dsio.dataset.dataset import (  # noqa: E402
@@ -24,8 +26,6 @@ from dsio.dataset.dataset import (  # noqa: E402
 )
 from dsio.model.components import Jitter  # noqa: E402
 from dsio.model.masking import CausalMask, SpanMask  # noqa: E402
-from dsio.splits.folds import folds_from_splits  # noqa: E402
-from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 
 
 @pytest.fixture

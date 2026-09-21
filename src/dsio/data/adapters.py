@@ -10,13 +10,16 @@ A project adds its own by satisfying the protocol; nothing here needs to know ab
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from math import isfinite
 from typing import Any
 
 import numpy as np
 
-from dsio.contracts import sha256_of_bytes
+from dsio.contracts import canonical_json, sha256_of
 from dsio.data.examples import ROOT_DERIVATION, ExamplesError, derive
 from dsio.data.views import assert_index_matches_store, window_times
+
+_MAX_DIGEST_VALUE_DEPTH = 32
 
 
 class TableExamples:
@@ -31,6 +34,7 @@ class TableExamples:
         self,
         *,
         name: str,
+        sample_ids: Sequence[str] | np.ndarray | None = None,
         groups: Sequence[Any] | np.ndarray,
         attributes: Mapping[str, Sequence[Any] | np.ndarray] | None = None,
         times: tuple[np.ndarray, np.ndarray] | None = None,
@@ -39,9 +43,13 @@ class TableExamples:
     ) -> None:
         self._name = name
         self._groups = np.asarray(groups)
-        self._attributes = {
-            key: np.asarray(value) for key, value in (attributes or {}).items()
-        }
+        self._sample_ids = np.asarray(
+            [str(index) for index in range(self._groups.size)]
+            if sample_ids is None
+            else sample_ids,
+            dtype=str,
+        )
+        self._attributes = {key: np.asarray(value) for key, value in (attributes or {}).items()}
         self._times = times
         self._digest = digest or self._derive_digest()
         self._derivation = derivation
@@ -54,11 +62,17 @@ class TableExamples:
         is the right granularity here: a split file binds to how the rows are grouped, and
         rebuilding it because an unrelated column changed would be noise.
         """
-        payload = self._groups.tobytes() + b"".join(
-            key.encode() + np.asarray(value).tobytes()
-            for key, value in sorted(self._attributes.items())
-        )
-        return sha256_of_bytes(payload)[:16]
+        order = np.argsort(self._sample_ids, kind="stable")
+        return sha256_of(
+            {
+                "sample_ids": self._sample_ids[order].tolist(),
+                "groups": _canonical_digest_value(self._groups[order].tolist()),
+                "attributes": {
+                    key: _canonical_digest_value(np.asarray(value)[order].tolist())
+                    for key, value in sorted(self._attributes.items())
+                },
+            }
+        )[:16]
 
     @property
     def name(self) -> str:
@@ -74,6 +88,10 @@ class TableExamples:
 
     def __len__(self) -> int:
         return int(self._groups.size)
+
+    @property
+    def sample_ids(self) -> np.ndarray:
+        return self._sample_ids
 
     @property
     def groups(self) -> np.ndarray:
@@ -98,6 +116,7 @@ class TableExamples:
         mask = np.asarray(mask, dtype=bool)
         return TableExamples(
             name=self._name,
+            sample_ids=self._sample_ids[mask],
             groups=self._groups[mask],
             attributes={key: value[mask] for key, value in self._attributes.items()},
             times=None if self._times is None else (self._times[0][mask], self._times[1][mask]),
@@ -168,6 +187,18 @@ class SignalExamples:
 
     def __len__(self) -> int:
         return len(self.index)
+
+    @property
+    def sample_ids(self) -> np.ndarray:
+        return np.asarray(
+            [
+                f"{entity_id}:{int(start)}:{self.index.digest}"
+                for entity_id, start in zip(
+                    self.index.entity_ids.tolist(), self.index.starts.tolist(), strict=True
+                )
+            ],
+            dtype=str,
+        )
 
     @property
     def groups(self) -> np.ndarray:
@@ -241,9 +272,76 @@ def entity_examples(store: Any) -> TableExamples:
     digest = store.manifest().signal_sha256[:16]
     return TableExamples(
         name=str(store.path.name),
+        sample_ids=[entity.entity_id for entity in entities],
         groups=[entity.group for entity in entities],
-        attributes={
-            key: [entity.attrs.get(key, np.nan) for entity in entities] for key in names
-        },
+        attributes={key: [entity.attrs.get(key, np.nan) for entity in entities] for key in names},
         digest=digest,
+    )
+
+
+def _canonical_digest_value(
+    value: Any,
+    *,
+    _active: set[int] | None = None,
+    _depth: int = 0,
+) -> Any:
+    """Type-tag arbitrary array values so no normalization sentinel can collide."""
+    if _depth > _MAX_DIGEST_VALUE_DEPTH:
+        raise ExamplesError(f"attribute value exceeds {_MAX_DIGEST_VALUE_DEPTH} nested containers")
+    if value is None:
+        return ["none"]
+    if isinstance(value, bool):
+        return ["bool", value]
+    if isinstance(value, int):
+        return ["integer", value]
+    if isinstance(value, float):
+        if isfinite(value):
+            return ["float", value]
+        if np.isnan(value):
+            kind = "nan"
+        else:
+            kind = "positive_infinity" if value > 0 else "negative_infinity"
+        return ["float", kind]
+    if isinstance(value, str):
+        return ["string", value]
+    if isinstance(value, bytes):
+        return ["bytes", value.hex()]
+    if isinstance(value, np.generic):
+        item = value.item()
+        if isinstance(item, np.generic):
+            raise ExamplesError(
+                f"NumPy scalar {value.dtype} has no lossless deterministic digest encoding"
+            )
+        return _canonical_digest_value(item, _active=_active, _depth=_depth)
+    if isinstance(value, list | tuple | dict | set | frozenset):
+        active = set() if _active is None else _active
+        marker = id(value)
+        if marker in active:
+            raise ExamplesError("attribute value contains a recursive container")
+        active.add(marker)
+        try:
+
+            def encode(item: Any) -> Any:
+                return _canonical_digest_value(
+                    item,
+                    _active=active,
+                    _depth=_depth + 1,
+                )
+
+            if isinstance(value, list):
+                return ["list", [encode(item) for item in value]]
+            if isinstance(value, tuple):
+                return ["tuple", [encode(item) for item in value]]
+            if isinstance(value, dict):
+                items = [[encode(key), encode(item)] for key, item in value.items()]
+                items.sort(key=canonical_json)
+                return ["dict", items]
+            items = [encode(item) for item in value]
+            items.sort(key=canonical_json)
+            tag = "frozenset" if isinstance(value, frozenset) else "set"
+            return [tag, items]
+        finally:
+            active.remove(marker)
+    raise ExamplesError(
+        f"attribute value of type {type(value).__name__} has no deterministic digest encoding"
     )

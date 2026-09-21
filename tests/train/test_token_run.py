@@ -20,13 +20,13 @@ pytest.importorskip("lightning")
 
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
+from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.components import EmbeddingEncoder  # noqa: E402
 from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
-from dsio.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.train.runner import execute  # noqa: E402
 from dsio.train.torch_task import Component, TorchTask, TrainerConfig  # noqa: E402
 

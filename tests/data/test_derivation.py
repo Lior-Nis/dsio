@@ -17,8 +17,8 @@ import pytest
 
 from dsio.data.adapters import TableExamples
 from dsio.data.examples import ExamplesError, check
-from dsio.splits.models import SplitError, SplitFile, SplitFold
-from dsio.splits.resolve import resolve_masks
+from dsio.data.splits.models import SplitError, SplitFile, SplitFold
+from dsio.data.splits.resolve import resolve_masks
 
 
 @pytest.fixture
