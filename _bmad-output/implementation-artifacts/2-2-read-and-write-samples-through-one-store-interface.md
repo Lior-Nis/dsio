@@ -4,7 +4,7 @@ baseline_commit: 487bd79b59a3e0bd4960bcd57c0cf520e699f061
 
 # Story 2.2: Read and Write Samples Through One Store Interface
 
-Status: review
+Status: done
 
 ## Story
 
@@ -42,7 +42,7 @@ so that training code is independent of the selected physical format.
 - [x] Verify and review (AC: 1-6)
   - [x] Run focused store, dataset, view, split, training, and distribution tests.
   - [x] Run full pytest, Ruff, mypy, import-linter, lock validation, build, and diff checks.
-  - [ ] Complete independent blind, edge-case, and acceptance reviews before merge.
+  - [x] Complete independent blind, edge-case, and acceptance reviews before merge.
 
 ## Dev Notes
 
@@ -98,6 +98,7 @@ Codex (GPT-5)
 - 2026-09-22: Full gate: 694 passed, 3 deselected; Ruff, mypy (64 source files), four import contracts, lock validation, build, and diff checks passed.
 - 2026-09-22: Review found canonical-offset, constructor-validation, strict-schema, JSON-attrs, and builder-cleanup gaps. Added failing regressions, applied minimal boundary fixes, and reran the full gate: 716 passed, 3 deselected; all other gates remained green.
 - 2026-09-22: Closure review found cyclic and externally malformed JSON metadata paths. The one attrs validator now guards build, publication, open, and return boundaries; 98 focused store tests pass.
+- 2026-09-22: Final blind, edge-case, and acceptance closure reviews approved all criteria. Final gate: 719 passed, 3 deselected; Ruff, mypy, four import contracts, lock validation, build, and diff checks passed.
 
 ### Completion Notes List
 
@@ -125,3 +126,4 @@ Codex (GPT-5)
 - 2026-09-22: Implemented and verified the stable, content-checked store interface; moved to review.
 - 2026-09-22: Addressed all first-pass blind, edge-case, and acceptance findings and requested closure review.
 - 2026-09-22: Addressed closure-review attribute findings and requested final verification.
+- 2026-09-22: All independent reviewers approved; Story 2.2 completed.
