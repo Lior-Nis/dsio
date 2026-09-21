@@ -329,13 +329,13 @@ def _versions(candidates: tuple[str, ...]) -> dict[str, str]:
     if "arrow-ipc" in candidates:
         packages.add("pyarrow")
     if "zarr-v3" in candidates:
-        packages.add("zarr")
+        packages.update(("numcodecs", "zarr"))
     return {name: importlib.metadata.version(name) for name in sorted(packages)}
 
 
 def _environment() -> dict[str, Any]:
     commit = _git("rev-parse", "HEAD")
-    dirty = bool(_git("status", "--porcelain"))
+    dirty = bool(_git("status", "--porcelain", "--untracked-files=no"))
     return {
         "python": sys.version,
         "platform": platform.platform(),
@@ -344,6 +344,7 @@ def _environment() -> dict[str, Any]:
         "cpu_count": os.cpu_count(),
         "git_commit": commit,
         "git_dirty": dirty,
+        "git_dirty_scope": "tracked files only",
         "rss_method": "resource.getrusage(RUSAGE_SELF).ru_maxrss",
         "cache_state": "uncontrolled; reads may use the operating-system page cache",
     }

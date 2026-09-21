@@ -105,7 +105,7 @@ def test_all_candidates_return_identical_logical_reads(tmp_path: Path) -> None:
     )
 
     report = json.loads(output.read_text())
-    assert set(report["versions"]) == {"numpy", "pyarrow", "zarr"}
+    assert set(report["versions"]) == {"numcodecs", "numpy", "pyarrow", "zarr"}
     results = report["workloads"][0]["candidates"]
     assert len({result["sequential"]["checksum"] for result in results}) == 1
     assert len({result["random"]["checksum"] for result in results}) == 1
