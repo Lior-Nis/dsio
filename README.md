@@ -163,6 +163,30 @@ manifest.save("splits/patient-5fold/split.yaml")
 Here, `examples` is the exact stable-identity collection the training loaders will consume;
 the manifest binds its assignments to that collection and its derivation.
 
+Inside a tracked task, record that same evidence through native MLflow inputs and artifacts;
+the returned immutable URI feeds the later task directly:
+
+```python
+from dsio.tracking import load_split_evidence, record_split_evidence
+
+manifest_uri = record_split_evidence(
+    split_run.info.run_id,
+    examples,
+    manifest,
+    source=store.path,
+)
+
+# After split_run finishes successfully, inside a later tracked task:
+manifest = load_split_evidence(
+    manifest_uri,
+    examples,
+    consumer_run_id=train_run.info.run_id,
+)
+```
+
+MLflow remains the record: the source Run owns the manifest artifact and native dataset input;
+the consumer links that same dataset plus the immutable artifact URI without copying either.
+
 Supported names are owned by DSIO; projects cannot register splitters at runtime. Novel
 algorithms enter through DSIO's reviewed experimental-admission path.
 
