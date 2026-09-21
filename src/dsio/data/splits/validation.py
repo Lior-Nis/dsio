@@ -107,6 +107,17 @@ def validate(examples: Examples, manifest: SplitFile) -> None:
                 f"split {manifest.name!r} fold {fold.index} group roles must be exactly "
                 f"{sorted(required_roles)}, got {sorted(fold.parts)}"
             )
+        if temporal:
+            if fold.temporal is None:
+                raise SplitError(
+                    f"split {manifest.name!r} fold {fold.index} has no temporal bounds"
+                )
+            temporal_roles = set(fold.temporal.spans)
+            if temporal_roles != required_roles:
+                raise SplitError(
+                    f"split {manifest.name!r} fold {fold.index} temporal span roles must "
+                    f"be exactly {sorted(required_roles)}, got {sorted(temporal_roles)}"
+                )
         owners: dict[str, str] = {}
         role_groups: dict[str, set[str]] = {}
         for role, assignments in fold.assignments.items():
@@ -173,10 +184,7 @@ def validate(examples: Examples, manifest: SplitFile) -> None:
                 )
 
         if temporal:
-            if fold.temporal is None:
-                raise SplitError(
-                    f"split {manifest.name!r} fold {fold.index} has no temporal bounds"
-                )
+            assert fold.temporal is not None
             assert times is not None
             starts, ends = times
             for role in manifest.required_roles:

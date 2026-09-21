@@ -530,6 +530,14 @@ def test_temporal_validation_rejects_extra_assignment_roles() -> None:
     with pytest.raises(SplitError, match="assignment roles must be exactly"):
         validate(examples, manifest.model_copy(update={"folds": [forged]}))
 
+    assert fold.temporal is not None
+    extra_bounds = fold.temporal.model_copy(
+        update={"spans": {**fold.temporal.spans, "shadow": fold.temporal.spans["test"]}}
+    )
+    extra_span = fold.model_copy(update={"temporal": extra_bounds})
+    with pytest.raises(SplitError, match="temporal span roles must be exactly"):
+        validate(examples, manifest.model_copy(update={"folds": [extra_span]}))
+
 
 def test_resolution_rejects_a_fold_not_stored_in_the_manifest() -> None:
     examples = _examples()

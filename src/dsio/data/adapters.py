@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-from dsio.contracts import sha256_of
+from dsio.contracts import canonical_json, sha256_of
 from dsio.data.examples import ROOT_DERIVATION, ExamplesError, derive
 from dsio.data.views import assert_index_matches_store, window_times
 
@@ -278,15 +278,42 @@ def entity_examples(store: Any) -> TableExamples:
 
 
 def _canonical_digest_value(value: Any) -> Any:
-    """Give non-finite array values an explicit, deterministic hash representation."""
-    if isinstance(value, float) and not isfinite(value):
+    """Type-tag arbitrary array values so no normalization sentinel can collide."""
+    if value is None:
+        return ["none"]
+    if isinstance(value, bool):
+        return ["bool", value]
+    if isinstance(value, int):
+        return ["integer", value]
+    if isinstance(value, float):
+        if isfinite(value):
+            return ["float", value]
         if np.isnan(value):
             kind = "nan"
         else:
             kind = "positive_infinity" if value > 0 else "negative_infinity"
-        return {"__dsio_nonfinite_float__": kind}
+        return ["float", kind]
+    if isinstance(value, str):
+        return ["string", value]
+    if isinstance(value, bytes):
+        return ["bytes", value.hex()]
+    if isinstance(value, np.generic):
+        return _canonical_digest_value(value.item())
     if isinstance(value, list):
-        return [_canonical_digest_value(item) for item in value]
+        return ["list", [_canonical_digest_value(item) for item in value]]
+    if isinstance(value, tuple):
+        return ["tuple", [_canonical_digest_value(item) for item in value]]
     if isinstance(value, dict):
-        return {str(key): _canonical_digest_value(item) for key, item in value.items()}
-    return value
+        items = [
+            [_canonical_digest_value(key), _canonical_digest_value(item)]
+            for key, item in value.items()
+        ]
+        items.sort(key=lambda pair: canonical_json(pair[0]))
+        return ["dict", items]
+    if isinstance(value, set | frozenset):
+        items = [_canonical_digest_value(item) for item in value]
+        items.sort(key=canonical_json)
+        return ["set", items]
+    raise ExamplesError(
+        f"attribute value of type {type(value).__name__} has no deterministic digest encoding"
+    )

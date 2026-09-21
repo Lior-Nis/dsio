@@ -145,8 +145,15 @@ def test_the_derived_digest_normalizes_non_finite_attribute_values() -> None:
 
     first = TableExamples(name="x", groups=["a", "b", "c"], attributes={"v": values})
     second = TableExamples(name="x", groups=["a", "b", "c"], attributes={"v": values})
+    sentinel_shaped_user_data = TableExamples(
+        name="x",
+        groups=["a"],
+        attributes={"v": [{"__dsio_nonfinite_float__": "nan"}]},
+    )
+    actual_nan = TableExamples(name="x", groups=["a"], attributes={"v": [np.nan]})
 
     assert first.digest == second.digest
+    assert actual_nan.digest != sentinel_shaped_user_data.digest
 
 
 # --- the whole split layer, on data with no features at all -----------------------------------
