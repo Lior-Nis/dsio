@@ -49,6 +49,8 @@ def generate(
         raise SplitError(f"split seed must be an integer, got {seed!r}")
     if len(roles) != 2 or len(set(roles)) != 2 or any(not role for role in roles):
         raise SplitError("roles must contain two distinct, non-empty names")
+    if algorithm == "purged_walk_forward" and "discarded" in roles:
+        raise SplitError("role name 'discarded' is reserved for temporal coverage evidence")
 
     try:
         source = check(examples)
@@ -79,21 +81,25 @@ def generate(
             "total_coverage",
         )
 
-    manifest = SplitFile(
-        store=source.name,
-        store_manifest_sha256=source.digest,
-        examples_derivation=source.derivation,
-        name=name,
-        algorithm=algorithm,
-        algorithm_version=ALGORITHM_VERSION,
-        parameters=normalized,
-        seed=seed,
-        dependencies=dependencies,
-        validations=validations,
-        coverage=coverage,
-        required_roles=roles,
-        folds=folds,
-    )
+    try:
+        manifest = SplitFile(
+            store=source.name,
+            store_manifest_sha256=source.digest,
+            examples_derivation=source.derivation,
+            name=name,
+            algorithm=algorithm,
+            algorithm_version=ALGORITHM_VERSION,
+            parameters=normalized,
+            seed=seed,
+            dependencies=dependencies,
+            validations=validations,
+            coverage=coverage,
+            required_roles=roles,
+            folds=folds,
+        )
+    except ValidationError as exc:
+        messages = [str(error["msg"]).removeprefix("Value error, ") for error in exc.errors()]
+        raise SplitError("invalid generated split: " + "; ".join(messages)) from exc
     validate(source, manifest)
     return manifest
 

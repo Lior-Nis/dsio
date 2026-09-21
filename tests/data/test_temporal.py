@@ -51,9 +51,7 @@ def _temporal_folds(
                     if counts.get("discarded")
                     else None
                 ),
-                folds=[
-                    SplitFold(index=fold, counts=counts, parts=groups or {}, temporal=bounds)
-                ],
+                folds=[SplitFold(index=fold, counts=counts, parts=groups or {}, temporal=bounds)],
             )
         )
     return files
@@ -161,9 +159,7 @@ def test_embargo_zero_keeps_the_adjacent_window(market: SignalStore, index) -> N
     t_start, t_end = window_times(market, index, unit="row")
     spans = {"train": [TimeSpan(start=0, end=5000)], "test": [TimeSpan(start=2000, end=3000)]}
     none = apply(TemporalBounds(spans=spans), t_start, t_end, part="train").sum()
-    some = apply(
-        TemporalBounds(spans=spans, embargo=500), t_start, t_end, part="train"
-    ).sum()
+    some = apply(TemporalBounds(spans=spans, embargo=500), t_start, t_end, part="train").sum()
     assert some < none
 
 
@@ -290,8 +286,10 @@ def test_a_temporal_split_needs_a_dataset_with_a_clock(market: SignalStore, inde
 
 
 def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) -> None:
-    folds = _temporal_folds(SignalExamples(market, index), TemporalSpec(n_splits=2,
-        label_horizon=30, embargo=40), name="wf"
+    folds = _temporal_folds(
+        SignalExamples(market, index),
+        TemporalSpec(n_splits=2, label_horizon=30, embargo=40),
+        name="wf",
     )
     path = tmp_path / "wf0.yaml"
     folds[0].save(path)
@@ -306,8 +304,10 @@ def test_temporal_split_round_trips(market: SignalStore, index, tmp_path: Path) 
 
 
 def test_temporal_header_states_the_rules(market: SignalStore, index) -> None:
-    folds = _temporal_folds(SignalExamples(market, index), TemporalSpec(n_splits=1,
-        label_horizon=25, embargo=60), name="wf"
+    folds = _temporal_folds(
+        SignalExamples(market, index),
+        TemporalSpec(n_splits=1, label_horizon=25, embargo=60),
+        name="wf",
     )
     header = folds[0].to_yaml()
     assert "# temporal: unit=row, label_horizon=25, embargo=60" in header
@@ -317,8 +317,11 @@ def test_temporal_header_states_the_rules(market: SignalStore, index) -> None:
 def test_temporal_composes_with_a_group_partition(market: SignalStore, index) -> None:
     """Purged walk-forward within a held-out cohort: generalise over symbols AND time."""
     groups = {"train": ["AAPL", "MSFT"], "test": ["NVDA"]}
-    folds = _temporal_folds(SignalExamples(market, index), TemporalSpec(n_splits=1,
-        test_fraction=0.2), name="wf", groups=groups
+    folds = _temporal_folds(
+        SignalExamples(market, index),
+        TemporalSpec(n_splits=1, test_fraction=0.2),
+        name="wf",
+        groups=groups,
     )
     parts = resolve(SignalExamples(market, index), folds[0], folds[0].fold(0))
     assert set(parts["train"].groups.tolist()) <= {"AAPL", "MSFT"}

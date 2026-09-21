@@ -89,13 +89,24 @@ def validate(examples: Examples, manifest: SplitFile) -> None:
     evaluation_owners: dict[str, int] = {}
 
     for fold in manifest.folds:
+        assignment_roles = set(fold.assignments)
+        required_roles = set(manifest.required_roles)
         missing_roles = [role for role in manifest.required_roles if role not in fold.assignments]
         if missing_roles:
             raise SplitError(
                 f"split {manifest.name!r} fold {fold.index} is missing required role "
                 f"{missing_roles[0]!r}"
             )
-
+        if assignment_roles != required_roles:
+            raise SplitError(
+                f"split {manifest.name!r} fold {fold.index} assignment roles must be "
+                f"exactly {sorted(required_roles)}, got {sorted(assignment_roles)}"
+            )
+        if not temporal and set(fold.parts) != required_roles:
+            raise SplitError(
+                f"split {manifest.name!r} fold {fold.index} group roles must be exactly "
+                f"{sorted(required_roles)}, got {sorted(fold.parts)}"
+            )
         owners: dict[str, str] = {}
         role_groups: dict[str, set[str]] = {}
         for role, assignments in fold.assignments.items():

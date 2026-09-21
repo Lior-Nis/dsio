@@ -10,6 +10,7 @@ A project adds its own by satisfying the protocol; nothing here needs to know ab
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from math import isfinite
 from typing import Any
 
 import numpy as np
@@ -59,12 +60,13 @@ class TableExamples:
         is the right granularity here: a split file binds to how the rows are grouped, and
         rebuilding it because an unrelated column changed would be noise.
         """
+        order = np.argsort(self._sample_ids, kind="stable")
         return sha256_of(
             {
-                "sample_ids": self._sample_ids.tolist(),
-                "groups": self._groups.tolist(),
+                "sample_ids": self._sample_ids[order].tolist(),
+                "groups": _canonical_digest_value(self._groups[order].tolist()),
                 "attributes": {
-                    key: np.asarray(value).tolist()
+                    key: _canonical_digest_value(np.asarray(value)[order].tolist())
                     for key, value in sorted(self._attributes.items())
                 },
             }
@@ -273,3 +275,18 @@ def entity_examples(store: Any) -> TableExamples:
         attributes={key: [entity.attrs.get(key, np.nan) for entity in entities] for key in names},
         digest=digest,
     )
+
+
+def _canonical_digest_value(value: Any) -> Any:
+    """Give non-finite array values an explicit, deterministic hash representation."""
+    if isinstance(value, float) and not isfinite(value):
+        if np.isnan(value):
+            kind = "nan"
+        else:
+            kind = "positive_infinity" if value > 0 else "negative_infinity"
+        return {"__dsio_nonfinite_float__": kind}
+    if isinstance(value, list):
+        return [_canonical_digest_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _canonical_digest_value(item) for key, item in value.items()}
+    return value

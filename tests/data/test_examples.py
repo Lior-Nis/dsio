@@ -87,18 +87,13 @@ def test_group_attribute_averages_a_numeric_key(table: TableExamples) -> None:
 def test_group_attribute_refuses_a_categorical_that_varies_within_a_group() -> None:
     """Averaging a site code across a group that moved between sites produces a number
     that means nothing and balances nothing."""
-    mixed = TableExamples(
-        name="m", groups=["a", "a"], attributes={"site": ["X", "Y"]}
-    )
+    mixed = TableExamples(name="m", groups=["a", "a"], attributes={"site": ["X", "Y"]})
     with pytest.raises(ExamplesError, match="must be constant per group"):
         group_attribute(mixed, "site")
 
 
 def test_categorical_report_number_is_stable_across_processes() -> None:
-    command = (
-        "from dsio.data.examples import _as_number; "
-        "print(_as_number('categorical-site'))"
-    )
+    command = "from dsio.data.examples import _as_number; print(_as_number('categorical-site'))"
     values = [
         subprocess.check_output(
             [sys.executable, "-c", command],
@@ -143,6 +138,15 @@ def test_the_digest_reflects_the_grouping_not_the_features() -> None:
     c = TableExamples(name="x", groups=["a", "b", "b"], attributes={"k": [1.0, 2.0, 3.0]})
     assert a.digest == b.digest
     assert a.digest != c.digest
+
+
+def test_the_derived_digest_normalizes_non_finite_attribute_values() -> None:
+    values = [np.nan, np.inf, -np.inf]
+
+    first = TableExamples(name="x", groups=["a", "b", "c"], attributes={"v": values})
+    second = TableExamples(name="x", groups=["a", "b", "c"], attributes={"v": values})
+
+    assert first.digest == second.digest
 
 
 # --- the whole split layer, on data with no features at all -----------------------------------

@@ -75,8 +75,8 @@ class TemporalBounds(DsioModel):
 class TemporalSpec(DsioModel):
     """How to generate walk-forward folds."""
 
-    n_splits: int = Field(default=5, ge=1)
-    test_fraction: float = Field(default=0.2, gt=0.0, lt=1.0)
+    n_splits: int = Field(default=5, ge=1, strict=True)
+    test_fraction: float = Field(default=0.1, gt=0.0, lt=1.0)
     label_horizon: float = Field(default=0.0, ge=0.0)
     embargo: float = Field(
         default=0.0,

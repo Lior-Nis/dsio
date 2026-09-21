@@ -126,10 +126,31 @@ def resolve_masks(
     ``fold`` — one family binds to one corpus, so that check runs once per call rather than
     being duplicated onto every fold.
     """
-    _validate_split_binding(examples, split)
-    _validate_group_assignments(examples, split, fold, require_total=require_total)
+    canonical_fold = split.fold(fold.index)
+    if fold != canonical_fold:
+        raise SplitError(
+            f"split {split.name!r} fold {fold.index} does not match the fold stored in the manifest"
+        )
     if fold.assignments:
         validate(examples, split)
+    return _resolve_validated_masks(
+        examples,
+        split,
+        canonical_fold,
+        require_total=require_total,
+    )
+
+
+def _resolve_validated_masks(
+    examples: Examples,
+    split: SplitFile,
+    fold: SplitFold,
+    *,
+    require_total: bool = True,
+) -> dict[str, np.ndarray]:
+    """Resolve one canonical fold after any whole-manifest validation has run."""
+    _validate_split_binding(examples, split)
+    _validate_group_assignments(examples, split, fold, require_total=require_total)
 
     groups = np.asarray([str(g) for g in examples.groups])
     sample_ids = np.asarray([str(sample_id) for sample_id in examples.sample_ids])

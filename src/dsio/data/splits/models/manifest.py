@@ -101,18 +101,21 @@ class SplitFile(DsioModel):
         fold_numbers = ", ".join(str(f.index) for f in self.folds)
         word = "fold" if len(self.folds) == 1 else "folds"
         header = [
-            f"# dsio split: {self.name} ({word} {fold_numbers})",
-            f"# store: {self.store}",
-            f"# algorithm: {self.algorithm}/{self.algorithm_version}  seed={self.seed}",
+            f"# dsio split: {_header(self.name)} ({word} {fold_numbers})",
+            f"# store: {_header(self.store)}",
+            f"# algorithm: {_header(self.algorithm)}/{_header(self.algorithm_version)}  "
+            f"seed={self.seed}",
             f"# digest: {self.digest}",
-            f"# group key: {self.group_key}  <- the leakage boundary",
+            f"# group key: {_header(self.group_key)}  <- the leakage boundary",
         ]
         multi = len(self.folds) > 1
         for fold in self.folds:
             prefix = f"[{fold.index}] " if multi else ""
             header.append(
                 f"# {prefix}counts: "
-                + ", ".join(f"{part}={count}" for part, count in sorted(fold.counts.items()))
+                + ", ".join(
+                    f"{_header(part)}={count}" for part, count in sorted(fold.counts.items())
+                )
             )
             if fold.temporal is not None:
                 header.append(
@@ -122,16 +125,17 @@ class SplitFile(DsioModel):
                 )
                 for part, spans in sorted(fold.temporal.spans.items()):
                     rendered = ", ".join(f"[{span.start:g}, {span.end:g})" for span in spans)
-                    header.append(f"#   {part}: {rendered}")
+                    header.append(f"#   {_header(part)}: {rendered}")
         if self.notes:
-            header.append(f"# {self.notes}")
+            header.append(f"# {_header(self.notes)}")
         payload = self.model_dump(mode="json")
         payload["digest"] = self.digest
         return "\n".join(header) + "\n" + yaml.safe_dump(payload, sort_keys=True, width=100)
 
-    def save(self, path: Path) -> None:
+    def save(self, path: Path | str) -> None:
         from dsio.contracts import atomic_write
 
+        path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, self.to_yaml().encode("utf-8"))
 
@@ -163,6 +167,24 @@ class SplitFile(DsioModel):
                 f"{manifest.digest}; the split manifest was modified"
             )
         return manifest
+
+
+def _header(value: object) -> str:
+    """Render arbitrary model text on exactly one YAML-comment line."""
+    escaped: list[str] = []
+    for character in str(value):
+        codepoint = ord(character)
+        if character == "\\":
+            escaped.append("\\\\")
+        elif character == "\r":
+            escaped.append("\\r")
+        elif character == "\n":
+            escaped.append("\\n")
+        elif codepoint < 32 or codepoint == 127 or character in {"\x85", "\u2028", "\u2029"}:
+            escaped.append(f"\\u{codepoint:04x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
 
 
 def _assert_evaluation_disjoint_across_folds(

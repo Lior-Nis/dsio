@@ -104,6 +104,8 @@ Codex (GPT-5)
 - 2026-09-22: Implemented the closed dispatcher, stable example identity, schema-v3 exact-assignment manifests, digest/provenance verification, concrete-source validation, package migration, and compatibility updates.
 - 2026-09-22: Self-audit tightened temporal-bound replay, cross-fold custom-role checks, count evidence, and malformed-YAML handling; promoted the oversized model module to a cohesive package.
 - 2026-09-22: Local gate passed: 739 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
+- 2026-09-22: Independent review found temporal default overlap, forged-fold replay, order-sensitive derived identity, extra-role coverage, unsafe header lines, quadratic family validation, non-finite metadata hashing, lax temporal parameters, a reserved-name collision, and the documented string-path mismatch. All were reproduced and fixed with regressions.
+- 2026-09-22: Reviewed revision passed 749 tests (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
 
 ### Completion Notes List
 
@@ -111,6 +113,7 @@ Codex (GPT-5)
 - `SplitFile` remains the single persisted contract and records exact assignments, normalized inputs, dependency provenance, declared validations, and a verified content digest.
 - Concrete-source validation proves identity membership, coverage, role/group separation, temporal-bound agreement, counts, and cross-fold evaluation uniqueness.
 - Stable sample identity is aligned and preserved across shipped `Examples` implementations and subsets.
+- Review fixes enforce canonical manifest folds during replay, validate each family once, make temporal defaults and parameters safe, and preserve deterministic identity for reordered and non-finite table metadata.
 
 ### File List
 

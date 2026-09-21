@@ -18,7 +18,8 @@ import numpy as np
 
 from dsio.data.examples import Examples
 from dsio.data.splits.models import SplitError, SplitFile, SplitFold
-from dsio.data.splits.resolve import resolve_masks
+from dsio.data.splits.resolve import _resolve_validated_masks
+from dsio.data.splits.validation import validate
 from dsio.eval.contract import Fold
 
 TRAIN_PART = "train"
@@ -52,8 +53,15 @@ def folds_from_splits(
 
     folds: list[Fold] = []
     for split in splits:
+        if any(fold.assignments for fold in split.folds):
+            validate(examples, split)
         for split_fold in split.folds:
-            masks = resolve_masks(examples, split, split_fold, require_total=require_total)
+            masks = _resolve_validated_masks(
+                examples,
+                split,
+                split_fold,
+                require_total=require_total,
+            )
             for required in (train_part, test_part):
                 if required not in masks:
                     raise SplitError(

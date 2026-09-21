@@ -8,6 +8,7 @@ import yaml
 
 from dsio.data.adapters import TableExamples
 from dsio.data.splits import generate, validate
+from dsio.data.splits.folds import folds_from_splits
 from dsio.data.splits.models import SplitError, SplitFile
 from dsio.data.splits.resolve import resolve_masks
 
@@ -114,6 +115,28 @@ def test_generation_is_independent_of_source_iteration_order() -> None:
     assert shuffled.folds == ordered.folds
 
 
+def test_derived_dataset_identity_is_independent_of_source_iteration_order() -> None:
+    ordered = _examples()
+    permutation = np.random.default_rng(99).permutation(len(ordered))
+    reordered = TableExamples(
+        name=ordered.name,
+        sample_ids=ordered.sample_ids[permutation],
+        groups=ordered.groups[permutation],
+        attributes={"label": ordered.attribute("label")[permutation]},
+    )
+    canonical = TableExamples(
+        name=ordered.name,
+        sample_ids=ordered.sample_ids,
+        groups=ordered.groups,
+        attributes={"label": ordered.attribute("label")},
+    )
+
+    assert reordered.digest == canonical.digest
+    left = generate(canonical, "group_kfold", name="stable", seed=17, parameters={"n_splits": 3})
+    right = generate(reordered, "group_kfold", name="stable", seed=17, parameters={"n_splits": 3})
+    assert right.digest == left.digest
+
+
 def test_roles_can_be_named_for_the_task() -> None:
     manifest = generate(
         _examples(),
@@ -140,7 +163,7 @@ def test_manifest_round_trip_verifies_its_digest(tmp_path: Path) -> None:
         parameters={"n_splits": 3},
     )
     path = tmp_path / "split.yaml"
-    manifest.save(path)
+    manifest.save(str(path))
 
     restored = SplitFile.load(path)
     assert restored == manifest
@@ -166,6 +189,29 @@ def test_manifest_load_rejects_non_mapping_yaml(tmp_path: Path) -> None:
         SplitFile.load(path)
 
 
+def test_manifest_header_escapes_newlines_and_round_trips(tmp_path: Path) -> None:
+    examples = TableExamples(
+        name="cohort\nname",
+        sample_ids=["a", "b", "c", "d"],
+        groups=["a", "b", "c", "d"],
+        digest="fixed",
+    )
+    manifest = generate(
+        examples,
+        "group_shuffle",
+        name="split\nname",
+        seed=1,
+        roles=("fit\nrole", "score"),
+        parameters={"test_size": 0.5},
+    ).model_copy(update={"notes": "first\nsecond"})
+    path = tmp_path / "split.yaml"
+
+    manifest.save(path)
+
+    assert SplitFile.load(path) == manifest
+    assert "# dsio split: split\\nname" in path.read_text()
+
+
 def test_unknown_algorithm_points_to_governed_admission() -> None:
     with pytest.raises(SplitError, match="unknown split algorithm.*experimental admission"):
         generate(_examples(), "project_magic", name="bad", seed=0)
@@ -187,6 +233,38 @@ def test_algorithm_parameters_fail_at_the_dispatch_boundary(
 ) -> None:
     with pytest.raises(SplitError, match=message):
         generate(_examples(), algorithm, name="bad", seed=0, parameters=parameters)
+
+
+@pytest.mark.parametrize("n_splits", [True, 1.0])
+def test_temporal_n_splits_is_a_strict_integer(n_splits: object) -> None:
+    size = 20
+    examples = TableExamples(
+        name="timeline",
+        sample_ids=[f"tick-{index}" for index in range(size)],
+        groups=["market"] * size,
+        times=(np.arange(size, dtype=float), np.arange(1, size + 1, dtype=float)),
+        digest="strict-temporal",
+    )
+
+    with pytest.raises(SplitError, match="invalid purged_walk_forward parameters"):
+        generate(
+            examples,
+            "purged_walk_forward",
+            name="bad",
+            seed=0,
+            parameters={"n_splits": n_splits},
+        )
+
+
+def test_temporal_discarded_role_name_is_reserved() -> None:
+    with pytest.raises(SplitError, match="'discarded' is reserved"):
+        generate(
+            _examples(),
+            "purged_walk_forward",
+            name="bad",
+            seed=0,
+            roles=("discarded", "test"),
+        )
 
 
 def test_dispatcher_exposes_no_runtime_registration_hook() -> None:
@@ -383,3 +461,112 @@ def test_validation_rechecks_cross_fold_evaluation_identity_for_custom_roles() -
             _examples(),
             manifest.model_copy(update={"folds": [first, forged, *remaining]}),
         )
+
+
+def test_purged_walk_forward_defaults_are_non_overlapping_and_replayable() -> None:
+    size = 100
+    examples = TableExamples(
+        name="timeline",
+        sample_ids=[f"tick-{index:03d}" for index in range(size)],
+        groups=["market"] * size,
+        times=(np.arange(size, dtype=float), np.arange(1, size + 1, dtype=float)),
+        digest="timeline-defaults",
+    )
+
+    manifest = generate(examples, "purged_walk_forward", name="defaults", seed=0)
+
+    evaluation_ids = [
+        sample_id for fold in manifest.folds for sample_id in fold.assignments["test"]
+    ]
+    assert len(manifest.folds) == 5
+    assert len(evaluation_ids) == len(set(evaluation_ids))
+    assert all("discarded" in fold.counts for fold in manifest.folds)
+
+    with pytest.raises(SplitError, match="invalid generated split"):
+        generate(
+            examples,
+            "purged_walk_forward",
+            name="overlapping",
+            seed=0,
+            parameters={"n_splits": 5, "test_fraction": 0.2},
+        )
+
+
+def test_temporal_validation_rejects_extra_assignment_roles() -> None:
+    size = 30
+    examples = TableExamples(
+        name="timeline",
+        sample_ids=[f"tick-{index:02d}" for index in range(size)],
+        groups=["market"] * size,
+        times=(np.arange(size, dtype=float), np.arange(1, size + 1, dtype=float)),
+        digest="timeline-extra-role",
+    )
+    manifest = generate(
+        examples,
+        "purged_walk_forward",
+        name="extra-role",
+        seed=0,
+        parameters={
+            "n_splits": 1,
+            "test_fraction": 0.2,
+            "label_horizon": 1.0,
+            "embargo": 1.0,
+        },
+    )
+    fold = manifest.folds[0]
+    assigned = set().union(*map(set, fold.assignments.values()))
+    discarded = next(iter(set(examples.sample_ids.tolist()) - assigned))
+    forged = fold.model_copy(
+        update={
+            "assignments": {**fold.assignments, "discarded_bucket": [discarded]},
+            "counts": {
+                **fold.counts,
+                "discarded_bucket": 1,
+                "discarded": fold.counts["discarded"] - 1,
+            },
+        }
+    )
+
+    with pytest.raises(SplitError, match="assignment roles must be exactly"):
+        validate(examples, manifest.model_copy(update={"folds": [forged]}))
+
+
+def test_resolution_rejects_a_fold_not_stored_in_the_manifest() -> None:
+    examples = _examples()
+    manifest = generate(
+        examples,
+        "group_shuffle",
+        name="canonical",
+        seed=2,
+        parameters={"test_size": 0.34},
+    )
+    canonical = manifest.folds[0]
+    forged = canonical.model_copy(update={"counts": {**canonical.counts, "test": 999}})
+
+    with pytest.raises(SplitError, match="does not match the fold stored"):
+        resolve_masks(examples, manifest, forged)
+
+
+def test_fold_conversion_validates_a_manifest_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dsio.data.splits.folds as fold_module
+
+    examples = _examples()
+    manifest = generate(
+        examples,
+        "group_kfold",
+        name="three-fold",
+        seed=4,
+        parameters={"n_splits": 3},
+    )
+    real_validate = fold_module.validate
+    calls = 0
+
+    def counted_validate(source: TableExamples, candidate: SplitFile) -> None:
+        nonlocal calls
+        calls += 1
+        real_validate(source, candidate)
+
+    monkeypatch.setattr(fold_module, "validate", counted_validate)
+
+    assert len(folds_from_splits(examples, [manifest])) == 3
+    assert calls == 1
