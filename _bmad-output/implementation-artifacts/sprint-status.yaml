@@ -1,0 +1,80 @@
+# generated: 2026-09-21T18:15:08+03:00
+# last_updated: 2026-09-21T18:31:23+03:00
+# project: DSio
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story is created
+#   - in-progress -> done: Manually when all stories reach done
+#
+# Story Status:
+#   - backlog: Story only exists in the epic file
+#   - ready-for-dev: Story file has been created
+#   - in-progress: Implementation is active
+#   - review: Implementation is ready for review
+#   - done: Story is complete
+#
+# Retrospective Status:
+#   - optional: Available but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - An epic becomes in-progress when its first story is created.
+# - Stories are implemented sequentially by default so later stories can use earlier learning.
+# - A story moves through review before done.
+# - Re-run sprint planning to refresh statuses without downgrading existing progress.
+
+generated: "2026-09-21T18:15:08+03:00"
+last_updated: "2026-09-21T18:57:49+03:00"
+project: DSio
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: in-progress
+  1-1-install-dsio-and-run-a-project-owned-flow: done
+  1-2-track-each-flow-execution-as-a-parent-run: backlog
+  1-3-track-task-attempts-as-immutable-child-runs: backlog
+  1-4-record-deterministic-identity-and-safe-configuration: backlog
+  1-5-resolve-and-reuse-verified-mlflow-evidence: backlog
+  1-6-rerun-downstream-work-without-recomputing-upstream-evidence: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-select-the-primary-store-through-a-reproducible-benchmark: backlog
+  2-2-read-and-write-samples-through-one-store-interface: backlog
+  2-3-generate-a-governed-split-manifest: backlog
+  2-4-record-and-reload-split-evidence-in-mlflow: backlog
+  2-5-construct-identity-preserving-dataloaders: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-train-a-task-through-the-exact-dsio-lightning-classes: backlog
+  3-2-configure-training-with-native-importable-components: backlog
+  3-3-apply-reproducible-stochastic-augmentation-on-the-accelerator: backlog
+  3-4-reject-unsupported-training-configurations-before-execution: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-build-a-self-contained-predictor-from-training-evidence: backlog
+  4-2-log-a-signed-mlflow-model-with-explicit-export-forms: backlog
+  4-3-predict-from-an-immutable-model-uri: backlog
+  4-4-evaluate-immutable-evidence-in-a-prefect-task: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-govern-components-from-experimental-to-stable: backlog
+  5-2-run-the-supervised-reference-flow: backlog
+  5-3-run-the-self-supervised-reference-flow: backlog
+  epic-5-retrospective: optional

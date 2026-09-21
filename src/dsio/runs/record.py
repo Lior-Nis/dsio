@@ -130,7 +130,7 @@ class Run:
     """A live run: captured provenance, plus a local scratch directory to write into.
 
     ``mlflow_run_id`` starts ``None`` and is filled in by the runner once it holds the
-    MLflow run this dsio run is logging to (``dsio.train.tracking.build_mlflow_logger``,
+    MLflow run this training execution is logging to (``dsio.train.tracking.build_mlflow_logger``,
     called from ``dsio.train.torch_task.run_torch`` / ``dsio.train.ssl_task.
     run_ssl_pretrain``) -- ``Run`` itself never talks to MLflow (see the module
     docstring), so this is the one field it does not set.
@@ -258,23 +258,7 @@ def _reproduce_script(record: RunRecord) -> str:
     else:
         lines.append('echo "WARNING: no git provenance was captured for this run" >&2')
 
-    if record.env.extra:
-        # `torch`/`lightning`/`mlflow-skinny` live only in the `cpu`/`gpu` extras
-        # (`pyproject.toml`), not in `dependencies` -- a bare `uv sync --locked` would
-        # *remove* them (they are not in the base dependency set at all) and every line
-        # after it would crash with `ModuleNotFoundError` before rerunning anything. The
-        # extra this run actually used was captured once, at run time, by
-        # `dsio.runs.provenance.capture_env` (see `EnvState.extra`); replaying with the
-        # same extra is what makes this script self-contained on a fresh clone.
-        lines += ["", f"uv sync --locked --extra {record.env.extra}", ""]
-    else:
-        lines += [
-            "",
-            'echo "WARNING: could not determine which cpu/gpu extra this run used;'
-            ' pass one explicitly, e.g. uv sync --locked --extra cpu" >&2',
-            "uv sync --locked",
-            "",
-        ]
+    lines += ["", "uv sync --locked", ""]
     if record.command:
         lines.append(" ".join(_quote(part) for part in record.command))
     else:

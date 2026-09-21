@@ -1,8 +1,8 @@
 """`execute()` seeds every RNG it can touch, so calling it directly is reproducible.
 
-`dsio run` (``src/dsio/cli/run_cmd.py``) already called ``seed_everything`` before
-starting a run, but nothing seeded a *direct* call to ``execute()`` — which is what every
-runner test, and any caller that is not going through the CLI, actually does. A backbone's
+Earlier orchestration called ``seed_everything`` before starting a run, but nothing seeded
+a *direct* call to ``execute()`` — which is what every runner test and project-owned flow
+actually does. A backbone's
 weights are drawn from torch's global RNG at construction time, so two runs of the same
 config used to disagree unless something upstream had happened to seed it. That silent gap
 is what ``execute`` seeding at its own entry closes — this is dispatcher-level behaviour
@@ -111,8 +111,8 @@ def _dirty_ambient_rng() -> None:
 
 
 def test_execute_is_deterministic_for_the_same_config_and_seed(corpus: Path) -> None:
-    """The headline promise — same config, same seed, identical metrics — for a caller
-    that never goes through `dsio run`. A freshly constructed backbone is the thing that
+    """The headline promise — same config, same seed, identical metrics — for a direct
+    caller. A freshly constructed backbone is the thing that
     actually exercises the gap: its weights draw from torch's global RNG with no seed of
     its own, so they only reproduce if something upstream seeded it — and nothing here
     calls `seed_everything` directly, only `execute()` does."""

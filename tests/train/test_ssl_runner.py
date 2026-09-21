@@ -171,7 +171,7 @@ def test_preflight_resolves_probe_only_names(corpus: Path) -> None:
 
 def test_preflight_rejects_a_fold_the_split_family_does_not_declare(corpus: Path) -> None:
     """The same guard `run_ssl_pretrain` has at the top of the runner, reached here from
-    the CLI's pre-flight step instead -- both call `require_fold`, so both name the same
+    the explicit preflight instead -- both call `require_fold`, so both name the same
     missing fold with `SplitFile.fold`'s own message."""
     config = RunConfig(name="p", task=pretrain_task(corpus, fold=7))
     with pytest.raises(Exception, match=r"split 'k3' has no fold 7; it defines folds"):

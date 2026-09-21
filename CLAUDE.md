@@ -1,11 +1,12 @@
 # DSio
 
-DSio is a reproducible ML/DL experimentation spine: one package rooted at `src/dsio/`,
-with one root `pyproject.toml`, that runs its own test suite from a fresh clone.
+DSio is a versioned ML/DL experimentation library rooted at `src/dsio/`. Consumer projects
+pin it as a dependency and define their workflows directly with Prefect.
 
-It is **not** a Copier template — that model was reversed by
-`docs/adr/0018-a-repository-not-a-template.md`. Projects clone the repository and pull
-spine improvements with `git fetch upstream && git merge upstream/main`.
+DSio owns reusable pipeline components, not project DAGs, deployment, scheduling, or project
+lifecycle. The current boundary is defined by
+`docs/adr/0019-versioned-library-with-project-owned-prefect-flows.md` and
+`docs/superpowers/specs/2026-09-18-generic-experiment-spine.md`.
 
 ## Company context
 

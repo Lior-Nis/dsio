@@ -11,7 +11,7 @@ keeps that scratch space contained the same way `stores/` already needs to be.
 The same isolation covers MLflow: pointing `MLFLOW_TRACKING_URI` at a tmp_path isolates
 saved artifacts between tests. `dsio.train.tracking.require_mlflow` makes every
 torch/ssl_pretrain run
-fail immediately if MLflow is unreachable, and `uv run --extra cpu pytest` must still pass
+fail immediately if MLflow is unreachable, and `uv run pytest` must still pass
 on a machine with nothing running (the plan's "the suite must not need Docker"
 constraint) -- so every test, by default, is pointed at a `file:` tracking URI under its
 own `tmp_path` rather than the compose stack's `localhost:5000`. That makes the *default*

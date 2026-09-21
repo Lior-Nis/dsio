@@ -3,16 +3,20 @@ name = "dsio"
 version = "0.1.0"
 description = "Reproducible ML/DL experimentation spine: config, data staging, splits, runs, evaluation."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 license = { text = "MIT" }
 
-# Spine only. Heavy modality dependencies live in optional groups so a fresh clone
-# installs in seconds and a Kaggle kernel can install just what it needs.
+# One published spine. Consumer projects pin DSio and choose the appropriate PyTorch
+# wheel/index in their own lockfile; DSio's runtime contract is not split into backends.
 dependencies = [
     "pydantic>=2.12",
-    "typer>=0.15",
     "pyyaml>=6.0",
     "numpy>=2.1",
+    "prefect>=3.8,<4",
+    "torch>=2.7,<3",
+    "lightning>=2.5,<3",
+    "torchmetrics>=1.7,<2",
+    "mlflow>=3,<4",
 ]
 
 [project.optional-dependencies]
@@ -26,40 +30,12 @@ tabular = ["scikit-learn>=1.9"]
 # `eval/contract.py`'s "Why npz and not parquet"). Kept as its own extra for a project
 # that wants to convert `oof.npz` to parquet itself, not because dsio needs it.
 data = ["pyarrow>=18"]
-# torch ships one wheel per accelerator, and they cannot coexist in a resolution.
-# CI has no GPU and wants the small CPU wheel; a local Blackwell card (sm_120) needs
-# a CUDA build or it fails at model-build time with "no kernel image is available
-# for execution on the device". Declaring both as conflicting extras lets one
-# lockfile serve both: `uv sync --extra cpu` in CI, `uv sync --extra gpu` locally.
-# Both carry the full Lightning stack (not just torch) so that neither extra alone,
-# nor the dev group, leaves a torch-needing import unresolved: a bare `uv run` with
-# no extra selected must fail loudly on a missing import, not silently fall back to
-# downloading a multi-gigabyte default wheel.
-#
-# `mlflow-skinny` lives here too, not in `dependencies`: decision 7 makes MLflow a
-# run's hard dependency, but the only code that ever imports it is `dsio.train.tracking`
-# and the two runner modules (`torch_task.py`, `ssl_task.py`), which already require
-# torch and lightning at module import time -- so a clone with neither extra selected was
-# never going to be able to run a training job anyway. Bundling it here, rather than in
-# `dependencies`, is what keeps a bare `uv sync` and `tests/data/` torch-free (and now
-# MLflow-free) exactly as before; `dsio.train.load_runners()` already tolerates a runner
-# module failing to import, so an environment missing this extra just skips registering
-# these runners, same as it does today for missing torch. `-skinny` over the full
-# `mlflow` package: only the tracking client is needed locally (the server itself runs
-# from the official image in `docker/mlflow`, which already bundles full `mlflow`), and
-# skinny drops the server/UI/flask/sqlalchemy/gunicorn dependency chain that a training
-# process never touches.
-cpu = ["torch>=2.7", "lightning>=2.5", "mlflow-skinny>=2.19"]
-gpu = ["torch>=2.7", "lightning>=2.5", "mlflow-skinny>=2.19"]
-
-[project.scripts]
-dsio = "dsio.cli.main:main"
-
-# dsio is one package, developed and tested in place: `uv sync --extra cpu && uv run pytest`.
+# DSio is one package, developed and tested in place.
 # There is no separate generated project and no workspace; this dev group is the only one.
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    "packaging>=24.2",
     "ruff>=0.9",
     "mypy>=1.14",
     "import-linter>=2.1",
@@ -67,24 +43,15 @@ dev = [
     "scikit-learn>=1.9",
 ]
 
-# torch and lightning are declared only in the cpu/gpu extras (above), not here.
-# A bare `uv sync` with no extra selected must leave torch and lightning uninstalled,
-# so that a bare `uv run pytest` fails loudly on ModuleNotFoundError instead of
-# silently resolving an unpinned, CUDA-bundled default wheel for the "no extra" fork.
-[tool.uv]
-conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
-
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-# No index is declared for the gpu extra: the default PyPI torch wheel for this
-# platform is already CUDA-enabled (2.13.0+cu130, newer than the pytorch-cu128
-# index's 2.11.0+cu128), so pinning to a specific CUDA index would make the gpu
-# extra resolve an *older* torch than the unpinned default — the wrong direction.
+# Repository tests run against the CPU wheel. This uv-only source is not emitted into
+# wheel metadata; consuming projects select their own accelerator build.
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu", extra = "cpu" }]
+torch = { index = "pytorch-cpu" }
 
 [tool.ruff]
 line-length = 100
@@ -116,12 +83,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/dsio"]
 
+[tool.hatch.build.targets.sdist]
+include = ["/src/dsio", "/pyproject.toml", "/README.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # `live` tests need the compose stack (`docker compose up -d`; compose.yaml) and are
-# excluded by default so `uv run --extra cpu pytest` keeps passing on a machine with
+# excluded by default so `uv run pytest` keeps passing on a machine with
 # nothing running -- the plan's "the suite must not need Docker" constraint. Run them
-# explicitly with `uv run --extra cpu pytest -m live`.
+# explicitly with `uv run pytest -m live`.
 markers = [
     "live: needs the local MLflow/Postgres compose stack; excluded by default",
 ]
@@ -177,7 +147,6 @@ forbidden_modules = [
     "dsio.train",
     "dsio.runs",
 
-    "dsio.cli",
 ]
 
 [[tool.importlinter.contracts]]
@@ -207,6 +176,5 @@ source_modules = [
     "dsio.train",
     "dsio.runs",
 
-    "dsio.cli",
 ]
 forbidden_modules = ["dsio.testing"]

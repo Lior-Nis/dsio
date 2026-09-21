@@ -411,7 +411,7 @@ def test_require_mlflow_probes_the_store_not_merely_liveness() -> None:
 @pytest.mark.live
 def test_require_mlflow_succeeds_against_the_running_compose_stack() -> None:
     """Needs `docker compose up -d` (compose.yaml). Excluded by default; run with
-    `uv run --extra cpu pytest -m live`."""
+    `uv run pytest -m live`."""
     assert require_mlflow("http://localhost:5000") == "http://localhost:5000"
 
 

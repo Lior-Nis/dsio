@@ -1,6 +1,6 @@
 # 17. The process boundary is the fold boundary
 
-Status: accepted (2026-08-20)
+Status: superseded by ADR 0019 (2026-09-18)
 Supersedes: ADR 0008 ("The fold loop owns comparison") in its mechanism, and ADR 0012 ("The
 ledger is the resume state") entirely.
 Implemented: yes, by Plan 3a. `SplitFile` (`splits/models.py`) holds every fold of a family

@@ -154,7 +154,7 @@ def test_an_invalid_name_is_refused_before_anything_is_written() -> None:
 @pytest.mark.live
 def test_live_round_trip_against_the_compose_stack() -> None:
     """The `file:` backend cannot reproduce a proxied-artifact-store failure. Needs
-    `docker compose up -d`; run with `uv run --extra cpu pytest -m live`."""
+    `docker compose up -d`; run with `uv run pytest -m live`."""
     import time
 
     client = MlflowClient(tracking_uri="http://localhost:5000")

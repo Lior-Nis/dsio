@@ -19,16 +19,30 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --locked --extra cpu
+        run: uv sync --locked
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Distribution and consumer-flow contracts
+        run: >-
+          uv run pytest -q
+          tests/test_distribution.py
+          tests/test_built_distribution.py
+          tests/test_project_flow.py
 
       - name: Tests
-        run: uv run --extra cpu pytest
+        run: >-
+          uv run pytest
+          --ignore=tests/test_distribution.py
+          --ignore=tests/test_built_distribution.py
+          --ignore=tests/test_project_flow.py
 
       - name: Lint
-        run: uv run --extra cpu ruff check .
+        run: uv run ruff check .
 
       - name: Types
-        run: uv run --extra cpu mypy
+        run: uv run mypy
 
       - name: Import contracts
-        run: uv run --extra cpu lint-imports
+        run: uv run lint-imports

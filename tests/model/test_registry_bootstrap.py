@@ -3,9 +3,8 @@
 ``dsio.model.__init__`` imports :mod:`dsio.model.components` purely for its side effect of
 populating ``BACKBONES``/``HEADS``/``LOSSES`` via their decorators. Nothing in that
 module is otherwise used, so it is one accidental docstring-only rewrite away from
-silently emptying every registry: ``run_cmd._bootstrap`` would still succeed, but
-every torch/ssl_pretrain preset would fail at model-build time with "unknown
-backbone/head/loss".
+silently emptying every registry: component assembly would then fail at model-build time
+with "unknown backbone/head/loss".
 
 This can't be checked in-process: sibling test modules (``tests/model/test_module.py``,
 ``tests/model/test_components.py``, ``tests/train/test_callbacks.py``) import
@@ -28,7 +27,7 @@ pytest.importorskip("lightning")
 
 def test_importing_model_package_populates_registries() -> None:
     """Importing ``dsio.model`` alone (not ``dsio.model.components``) must register the
-    built-in backbones, heads, and losses. This is what every preset relies on."""
+    built-in backbones, heads, and losses. Generic model assembly relies on this."""
     probe = (
         "import dsio.model as model_pkg\n"
         "import dsio.model.registry as r\n"

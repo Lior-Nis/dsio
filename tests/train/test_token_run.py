@@ -1,4 +1,4 @@
-"""A token corpus must reach the model through `dsio run`, not only through Python.
+"""A token corpus must reach the model through the shared runner path.
 
 `payload_dtype` landed on `WindowDataset` but not on `TorchTask`, so a token-id corpus
 could be trained from a notebook and not from the entry point. That is not a smaller
@@ -152,7 +152,7 @@ def test_the_model_receives_integer_ids_through_the_runner(
 
 
 def test_a_token_corpus_trains_through_the_runner(token_corpus: Path) -> None:
-    """`execute` is the path `dsio run` takes, so this is the claim "NLP works" rests on.
+    """`execute` is the shared runner path, so this is the claim "NLP works" rests on.
 
     The dtype is the test above; this one is the plumbing around it -- provenance, the
     fold's predictions, the metrics a pooled comparison later reads.

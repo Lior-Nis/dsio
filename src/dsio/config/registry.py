@@ -7,7 +7,7 @@ Renaming a registered class is also caught by mypy at every use site, which a st
 target never is.
 
 Registries hold values, not types, so the same machinery serves component classes
-(``Registry[type[TaskConfig]]``) and preset functions (``Registry[PresetFn]``).
+(``Registry[type[TaskConfig]]``) and reusable component factories.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ _ALL_REGISTRIES: dict[str, Registry[Any]] = {}
 class UnknownComponentError(KeyError):
     """Raised when a name is not registered in a namespace.
 
-    Carries a rendered message rather than a bare key so the CLI can surface it directly;
+    Carries a rendered message rather than a bare key so callers can surface it directly;
     ``KeyError.__str__`` would otherwise wrap the message in its own quotes.
     """
 

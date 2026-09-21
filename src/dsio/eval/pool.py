@@ -1,8 +1,8 @@
 """Pool the per-fold predictions that N single-fold runs wrote.
 
-Decision 6 made the process boundary the fold boundary: `dsio run` trains one config
-against one fold and writes one ``predictions.npz``. Cross-validation is running the entry
-point N times. Nothing then holds all the folds at once -- so the checks the in-process
+The legacy runner trains one config against one fold and writes one ``predictions.npz``.
+Cross-validation invokes that runner N times from a project-owned flow. Nothing then holds
+all the folds at once -- so the checks the in-process
 fold loop used to make while accumulating have to be made here instead, when the files are
 read back.
 
