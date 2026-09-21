@@ -67,6 +67,7 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     }
 
     assert "dsio/__init__.py" in members
+    assert "dsio/tracking/__init__.py" in members
     assert set(requirements) == set(REQUIRED_DEPENDENCIES)
     for name, expected_specifier in REQUIRED_DEPENDENCIES.items():
         requirement = requirements[name]
@@ -228,6 +229,7 @@ print(json.dumps({
         "PREFECT_SERVER_ANALYTICS_ENABLED": "false",
         "DO_NOT_TRACK": "1",
         "MLFLOW_TRACKING_URI": f"file:{mlflow_store}",
+        "MLFLOW_ALLOW_FILE_STORE": "true",
         "DSIO_IMPORT_ENV_ROOT": str(environment),
         "DSIO_IMPORT_STATE_ROOT": str(state),
         "PYTHONDONTWRITEBYTECODE": "1",
@@ -256,18 +258,28 @@ print(json.dumps({
     flow_probe = """
 from prefect import flow, task
 from prefect.testing.utilities import prefect_test_harness
+from mlflow import MlflowClient
 from dsio.contracts import sha256_of
+from dsio.tracking import experiment
 
 @task
-def identify_dataset(dataset):
-    return sha256_of(dataset)
+def identify_dataset(dataset, parent_run_id):
+    return sha256_of(dataset), parent_run_id
 
 @flow
 def project_flow():
-    return identify_dataset({'name': 'algae', 'revision': 1})
+    with experiment('installed-wheel-flow') as parent:
+        digest, observed_parent_id = identify_dataset(
+            {'name': 'algae', 'revision': 1}, parent.info.run_id
+        )
+        assert digest == '2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556'
+        assert observed_parent_id == parent.info.run_id
+        return digest, parent.info.run_id
 
 with prefect_test_harness():
-    print('DSIO_RESULT=' + project_flow())
+    digest, parent_run_id = project_flow()
+print('DSIO_RESULT=' + digest)
+print('DSIO_PARENT_STATUS=' + MlflowClient().get_run(parent_run_id).info.status)
 """
     flow_result = subprocess.run(
         [str(python), "-I", "-B", "-c", flow_probe],
@@ -278,3 +290,4 @@ with prefect_test_harness():
         capture_output=True,
     )
     assert f"DSIO_RESULT={EXPECTED_DIGEST}" in flow_result.stdout
+    assert "DSIO_PARENT_STATUS=FINISHED" in flow_result.stdout

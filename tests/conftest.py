@@ -38,10 +38,14 @@ from dsio.runs.record import RUNS_ROOT_ENV
 
 @pytest.fixture(autouse=True)
 def _isolated_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import mlflow
+
     monkeypatch.setenv(RUNS_ROOT_ENV, str(tmp_path / "runs"))
     monkeypatch.setenv(DATA_ROOT_ENV, str(tmp_path / "stores"))
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"file:{tmp_path / 'mlruns'}")
+    tracking_uri = f"file:{tmp_path / 'mlruns'}"
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
     monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
+    mlflow.set_tracking_uri(tracking_uri)
 
 
 @pytest.fixture
