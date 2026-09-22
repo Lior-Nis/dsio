@@ -61,7 +61,7 @@ development_status:
 
   epic-3: in-progress
   3-1-train-a-task-through-the-exact-dsio-lightning-classes: done
-  3-2-configure-training-with-native-importable-components: in-progress
+  3-2-configure-training-with-native-importable-components: done
   3-3-apply-reproducible-stochastic-augmentation-on-the-accelerator: backlog
   3-4-reject-unsupported-training-configurations-before-execution: backlog
   epic-3-retrospective: optional

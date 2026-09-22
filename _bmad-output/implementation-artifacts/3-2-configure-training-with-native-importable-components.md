@@ -4,7 +4,7 @@ baseline_commit: fddc018
 
 # Story 3.2: Configure Training with Native Importable Components
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -34,7 +34,7 @@ so that tasks vary without forks, subclasses, or a custom plugin framework.
 - [x] Make full component configuration first-class provenance (AC: 1, 5)
   - [x] Accept canonical component mappings in execution identity and MLflow provenance.
   - [x] Prove reference and parameter changes alter identity and are logged exactly.
-- [ ] Migrate current consumers and pass full quality and independent review gates (AC: 1-6)
+- [x] Migrate current consumers and pass full quality and independent review gates (AC: 1-6)
 
 ## Dev Notes
 
@@ -68,8 +68,9 @@ Codex (GPT-5)
 
 - 2026-09-22: Created from merged Story 3.1 at `fddc018`; constrained the design to one import resolver, plain mappings, native Lightning/PyTorch structures, and existing provenance.
 - 2026-09-22: Removed the model-component and mask registries; current supervised, SSL, token, label, optimizer, and scheduler consumers now use ordinary import references.
-- 2026-09-22: Candidate release gate passed: 859 tests passed (3 deselected), locked sync, builds, Ruff, mypy, root-import inertia, and diff checks.
+- 2026-09-22: Final release gate passed on `7af0ed2`: 8 distribution/consumer-flow tests and 874 remaining tests passed (3 live tests deselected), with locked sync, builds, Ruff, mypy, import contracts, and diff checks clean.
 - 2026-09-22: Native TorchMetrics values are accepted as optional objective metrics and passed directly to `LightningModule.log`; loss remains a scalar tensor.
+- 2026-09-22: Blind, edge-case, and acceptance reviewers approved exact candidate `7af0ed2` after provenance, scheduler, and lazy TorchMetrics boundary fixes.
 
 ### Completion Notes List
 
@@ -77,12 +78,14 @@ Codex (GPT-5)
 - `DsioModule` validates importability before training and returns native optimizer or Lightning optimizer/scheduler structures.
 - Full component mappings are hashed and stored unchanged in MLflow provenance; references and parameters independently affect identity.
 - Existing training configs now name models, objectives, transforms, masks, labels, optimizers, and schedulers by import path.
+- Secret and ephemeral component parameters are removed before access or canonical validation; scheduler mappings and registered TorchMetrics are validated against Lightning's native runtime contracts.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/3-2-configure-training-with-native-importable-components.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `README.md`
+- `src/dsio/config/__init__.py`
 - `src/dsio/config/components.py`
 - `src/dsio/config/registry.py`
 - `src/dsio/data/labels.py`
@@ -113,3 +116,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 3.2 and started implementation.
 - 2026-09-22: Implemented native importable component configuration and passed the complete candidate gate.
+- 2026-09-22: Closed all independent-review findings and completed Story 3.2 on exact candidate `7af0ed2`.
