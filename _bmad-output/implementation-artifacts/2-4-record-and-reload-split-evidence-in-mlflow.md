@@ -86,7 +86,8 @@ Codex (GPT-5)
 - 2026-09-22: Implemented direct `runs:/` record/load composition with native `MetaDataset`/`DatasetInput` lineage, content-addressed manifest artifacts, provenance-aware source reuse, and concrete split validation.
 - 2026-09-22: Local gate passed: 768 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
 - 2026-09-22: Independent review exposed MLflow's silent dataset-input deduplication, a source lifecycle race, ambiguous source lineage, and unnormalized source serialization failures; fixed each with exact persisted-input checks and refreshed source validation.
-- 2026-09-22: Post-review gate passed: 773 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks. The repository-wide Ruff format check remains outside CI and reports pre-existing formatting drift; both changed Python files pass formatting.
+- 2026-09-22: Post-review gate passed: 774 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks. The repository-wide Ruff format check remains outside CI and reports pre-existing formatting drift; both changed Python files pass formatting.
+- 2026-09-22: Edge re-review found that a manifest URI could already belong to another native dataset identity; collision checks now cover both MLflow dataset identity and immutable manifest URI on source and consumer Runs.
 
 ### Completion Notes List
 

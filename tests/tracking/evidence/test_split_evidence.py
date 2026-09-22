@@ -187,7 +187,7 @@ def test_recording_rejects_mlflow_dataset_input_deduplication(tmp_path: Path) ->
         first,
         source=tmp_path / "cohort.store",
     )
-    with pytest.raises(TrackingError, match="different split lineage"):
+    with pytest.raises(TrackingError, match="conflicting split lineage"):
         record_split_evidence(
             run_id,
             examples,
@@ -198,6 +198,39 @@ def test_recording_rejects_mlflow_dataset_input_deduplication(tmp_path: Path) ->
     inputs = client.get_run(run_id).inputs.dataset_inputs
     assert len(inputs) == 1
     assert _tags(inputs[0])["dsio.split.manifest_uri"] == first_uri
+
+
+def test_recording_rejects_a_manifest_uri_bound_to_another_dataset(tmp_path: Path) -> None:
+    client = MlflowClient()
+    experiment_id = _experiment(client)
+    run_id = _run(client, experiment_id, "split")
+    examples = _examples()
+    manifest = _manifest(examples)
+    uri = evidence_uri(run_id, f"split-evidence/{manifest.digest}/manifest.yaml")
+    client.log_inputs(
+        run_id,
+        datasets=[
+            DatasetInput(
+                Dataset("other", "other", "local", '{"uri": "other.store"}'),
+                [
+                    InputTag("mlflow.data.context", "split"),
+                    InputTag("dsio.split.manifest_uri", uri),
+                    InputTag("dsio.split.manifest_digest", manifest.digest),
+                ],
+            )
+        ],
+    )
+
+    with pytest.raises(TrackingError, match="conflicting split lineage"):
+        record_split_evidence(
+            run_id,
+            examples,
+            manifest,
+            source=tmp_path / "cohort.store",
+        )
+
+    assert len(client.get_run(run_id).inputs.dataset_inputs) == 1
+    assert [entry.path for entry in client.list_artifacts(run_id)] == ["provenance.json"]
 
 
 def test_recording_normalizes_dataset_source_serialization_failures(tmp_path: Path) -> None:
@@ -393,12 +426,36 @@ def test_reuse_rejects_mlflow_dataset_input_deduplication(tmp_path: Path) -> Non
     consumer_run_id = _run(client, experiment_id, "train")
 
     load_split_evidence(first_uri, examples, consumer_run_id=consumer_run_id)
-    with pytest.raises(TrackingError, match="different split lineage"):
+    with pytest.raises(TrackingError, match="conflicting split lineage"):
         load_split_evidence(second_uri, examples, consumer_run_id=consumer_run_id)
 
     inputs = client.get_run(consumer_run_id).inputs.dataset_inputs
     assert len(inputs) == 1
     assert _tags(inputs[0])["dsio.split.manifest_uri"] == first_uri
+
+
+def test_reuse_rejects_a_manifest_uri_bound_to_another_dataset(tmp_path: Path) -> None:
+    client, experiment_id, source_run_id, examples, manifest, uri = _recorded_source(tmp_path)
+    consumer_run_id = _run(client, experiment_id, "train")
+    client.log_inputs(
+        consumer_run_id,
+        datasets=[
+            DatasetInput(
+                Dataset("other", "other", "local", '{"uri": "other.store"}'),
+                [
+                    InputTag("mlflow.data.context", "split_reuse"),
+                    InputTag("dsio.split.manifest_uri", uri),
+                    InputTag("dsio.split.manifest_digest", manifest.digest),
+                    InputTag("dsio.split.source_run_id", source_run_id),
+                ],
+            )
+        ],
+    )
+
+    with pytest.raises(TrackingError, match="conflicting split lineage"):
+        load_split_evidence(uri, examples, consumer_run_id=consumer_run_id)
+
+    assert len(client.get_run(consumer_run_id).inputs.dataset_inputs) == 1
 
 
 def test_source_lifecycle_change_during_load_leaves_consumer_unlinked(

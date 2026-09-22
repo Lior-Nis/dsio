@@ -246,29 +246,30 @@ def _source_dataset(run: Run, manifest: SplitFile, manifest_uri: str) -> Dataset
 
 def _preflight_input(run: Run, expected: DatasetInput) -> bool:
     """Reject MLflow's silent dataset-input deduplication before a write."""
-    existing = _dataset_inputs(run)
-    same_dataset = [
-        item for item in existing if _same_dataset_identity(item.dataset, expected.dataset)
-    ]
-    if not same_dataset:
+    collisions = _colliding_inputs(run, expected)
+    if not collisions:
         return False
-    if all(_same_input(item, expected) for item in same_dataset):
+    if all(_same_input(item, expected) for item in collisions):
         return True
-    raise TrackingError(
-        f"MLflow Run {run.info.run_id!r} already links this dataset with different split lineage."
-    )
+    raise TrackingError(f"MLflow Run {run.info.run_id!r} already has conflicting split lineage.")
 
 
 def _require_persisted_input(run: Run, expected: DatasetInput) -> None:
-    same_dataset = [
-        item
-        for item in _dataset_inputs(run)
-        if _same_dataset_identity(item.dataset, expected.dataset)
-    ]
-    if not same_dataset or any(not _same_input(item, expected) for item in same_dataset):
+    collisions = _colliding_inputs(run, expected)
+    if not collisions or any(not _same_input(item, expected) for item in collisions):
         raise TrackingError(
             f"MLflow did not persist the exact split lineage on Run {run.info.run_id!r}."
         )
+
+
+def _colliding_inputs(run: Run, expected: DatasetInput) -> list[DatasetInput]:
+    expected_uri = _input_tags(expected).get(_MANIFEST_URI)
+    return [
+        item
+        for item in _dataset_inputs(run)
+        if _same_dataset_identity(item.dataset, expected.dataset)
+        or _input_tags(item).get(_MANIFEST_URI) == expected_uri
+    ]
 
 
 def _dataset_inputs(run: Run) -> list[DatasetInput]:
