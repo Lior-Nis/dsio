@@ -4,26 +4,6 @@ from __future__ import annotations
 
 import ast
 
-_COMPONENT_ROLES = frozenset(
-    {
-        "callback",
-        "collator",
-        "component",
-        "dataset",
-        "factory",
-        "handler",
-        "loss",
-        "metric",
-        "model",
-        "objective",
-        "plugin",
-        "runner",
-        "sampler",
-        "splitter",
-        "transform",
-    }
-)
-
 
 def initialized_registration(
     statement: ast.Assign | ast.AnnAssign, tables: set[str]
@@ -39,15 +19,4 @@ def initialized_registration(
     if not elements:
         return False
     targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-    names = [target.id for target in targets if isinstance(target, ast.Name)]
-    explicit = any(
-        name.casefold() in {"catalog", "registries", "registry"}
-        or name.casefold().endswith(("_catalog", "_registries", "_registry"))
-        for name in names
-    )
-    component_value = any(
-        isinstance(candidate, ast.Name) and candidate.id.casefold() in _COMPONENT_ROLES
-        for element in elements
-        for candidate in ast.walk(element)
-    )
-    return any(name in tables for name in names) and (explicit or component_value)
+    return any(isinstance(target, ast.Name) and target.id in tables for target in targets)

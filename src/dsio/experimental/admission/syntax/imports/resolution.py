@@ -67,10 +67,18 @@ def aliases_at(
     for index, scope in enumerate(scopes):
         _remove_parameters(scope, resolved)
         cutoff = _position(node) if index == len(scopes) - 1 else (float("inf"), 0)
-        for event in sorted(_scope_events(scope), key=_position):
+        for event, conditional in sorted(
+            _scope_events(scope), key=lambda item: _position(item[0])
+        ):
             if _position(event) > cutoff:
                 break
-            _apply_alias_event(event, resolved, module, is_package=is_package)
+            _apply_alias_event(
+                event,
+                resolved,
+                module,
+                is_package=is_package,
+                conditional=conditional,
+            )
     return resolved
 
 
@@ -103,34 +111,58 @@ def _remove_parameters(
         return
     parameters = (*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs)
     for parameter in parameters:
-        resolved.pop(parameter.arg, None)
+        resolved[parameter.arg] = f"<local>.{parameter.arg}"
     if scope.args.vararg is not None:
-        resolved.pop(scope.args.vararg.arg, None)
+        resolved[scope.args.vararg.arg] = f"<local>.{scope.args.vararg.arg}"
     if scope.args.kwarg is not None:
-        resolved.pop(scope.args.kwarg.arg, None)
+        resolved[scope.args.kwarg.arg] = f"<local>.{scope.args.kwarg.arg}"
 
 
 def _scope_events(
     scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
-) -> tuple[ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign, ...]:
-    events: list[ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign] = []
+) -> tuple[tuple[ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign, bool], ...]:
+    events: list[
+        tuple[ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign, bool]
+    ] = []
 
-    def collect(node: ast.AST) -> None:
+    def collect(node: ast.AST, *, conditional: bool) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(
                 child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
             ):
                 continue
+            child_conditional = conditional or isinstance(
+                child,
+                ast.If
+                | ast.For
+                | ast.AsyncFor
+                | ast.While
+                | ast.Try
+                | ast.TryStar
+                | ast.Match,
+            )
             if isinstance(child, ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign):
-                events.append(child)
-            collect(child)
+                events.append((child, conditional))
+            collect(child, conditional=child_conditional)
 
     for statement in scope.body:
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             continue
         if isinstance(statement, ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign):
-            events.append(statement)
-        collect(statement)
+            events.append((statement, False))
+        collect(
+            statement,
+            conditional=isinstance(
+                statement,
+                ast.If
+                | ast.For
+                | ast.AsyncFor
+                | ast.While
+                | ast.Try
+                | ast.TryStar
+                | ast.Match,
+            ),
+        )
     return tuple(dict.fromkeys(events))
 
 
@@ -140,6 +172,7 @@ def _apply_alias_event(
     module: str,
     *,
     is_package: bool,
+    conditional: bool,
 ) -> None:
     if isinstance(event, ast.Import):
         for imported in event.names:
@@ -163,10 +196,19 @@ def _apply_alias_event(
     for target in targets:
         if not isinstance(target, ast.Name):
             continue
+        current = resolved.get(target.id, "")
+        if conditional and _sensitive_alias(current) and not _sensitive_alias(name):
+            continue
         if name:
             resolved[target.id] = name
         else:
             resolved.pop(target.id, None)
+
+
+def _sensitive_alias(name: str) -> bool:
+    return name in {"__builtins__", "__import__", "compile", "eval", "exec"} or name.startswith(
+        ("builtins", "dsio", "importlib", "pkgutil", "pydoc", "runpy")
+    )
 
 
 def _position(node: ast.AST) -> tuple[float, int]:

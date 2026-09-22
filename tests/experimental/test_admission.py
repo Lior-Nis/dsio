@@ -560,6 +560,18 @@ def test_project_identity_in_short_circuit_control_is_rejected(tmp_path: Path) -
         assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
 
+def test_definition_time_and_assignment_expression_project_control_is_rejected(
+    tmp_path: Path,
+) -> None:
+    for source in (
+        "def run(value=(special() if project else generic())):\n    return value\n",
+        "class Model(Special if project else Generic):\n    pass\n",
+        "(p := project)\nif p:\n    run()\n",
+        "p = signal_kind\np += project\nif p:\n    run()\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
 def test_project_control_inside_contexts_and_assertions_is_rejected(tmp_path: Path) -> None:
     for source in (
         "def run(project, context):\n"
@@ -567,6 +579,9 @@ def test_project_control_inside_contexts_and_assertions_is_rejected(tmp_path: Pa
         "        if project:\n"
         "            train()\n",
         "def validate(project):\n    assert project != 'pulse'\n",
+        "with project_context(project) as selected:\n"
+        "    if selected:\n"
+        "        run()\n",
     ):
         assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
@@ -607,6 +622,8 @@ def test_descriptive_candidate_registry_names_are_rejected(tmp_path: Path) -> No
         "CATALOG = {}\nCATALOG['x'] = component\n",
         "CATALOG = {}\nCATALOG |= {'x': component}\n",
         "def component(): pass\nCOMPONENT_REGISTRY = {'x': component}\n",
+        "HANDLERS = {'x': handle_x}\n",
+        "FACTORIES = {'linear': build_linear}\n",
     ):
         assert any(
             message.startswith("runtime-registration:")
@@ -615,20 +632,36 @@ def test_descriptive_candidate_registry_names_are_rejected(tmp_path: Path) -> No
 
 
 def test_escaping_local_registry_mutator_is_rejected(tmp_path: Path) -> None:
-    source = (
-        "def make_registry():\n"
-        "    handlers = {}\n"
-        "    def enroll(name, component):\n"
-        "        handlers[name] = component\n"
-        "    return enroll\n"
-    )
-    assert any(
-        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
-    )
+    for mutation, initializer in (
+        ("handlers[name] = component", "{}"),
+        ("handlers.update({name: component})", "{}"),
+        ("handlers.append(component)", "[]"),
+    ):
+        source = (
+            "def make_registry():\n"
+            f"    handlers = {initializer}\n"
+            "    def enroll(name, component):\n"
+            f"        {mutation}\n"
+            "    return enroll\n"
+        )
+        assert any(
+            message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
+        )
 
 
 def test_domain_function_named_register_is_not_a_registry(tmp_path: Path) -> None:
     source = "def register(reference, moving):\n    return align(reference, moving)\n"
+    assert _audit(tmp_path, source) == ()
+
+
+def test_numeric_metric_accumulator_is_not_a_component_registry(tmp_path: Path) -> None:
+    source = (
+        "def make_accumulator():\n"
+        "    metrics = {}\n"
+        "    def record(name: str, value: float):\n"
+        "        metrics[name] = value\n"
+        "    return record\n"
+    )
     assert _audit(tmp_path, source) == ()
 
 
@@ -655,6 +688,35 @@ def test_dynamic_import_aliases_follow_order_and_parameter_shadowing(tmp_path: P
         "    return loader.import_module\n"
     )
     assert _audit(tmp_path, safe) == ()
+
+    conditional = (
+        "import importlib as loader\n"
+        "if use_safe:\n"
+        "    loader = safe_loader\n"
+        "loader.import_module(module_name)\n"
+    )
+    assert any(message.startswith("dependency:") for message in _audit(tmp_path, conditional))
+
+    registry = (
+        "import dsio.eval.metrics as metrics\n"
+        "if use_safe:\n"
+        "    metrics = safe_module\n"
+        "metrics.METRICS.clear()\n"
+    )
+    assert any(
+        message.startswith("runtime-registration:") for message in _audit(tmp_path, registry)
+    )
+
+
+def test_builtin_api_names_can_be_lexically_shadowed(tmp_path: Path) -> None:
+    for source in (
+        "def choose(train, eval):\n"
+        "    return eval if eval is not None else train\n",
+        "import torch\n"
+        "def prepare(model, compile: bool = False):\n"
+        "    return torch.compile(model) if compile else model\n",
+    ):
+        assert _audit(tmp_path, source) == ()
 
 
 def test_registry_owner_module_imports_are_safe_until_dispatcher_access(

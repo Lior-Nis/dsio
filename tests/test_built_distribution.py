@@ -82,7 +82,10 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     assert "dsio/experimental/admission/syntax/imports/dynamic.py" in members
     assert "dsio/experimental/admission/syntax/imports/names.py" in members
     assert "dsio/experimental/admission/syntax/imports/resolution.py" in members
-    assert "dsio/experimental/admission/syntax/projects.py" in members
+    assert "dsio/experimental/admission/syntax/projects/__init__.py" in members
+    assert "dsio/experimental/admission/syntax/projects/consumers.py" in members
+    assert "dsio/experimental/admission/syntax/projects/contexts.py" in members
+    assert "dsio/experimental/admission/syntax/projects/identity.py" in members
     assert "dsio/experimental/admission/syntax/registries/__init__.py" in members
     assert "dsio/experimental/admission/syntax/registries/escaping.py" in members
     assert "dsio/experimental/admission/syntax/registries/initializers.py" in members

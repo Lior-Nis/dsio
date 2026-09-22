@@ -41,18 +41,9 @@ def _returns_mutator(
     for nested in function.body:
         if not isinstance(nested, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        if nested.name in returned and any(
-            isinstance(node, ast.Assign | ast.AnnAssign | ast.Delete)
-            and any(
-                _mutates(target, tables)
-                for target in (
-                    node.targets
-                    if isinstance(node, ast.Assign | ast.Delete)
-                    else [node.target]
-                )
-            )
-            for node in ast.walk(nested)
-        ):
+        if nested.name not in returned or not _component_registration_evidence(nested, tables):
+            continue
+        if any(_mutates_node(node, tables) for node in ast.walk(nested)):
             return True
     return False
 
@@ -88,3 +79,56 @@ def _mutates(target: ast.expr, tables: set[str]) -> bool:
         return False
     receiver = expression_name(target.value, {})
     return receiver.partition(".")[0] in tables or receiver.rpartition(".")[2] in tables
+
+
+def _mutates_node(node: ast.AST, tables: set[str]) -> bool:
+    if isinstance(node, ast.Assign | ast.AnnAssign | ast.Delete):
+        targets = node.targets if isinstance(node, ast.Assign | ast.Delete) else [node.target]
+        return any(_mutates(target, tables) for target in targets)
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return False
+    receiver = expression_name(node.func.value, {})
+    return (
+        receiver.partition(".")[0] in tables or receiver.rpartition(".")[2] in tables
+    ) and node.func.attr in {
+        "__setitem__",
+        "add",
+        "append",
+        "extend",
+        "insert",
+        "register",
+        "setdefault",
+        "update",
+    }
+
+
+def _component_registration_evidence(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, tables: set[str]
+) -> bool:
+    explicit_table = any(
+        name.casefold() in {"catalog", "registries", "registry"}
+        or name.casefold().endswith(("_catalog", "_registries", "_registry"))
+        for name in tables
+    )
+    component_roles = {
+        "callback",
+        "collator",
+        "component",
+        "dataset",
+        "factory",
+        "handler",
+        "loss",
+        "metric",
+        "model",
+        "objective",
+        "plugin",
+        "runner",
+        "sampler",
+        "splitter",
+        "transform",
+    }
+    parameters = {
+        argument.arg
+        for argument in (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
+    }
+    return explicit_table or bool(parameters & component_roles)
