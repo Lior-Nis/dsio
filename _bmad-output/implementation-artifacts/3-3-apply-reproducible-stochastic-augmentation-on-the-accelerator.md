@@ -4,7 +4,7 @@ baseline_commit: 32c42dea276a53ad0a32b8e6174f87f948e131bf
 
 # Story 3.3: Apply Reproducible Stochastic Augmentation on the Accelerator
 
-Status: review
+Status: done
 
 ## Story
 
@@ -80,6 +80,7 @@ Codex (GPT-5)
 - 2026-09-22: The complete repository suite passed with 855 tests and 3 live tests deselected; affected augmentation, SSL, callback, dataset, component, and module suites passed 120 tests.
 - 2026-09-22: First independent review blocked the candidate on retained identity-augmentor compatibility, in-place aliasing, length-one normalization, malformed metadata boundaries, test-split RankMe use, and silently accepted validation-dependent controls. All findings were reproduced and fixed test-first; 128 affected tests passed.
 - 2026-09-22: Second edge audit found the same length-one standard-deviation boundary in `Jitter`; a failing regression reproduced NaN views and population standard deviation closed it.
+- 2026-09-22: Exact candidate `0f6d303` passed the distribution/consumer gate (8 tests), remaining repository suite (856 tests; 3 live tests deselected), Ruff, mypy across 77 source files, and all three independent acceptance, blind, and edge reviews.
 
 ### Completion Notes List
 
@@ -115,3 +116,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 3.3 and started implementation.
 - 2026-09-22: Moved reproducible stochastic augmentation to the accelerator-side training step and removed the data-layer implementation.
+- 2026-09-22: Completed Story 3.3 after all release gates and the three-layer independent review approved the exact code candidate.
