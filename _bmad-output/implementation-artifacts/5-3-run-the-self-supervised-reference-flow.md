@@ -4,7 +4,7 @@ baseline_commit: af1bfaf
 
 # Story 5.3: Run the Self-Supervised Reference Flow
 
-Status: review
+Status: done
 
 ## Story
 
@@ -63,6 +63,7 @@ Codex (GPT-5)
 - 2026-09-22: Full gate passed: 1047 tests, Ruff, mypy, import contracts, and wheel/sdist build.
 - 2026-09-22: Three-layer review exposed a time/channel layout mismatch that made jitter a no-op, plus split-name and resolved-environment identity gaps. Added regressions and corrected all three.
 - 2026-09-22: Post-fix full gate passed: 1048 tests, Ruff, mypy, import contracts, wheel/sdist build, and copied-consumer wheel execution.
+- 2026-09-22: Acceptance, blind adversarial, and edge-case reviews all passed exact commit `b8429d3` with no findings.
 
 ### Completion Notes List
 
@@ -96,3 +97,4 @@ Codex (GPT-5)
 - 2026-09-22: Created Story 5.3 and started implementation.
 - 2026-09-22: Implemented and validated the self-supervised reference flow; moved to review.
 - 2026-09-22: Fixed all initial adversarial-review findings and split the growing SSL task module by responsibility.
+- 2026-09-22: Completed all review and release gates; marked done.

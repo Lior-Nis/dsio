@@ -4,7 +4,7 @@ baseline_commit: ebf9ea6
 
 # Story 5.2: Run the Supervised Reference Flow
 
-Status: review
+Status: done
 
 ## Story
 
@@ -92,3 +92,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 5.2 and started implementation.
 - 2026-09-22: Implemented and validated the supervised reference flow; moved to review.
+- 2026-09-22: Completed review gates and merged PR #54; marked done.
