@@ -78,6 +78,7 @@ Codex (GPT-5)
 
 - 2026-09-22: Created from merged Story 3.2 at `32c42de`; compared three interface designs and selected one training-step seam with explicit device-local generators and no new objective abstraction.
 - 2026-09-22: The complete repository suite passed with 855 tests and 3 live tests deselected; affected augmentation, SSL, callback, dataset, component, and module suites passed 120 tests.
+- 2026-09-22: First independent review blocked the candidate on retained identity-augmentor compatibility, in-place aliasing, length-one normalization, malformed metadata boundaries, test-split RankMe use, and silently accepted validation-dependent controls. All findings were reproduced and fixed test-first; 128 affected tests passed.
 
 ### Completion Notes List
 
@@ -86,6 +87,7 @@ Codex (GPT-5)
 - SSL loaders return raw identity-bearing windows. Dataset masking, seeded mask state, and `TwoViewCollate` were deleted rather than retained as a second path.
 - SSL no longer manufactures a stochastic pretext validation result. OnlineProbe and RankMe run from train-epoch end over their own deterministic raw loaders.
 - Existing MAE, SimCLR, VICReg, supervised training, checkpoint, MLflow, and encoder handoff flows remain green.
+- Review hardening isolates in-place augmentors, preserves dtype/row/view contracts, normalizes canonicalization failures, keeps unlabeled RankMe on training evidence, and rejects SSL early stopping or direct plateau scheduling without a validation objective.
 
 ### File List
 
