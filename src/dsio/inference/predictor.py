@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import copy
 import io
-from collections.abc import Callable, Mapping, Sequence
+import random
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from typing import Any
 
+import numpy as np
 import torch
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
@@ -167,7 +170,7 @@ def build_predictor(
     )
     try:
         probe = copy.deepcopy(predictor)
-        with torch.random.fork_rng():
+        with _preserve_rng():
             probe(input_example)
         torch.save(probe, io.BytesIO())
         torch.save(predictor, io.BytesIO())
@@ -288,6 +291,18 @@ def _clone_component[T](value: T, role: str) -> T:
     except Exception as error:
         raise PredictorError(f"{role} cannot be isolated or serialized: {error}") from error
     return cloned
+
+
+@contextmanager
+def _preserve_rng() -> Iterator[None]:
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    try:
+        with torch.random.fork_rng():
+            yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
 
 
 def _name(value: object) -> str:

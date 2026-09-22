@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import io
+import random
 import threading
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 from mlflow.tracking import MlflowClient
@@ -74,6 +76,14 @@ class CountingPreprocessor(nn.Module):
 
     def forward(self, value: Tensor) -> Tensor:
         self.call_count.add_(1)
+        return value
+
+
+class RngConsumingPreprocessor(nn.Module):
+    def forward(self, value: Tensor) -> Tensor:
+        random.random()
+        np.random.random()
+        torch.rand(())
         return value
 
 
@@ -293,6 +303,32 @@ def test_construction_probe_does_not_mutate_the_returned_predictor(tmp_path: Pat
     assert predictor.preprocessor.call_count.item() == 0
     predictor({"sample_id": ["first"], "x": torch.ones(1, 2)})
     assert predictor.preprocessor.call_count.item() == 1
+
+
+def test_construction_probe_preserves_ambient_rng_state(tmp_path: Path) -> None:
+    ref = _checkpoint(tmp_path)
+    model = nn.Linear(2, 1)
+    preprocessor = RngConsumingPreprocessor()
+    normalizer = TensorOutput()
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.random.get_rng_state()
+
+    build_predictor(
+        ref,
+        model=model,
+        preprocessor=preprocessor,
+        normalizer=normalizer,
+        validator=validate_tensor_prediction,
+        input_example={"sample_id": ["example"], "x": torch.ones(1, 2)},
+    )
+
+    assert random.getstate() == python_state
+    restored_numpy_state = np.random.get_state()
+    assert restored_numpy_state[0] == numpy_state[0]
+    np.testing.assert_array_equal(restored_numpy_state[1], numpy_state[1])
+    assert restored_numpy_state[2:] == numpy_state[2:]
+    assert torch.equal(torch.random.get_rng_state(), torch_state)
 
 
 def test_checkpoint_and_predictor_remain_distinct_artifacts(tmp_path: Path) -> None:
