@@ -329,6 +329,37 @@ def test_incompatible_score_rank_fails_before_writes(
     assert client.get_run(child_run_id).data.metrics == {}
 
 
+def test_unicode_and_bytes_labels_are_not_mixed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.eval.execution as execution
+
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("evaluation-text-dtype")
+    _, child_run_id = _evaluation_child(client, experiment_id)
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {
+            "sample_id": np.asarray(["a", "b"]),
+            "prediction": np.asarray([b"yes", b"no"]),
+        },
+    )
+
+    with pytest.raises(EvaluationError, match="dtype.*incompatible"):
+        evaluate(
+            run_id=child_run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=np.asarray(["yes", "no"]),
+            metrics=("accuracy",),
+        )
+
+    assert client.get_run(child_run_id).data.metrics == {}
+
+
 def test_evaluation_requires_a_clean_dedicated_child() -> None:
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()

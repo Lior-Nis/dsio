@@ -318,8 +318,10 @@ def _validate_metric_arrays(
 def _dtype_family(value: np.ndarray[Any, Any], role: str) -> str:
     if value.dtype.kind in "buif":
         return "numeric"
-    if value.dtype.kind in "US":
-        return "text"
+    if value.dtype.kind == "U":
+        return "unicode"
+    if value.dtype.kind == "S":
+        return "bytes"
     raise EvaluationError(
         f"evaluation {role} dtype {value.dtype} is unsupported; object and complex "
         "arrays are not safe metric evidence"
