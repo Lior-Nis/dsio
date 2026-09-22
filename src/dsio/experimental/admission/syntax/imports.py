@@ -82,24 +82,20 @@ def expression_name(expression: ast.expr, known_aliases: dict[str, str]) -> str:
         parent = expression_name(expression.value, known_aliases)
         if key and parent.endswith(".__dict__"):
             return f"{parent.removesuffix('.__dict__')}.{key}"
+        if key and parent:
+            return f"{parent}[{key!r}]"
     return ""
 
 
 def is_dynamic_import_api(name: str) -> bool:
-    return name in {
-        "builtins.__import__",
-        "builtins.compile",
-        "builtins.eval",
-        "builtins.exec",
-        "importlib.import_module",
-    }
+    return name == "builtins" or name.startswith(("builtins.", "importlib", "runpy"))
 
 
 def dynamic_import_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
-    if not isinstance(node, ast.Name | ast.Attribute | ast.Call):
+    if not isinstance(node, ast.Name | ast.Attribute | ast.Subscript | ast.Call):
         return False
     name = expression_name(node, known_aliases)
-    return name in {
+    return name == "__builtins__" or name in {
         "__import__",
         "builtins.__import__",
         "builtins.compile",
@@ -109,7 +105,7 @@ def dynamic_import_reference(node: ast.AST, known_aliases: dict[str, str]) -> bo
         "eval",
         "exec",
         "importlib.import_module",
-    }
+    } or name.startswith(("builtins.", "importlib.", "runpy."))
 
 
 def import_from_base(

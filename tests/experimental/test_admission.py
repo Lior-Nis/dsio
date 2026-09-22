@@ -177,6 +177,15 @@ def test_project_name_constant_is_rejected(tmp_path: Path) -> None:
     )
 
 
+def test_bare_project_condition_is_rejected(tmp_path: Path) -> None:
+    for source in (
+        "project = 'pulse'\nif project:\n    value = 1\n",
+        "projectName = 'pulse'\nvalue = one if projectName else two\n",
+        "while current_project:\n    run()\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -246,6 +255,10 @@ def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path
         "REGISTRY = {}\nREGISTRY['x'] = component\n",
         "COMPONENTS = {}\ndef register(name):\n    COMPONENTS[name] = component\n",
         "HANDLERS = {}\ndef enroll(name):\n    HANDLERS[name] = component\n",
+        "HANDLERS = {}\nHANDLERS |= {'x': component}\n",
+        "HANDLERS = {}\nHANDLERS.__setitem__('x', component)\n",
+        "import collections\nHANDLERS = collections.defaultdict(dict)\n"
+        "table = HANDLERS\ntable['x'] = component\n",
     ):
         assert any(
             message.startswith("runtime-registration:")
@@ -286,7 +299,9 @@ def test_reflective_dsio_registry_access_is_rejected(tmp_path: Path) -> None:
     for reference in (
         "NAME = 'METRICS'\ngetattr(metrics, NAME).clear()",
         "metrics.__dict__['MET' + 'RICS'].clear()",
+        "metrics.__dict__.get('METRICS').clear()",
         "mutate(vars(metrics)['METRICS'])",
+        "object.__getattribute__(metrics, 'METRICS').clear()",
     ):
         source = f"import dsio.eval.metrics as metrics\n{reference}\n"
         assert any(
@@ -306,6 +321,8 @@ def apply_plugins(value, plugins):
     return tuple(plugin(value) for plugin in plugins)
 """
     assert _audit(tmp_path, source) == ()
+    assert _audit(tmp_path, "CACHE = {}\nCACHE[key] = expensive(key)\n") == ()
+    assert _audit(tmp_path, "METADATA = {}\nMETADATA['version'] = 1\n") == ()
 
 
 @pytest.mark.parametrize(
@@ -315,6 +332,9 @@ def apply_plugins(value, plugins):
         "import importlib\ngetattr(importlib, 'import_module')('consumer_x.private')\n",
         "import builtins\nbuiltins.eval(source)\n",
         "from builtins import exec as run\nrun(source)\n",
+        "import builtins\nvars(builtins)['eval'](source)\n",
+        "import runpy\nrunpy.run_module('consumer_x.private')\n",
+        "import importlib.util\nimportlib.util.spec_from_file_location(name, path)\n",
         "eval(source)\n",
     ],
 )

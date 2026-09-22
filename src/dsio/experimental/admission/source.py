@@ -23,7 +23,6 @@ _PUBLIC_DEPENDENCIES = frozenset(
         "yaml",
     }
 )
-_KNOWN_PROJECTS = ("pulse", "algae", "algua")
 _EXPERIMENTAL_ROOT = Path(__file__).parents[1]
 
 
@@ -111,32 +110,29 @@ def _audit_source(
         for name in project_names
         if isinstance(name, str) and name
     }
-    known_projects = set(_KNOWN_PROJECTS) - explicit_projects
     explicit_match = _matched_project(tree, explicit_projects)
     if explicit_match is not None:
         failures.append(f"genericity: source references consumer project {explicit_match!r}")
-    string_constants = syntax.string_constants(tree)
-    for context in syntax.project_contexts(tree):
-        known_match = _matched_project(context, known_projects, string_constants)
-        if known_match is not None:
-            failures.append(
-                f"genericity: source references consumer project {known_match!r}"
+    policy_module = module == "dsio.experimental.admission" or module.startswith(
+        "dsio.experimental.admission."
+    )
+    if not policy_module:
+        if syntax.project_contexts(tree):
+            failures.append("genericity: component source branches on consumer project identity")
+        if (
+            any(syntax.registry_reference(node, aliases) for node in ast.walk(tree))
+            or any(
+                syntax.registry_mutation(node, aliases)
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
             )
-
-    if (
-        any(syntax.registry_reference(node, aliases) for node in ast.walk(tree))
-        or any(
-            syntax.registry_mutation(node, aliases)
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-        )
-        or any(syntax.registry_assignment(node, aliases) for node in ast.walk(tree))
-        or syntax.defines_registration_surface(tree)
-    ):
-        failures.append(
-            "runtime-registration: component source mutates a registry; contribute "
-            "through the governed DSIO dispatcher instead"
-        )
+            or any(syntax.registry_assignment(node, aliases) for node in ast.walk(tree))
+            or syntax.defines_registration_surface(tree)
+        ):
+            failures.append(
+                "runtime-registration: component source mutates a registry; contribute "
+                "through the governed DSIO dispatcher instead"
+            )
 
     for imported in imported_modules:
         dependency = _experimental_source(imported)

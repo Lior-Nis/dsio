@@ -15,8 +15,8 @@ runtime plugin system.
    mutation. To stay mechanically decidable, experimental source may not use star imports,
    dynamic import/code-evaluation APIs, closed-dispatcher references, or define a runtime
    registration surface. Supplied consumer names are forbidden throughout the source;
-   built-in ambiguous terms such as `pulse` are rejected only when project identity is also
-   referenced.
+   project-identity-driven control flow is forbidden while ambiguous terms such as `pulse`
+   remain valid when they are unrelated to project identity.
 4. Add focused unit tests, an integration or property test through the stable DSIO
    contract, deterministic replay evidence, and provenance assertions.
 5. Record one real downstream confirmation, limitations, and an adversarial agent review

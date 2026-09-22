@@ -10,7 +10,6 @@ from dsio.experimental.admission.syntax.imports import (
 )
 from dsio.experimental.admission.syntax.projects import (
     project_contexts,
-    string_constants,
     string_values,
 )
 from dsio.experimental.admission.syntax.registries import (
@@ -34,6 +33,5 @@ __all__ = [
     "registry_assignment",
     "registry_mutation",
     "registry_reference",
-    "string_constants",
     "string_values",
 ]

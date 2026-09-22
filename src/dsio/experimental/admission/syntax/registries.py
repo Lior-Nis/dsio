@@ -43,9 +43,18 @@ def registry_mutation(call: ast.Call, known_aliases: dict[str, str]) -> bool:
 def registry_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
     if isinstance(node, ast.Name | ast.Attribute | ast.Subscript | ast.Call):
         name = expression_name(node, known_aliases)
-        if name in _REGISTRATION_CALLABLES or _is_registry_receiver(name):
+        if (
+            name in _REGISTRATION_CALLABLES
+            or _is_registry_receiver(name)
+            or (name.startswith("dsio.") and ".__dict__" in name)
+        ):
             return True
     if isinstance(node, ast.Call) and expression_name(node.func, known_aliases) == "getattr":
+        return bool(node.args) and expression_name(node.args[0], known_aliases).startswith("dsio.")
+    if isinstance(node, ast.Call) and expression_name(node.func, known_aliases) in {
+        "object.__getattribute__",
+        "vars",
+    }:
         return bool(node.args) and expression_name(node.args[0], known_aliases).startswith("dsio.")
     if isinstance(node, ast.Subscript):
         return expression_name(node.value, known_aliases).startswith("dsio.") and isinstance(
@@ -101,21 +110,44 @@ def defines_registration_surface(tree: ast.AST) -> bool:
             statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         )
         if isinstance(target, ast.Name)
+        and _registration_table(target.id)
     }
+    aliases = set(tables)
+    table_assignments = [
+        (target.id, expression_name(statement.value, {}))
+        for statement in ast.walk(tree)
+        if isinstance(statement, ast.Assign | ast.AnnAssign)
+        and statement.value is not None
+        for target in (
+            statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        )
+        if isinstance(target, ast.Name)
+    ]
+    for _ in table_assignments:
+        changed = False
+        for target, value in table_assignments:
+            if value in aliases and target not in aliases:
+                aliases.add(target)
+                changed = True
+        if not changed:
+            break
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign | ast.Delete):
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.Delete):
             targets = (
                 node.targets
                 if isinstance(node, ast.Assign | ast.Delete)
                 else [node.target]
             )
-            if any(_mutates_table(target, tables) for target in targets):
+            if any(_mutates_table(target, aliases) for target in targets):
+                return True
+        elif isinstance(node, ast.AugAssign):
+            if _mutates_table(node.target, aliases) or expression_name(node.target, {}) in aliases:
                 return True
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and expression_name(node.func.value, {}).partition(".")[0] in tables
-            and node.func.attr in {"clear", "pop", "setdefault", "update"}
+            and expression_name(node.func.value, {}).partition(".")[0] in aliases
+            and node.func.attr in {"__setitem__", "clear", "pop", "setdefault", "update"}
         ):
             return True
     return False
@@ -132,8 +164,7 @@ def _is_registry_receiver(name: str) -> bool:
 def _mutable_mapping(value: ast.expr) -> bool:
     return isinstance(value, ast.Dict) or (
         isinstance(value, ast.Call)
-        and isinstance(value.func, ast.Name)
-        and value.func.id in {"dict", "defaultdict"}
+        and expression_name(value.func, {}).rpartition(".")[2] in {"dict", "defaultdict"}
     )
 
 
@@ -141,3 +172,16 @@ def _mutates_table(target: ast.expr, tables: set[str]) -> bool:
     return isinstance(target, ast.Subscript) and expression_name(target.value, {}).partition(".")[
         0
     ] in tables
+
+
+def _registration_table(name: str) -> bool:
+    return name.casefold() in {
+        "components",
+        "handlers",
+        "metrics",
+        "plugins",
+        "registries",
+        "registry",
+        "runners",
+        "tasks",
+    }

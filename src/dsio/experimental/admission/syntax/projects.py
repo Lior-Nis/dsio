@@ -10,13 +10,14 @@ from dsio.experimental.admission.syntax.imports import expression_name, fold_str
 def references_project_identity(tree: ast.AST, aliases: set[str] | None = None) -> bool:
     aliases = aliases or set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name | ast.Attribute):
+        if isinstance(node, ast.Subscript):
+            if expression_name(node, {}) in aliases or fold_string(node.slice) == "project":
+                return True
+        elif isinstance(node, ast.Name | ast.Attribute):
             name = node.id if isinstance(node, ast.Name) else node.attr
-            if expression_name(node, {}) in aliases or _project_identifier(name):
+            if expression_name(node, {}) in aliases or (name and _project_identifier(name)):
                 return True
         elif (
-            isinstance(node, ast.Subscript) and fold_string(node.slice) == "project"
-        ) or (
             isinstance(node, ast.Call)
             and node.args
             and isinstance(node.func, ast.Attribute)
@@ -48,24 +49,18 @@ def project_contexts(tree: ast.AST) -> tuple[ast.AST, ...]:
     candidates = (
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.Compare | ast.Match | ast.Call | ast.Subscript)
+        if isinstance(
+            node,
+            ast.Compare
+            | ast.If
+            | ast.IfExp
+            | ast.Match
+            | ast.Call
+            | ast.Subscript
+            | ast.While,
+        )
     )
     return tuple(node for node in candidates if references_project_identity(node, aliases))
-
-
-def string_constants(tree: ast.AST) -> dict[str, set[str]]:
-    constants: dict[str, set[str]] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
-            continue
-        value = fold_string(node.value)
-        if value is None:
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        for target in targets:
-            if isinstance(target, ast.Name):
-                constants.setdefault(target.id, set()).add(value)
-    return constants
 
 
 def string_values(tree: ast.AST, constants: dict[str, set[str]]) -> tuple[str, ...]:
@@ -92,7 +87,7 @@ def _project_identifier(name: str) -> bool:
 
 
 def _assigned_names(target: ast.expr) -> tuple[str, ...]:
-    if isinstance(target, ast.Name | ast.Attribute):
+    if isinstance(target, ast.Name | ast.Attribute | ast.Subscript):
         return (expression_name(target, {}),)
     if isinstance(target, ast.Tuple | ast.List):
         return tuple(name for item in target.elts for name in _assigned_names(item))
