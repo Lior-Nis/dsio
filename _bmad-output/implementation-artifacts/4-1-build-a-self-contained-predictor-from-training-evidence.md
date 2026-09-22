@@ -4,7 +4,7 @@ baseline_commit: 4902f67
 
 # Story 4.1: Build a Self-Contained Predictor from Training Evidence
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -21,19 +21,19 @@ so that inference does not depend on reconstructing project training code by con
 
 ## Tasks / Subtasks
 
-- [ ] Add the `dsio.inference` package and one concrete predictor (AC: 1-2)
-  - [ ] Compose native deterministic preprocessing, native model inference, output normalization, and semantic validation behind one `nn.Module`.
-  - [ ] Accept identity-bearing tensor batches and return a native mapping with aligned `sample_id` values.
-  - [ ] Keep stochastic training augmentation and the Lightning training system outside the predictor.
-- [ ] Build from immutable successful checkpoint evidence (AC: 1, 4)
-  - [ ] Verify the MLflow Run completed successfully and the existing digest-pinned artifact bytes still match.
-  - [ ] Load only the trained model state from the Lightning checkpoint, strictly, on CPU.
-  - [ ] Retain the immutable checkpoint URI and digest as predictor provenance without copying or registering the checkpoint.
-- [ ] Fail construction at reproducibility boundaries (AC: 3)
-  - [ ] Require named importable model, preprocessing, normalization, and validator behavior.
-  - [ ] Prove the completed predictor can be serialized before returning it.
-  - [ ] Name state, importability, serialization, and semantic contract failures directly.
-- [ ] Prove local order, identity, contract, and artifact separation through tests and full release gates (AC: 1-4)
+- [x] Add the `dsio.inference` package and one concrete predictor (AC: 1-2)
+  - [x] Compose native deterministic preprocessing, native model inference, output normalization, and semantic validation behind one `nn.Module`.
+  - [x] Accept identity-bearing tensor batches and return a native mapping with aligned `sample_id` values.
+  - [x] Keep stochastic training augmentation and the Lightning training system outside the predictor.
+- [x] Build from immutable successful checkpoint evidence (AC: 1, 4)
+  - [x] Verify the MLflow Run completed successfully and the existing digest-pinned artifact bytes still match.
+  - [x] Load only the trained model state from the Lightning checkpoint, strictly, on CPU.
+  - [x] Retain the immutable checkpoint URI and digest as predictor provenance without copying or registering the checkpoint.
+- [x] Fail construction at reproducibility boundaries (AC: 3)
+  - [x] Require named importable model, preprocessing, normalization, and validator behavior.
+  - [x] Prove the completed predictor can be serialized before returning it.
+  - [x] Name state, importability, serialization, and semantic contract failures directly.
+- [x] Prove local order, identity, contract, and artifact separation through tests and full release gates (AC: 1-4)
 
 ## Dev Notes
 
@@ -72,14 +72,28 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 3.4 at `4902f67`; compared rebuilding a training task, serializing a whole `DsioModule`, and loading only `model.` checkpoint state into an inference composition. Selected the last to keep resume and inference artifacts structurally distinct.
+- 2026-09-22: Independent review exposed caller/validator mutation, incomplete construction preflight, deleted/transitioning Run evidence, filtered PyTorch extra state, shared validator state, and probe state/RNG leakage. Each accepted finding was reproduced and fixed test-first; forced CPU conversion was rejected because the approved contract preserves caller-selected device and dtype.
+- 2026-09-22: Exact candidate `6ddb664` passed 8 distribution/consumer checks, 891 remaining tests with 3 live tests deselected, Ruff, mypy across 80 source files, and all import contracts.
+- 2026-09-22: Acceptance, blind, and edge review layers independently approved exact candidate `6ddb664` with no remaining actionable finding.
 
 ### Completion Notes List
+
+- `Predictor` is one inference-only native `nn.Module` composing deterministic preprocessing, model forward, output normalization, and semantic validation while preserving source `sample_id` values.
+- Construction accepts only a digest-verified checkpoint from an active, `FINISHED` MLflow Run, extracts only `model.` state (including native PyTorch extra state), loads it strictly, and rechecks the Run after assembly.
+- Importability, independent ownership, serialization, representative-input compatibility, identity alignment, and semantic output failures are checked before a predictor can be returned for logging.
+- Construction probes an isolated copy and preserves Python, NumPy, and PyTorch RNG streams; caller input and returned predictions cannot be mutated by preprocessing or validators.
+- Checkpoint provenance remains URI-plus-digest evidence, and no DSIO or MLflow registry entity is created.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/4-1-build-a-self-contained-predictor-from-training-evidence.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/dsio/inference/__init__.py`
+- `src/dsio/inference/predictor.py`
+- `tests/inference/test_predictor.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 4.1 and started implementation.
+- 2026-09-22: Added the self-contained predictor, immutable checkpoint construction, and fail-closed component validation; moved the story through the full independent review gate.
+- 2026-09-22: Completed Story 4.1 after exact candidate `6ddb664` passed all release and review gates.
