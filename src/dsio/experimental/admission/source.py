@@ -78,12 +78,16 @@ def _audit_source(
         return tuple(failures)
 
     is_package = source_path.name == "__init__.py"
-    aliases = syntax.assigned_aliases(tree, syntax.aliases(tree, module, is_package=is_package))
+    aliases_by_node = {
+        id(node): syntax.aliases_at(tree, node, module, is_package=is_package)
+        for node in ast.walk(tree)
+    }
     imported_modules = (
         *syntax.imports(tree, module, is_package=is_package),
     )
     if any(syntax.is_dynamic_import_api(imported) for imported in imported_modules) or any(
-        syntax.dynamic_import_reference(node, aliases) for node in ast.walk(tree)
+        syntax.dynamic_import_reference(node, aliases_by_node[id(node)])
+        for node in ast.walk(tree)
     ):
         failures.append(
             "dependency: dynamic import and code-evaluation APIs are not statically admissible"
@@ -131,13 +135,19 @@ def _audit_source(
         if syntax.project_contexts(tree):
             failures.append("genericity: component source branches on consumer project identity")
         if (
-            any(syntax.registry_reference(node, aliases) for node in ast.walk(tree))
+            any(
+                syntax.registry_reference(node, aliases_by_node[id(node)])
+                for node in ast.walk(tree)
+            )
             or any(
-                syntax.registry_mutation(node, aliases)
+                syntax.registry_mutation(node, aliases_by_node[id(node)])
                 for node in ast.walk(tree)
                 if isinstance(node, ast.Call)
             )
-            or any(syntax.registry_assignment(node, aliases) for node in ast.walk(tree))
+            or any(
+                syntax.registry_assignment(node, aliases_by_node[id(node)])
+                for node in ast.walk(tree)
+            )
             or syntax.defines_registration_surface(tree)
         ):
             failures.append(

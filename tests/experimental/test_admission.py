@@ -552,6 +552,38 @@ def test_common_project_identity_fields_are_rejected_in_predicates(tmp_path: Pat
         assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
 
+def test_project_identity_in_short_circuit_control_is_rejected(tmp_path: Path) -> None:
+    for source in (
+        "project and run()\n",
+        "def choose(project):\n    return project and run()\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
+def test_project_control_inside_contexts_and_assertions_is_rejected(tmp_path: Path) -> None:
+    for source in (
+        "def run(project, context):\n"
+        "    with context:\n"
+        "        if project:\n"
+        "            train()\n",
+        "def validate(project):\n    assert project != 'pulse'\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
+def test_destructured_project_aliases_are_tracked_elementwise(tmp_path: Path) -> None:
+    for assignment in (
+        "project_copy, signal = project, signal_kind",
+        "signal, project_copy = signal_kind, project",
+    ):
+        source = f"{assignment}\nif signal:\n    run()\n"
+        assert _audit(tmp_path, source) == ()
+        project_source = f"{assignment}\nif project_copy:\n    run()\n"
+        assert any(
+            message.startswith("genericity:") for message in _audit(tmp_path, project_source)
+        )
+
+
 def test_function_local_working_collections_are_not_registries(tmp_path: Path) -> None:
     for source in (
         "def compute(loss):\n"
@@ -574,11 +606,30 @@ def test_descriptive_candidate_registry_names_are_rejected(tmp_path: Path) -> No
         "COMPONENT_REGISTRY['x'] = component\n",
         "CATALOG = {}\nCATALOG['x'] = component\n",
         "CATALOG = {}\nCATALOG |= {'x': component}\n",
+        "def component(): pass\nCOMPONENT_REGISTRY = {'x': component}\n",
     ):
         assert any(
             message.startswith("runtime-registration:")
             for message in _audit(tmp_path, source)
         )
+
+
+def test_escaping_local_registry_mutator_is_rejected(tmp_path: Path) -> None:
+    source = (
+        "def make_registry():\n"
+        "    handlers = {}\n"
+        "    def enroll(name, component):\n"
+        "        handlers[name] = component\n"
+        "    return enroll\n"
+    )
+    assert any(
+        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
+    )
+
+
+def test_domain_function_named_register_is_not_a_registry(tmp_path: Path) -> None:
+    source = "def register(reference, moving):\n    return align(reference, moving)\n"
+    assert _audit(tmp_path, source) == ()
 
 
 def test_entry_point_loading_apis_are_not_statically_admissible(tmp_path: Path) -> None:
@@ -587,6 +638,23 @@ def test_entry_point_loading_apis_are_not_statically_admissible(tmp_path: Path) 
         "component = EntryPoint(name='x', value='math:sqrt', group='dsio').load()\n"
     )
     assert any(message.startswith("dependency:") for message in _audit(tmp_path, source))
+
+
+def test_dynamic_import_aliases_follow_order_and_parameter_shadowing(tmp_path: Path) -> None:
+    unsafe = (
+        "safe_loader = object()\n"
+        "loader = safe_loader\n"
+        "import importlib as loader\n"
+        "loader.import_module(module_name)\n"
+    )
+    assert any(message.startswith("dependency:") for message in _audit(tmp_path, unsafe))
+
+    safe = (
+        "import importlib as loader\n"
+        "def inspect(loader):\n"
+        "    return loader.import_module\n"
+    )
+    assert _audit(tmp_path, safe) == ()
 
 
 def test_registry_owner_module_imports_are_safe_until_dispatcher_access(

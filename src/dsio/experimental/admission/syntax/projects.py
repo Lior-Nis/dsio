@@ -171,16 +171,21 @@ def _scan_statements(
             state = set().union(state, *branch_states)
             state = _scan_statements(statement.finalbody, state, contexts)
             continue
+        if isinstance(statement, ast.With | ast.AsyncWith):
+            for item in statement.items:
+                _record_nested_contexts(item.context_expr, state, contexts)
+                if item.optional_vars is not None:
+                    for name in _assigned_names(item.optional_vars):
+                        state.discard(name)
+            state = _scan_statements(statement.body, state, contexts)
+            continue
+        if isinstance(statement, ast.Assert):
+            _record_context(statement.test, state, contexts)
         _record_nested_contexts(statement, state, contexts)
         if isinstance(statement, ast.Assign | ast.AnnAssign) and statement.value is not None:
             targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-            project_derived = references_project_identity(statement.value, state)
             for target in targets:
-                for name in _assigned_names(target):
-                    if project_derived:
-                        state.add(name)
-                    else:
-                        state.discard(name)
+                _update_aliases(target, statement.value, state)
     return state
 
 
@@ -193,12 +198,31 @@ def _record_nested_contexts(
     node: ast.AST, aliases: set[str], contexts: list[ast.AST]
 ) -> None:
     for candidate in ast.walk(node):
-        if isinstance(candidate, ast.IfExp):
+        if isinstance(candidate, ast.BoolOp):
+            _record_context(candidate, aliases, contexts)
+        elif isinstance(candidate, ast.IfExp):
             _record_context(candidate.test, aliases, contexts)
         elif isinstance(candidate, ast.comprehension):
             _record_context(candidate.iter, aliases, contexts)
             for condition in candidate.ifs:
                 _record_context(condition, aliases, contexts)
+
+
+def _update_aliases(target: ast.expr, value: ast.expr, aliases: set[str]) -> None:
+    if (
+        isinstance(target, ast.Tuple | ast.List)
+        and isinstance(value, ast.Tuple | ast.List)
+        and len(target.elts) == len(value.elts)
+    ):
+        for target_item, value_item in zip(target.elts, value.elts, strict=True):
+            _update_aliases(target_item, value_item, aliases)
+        return
+    project_derived = references_project_identity(value, aliases)
+    for name in _assigned_names(target):
+        if project_derived:
+            aliases.add(name)
+        else:
+            aliases.discard(name)
 
 
 def _assigned_names(target: ast.expr) -> tuple[str, ...]:

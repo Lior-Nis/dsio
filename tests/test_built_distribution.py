@@ -78,10 +78,16 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     assert "dsio/experimental/admission/__init__.py" in members
     assert "dsio/experimental/admission/source.py" in members
     assert "dsio/experimental/admission/syntax/__init__.py" in members
-    assert "dsio/experimental/admission/syntax/imports.py" in members
+    assert "dsio/experimental/admission/syntax/imports/__init__.py" in members
+    assert "dsio/experimental/admission/syntax/imports/dynamic.py" in members
+    assert "dsio/experimental/admission/syntax/imports/names.py" in members
+    assert "dsio/experimental/admission/syntax/imports/resolution.py" in members
     assert "dsio/experimental/admission/syntax/projects.py" in members
     assert "dsio/experimental/admission/syntax/registries/__init__.py" in members
+    assert "dsio/experimental/admission/syntax/registries/escaping.py" in members
+    assert "dsio/experimental/admission/syntax/registries/initializers.py" in members
     assert "dsio/experimental/admission/syntax/registries/known.py" in members
+    assert "dsio/experimental/admission/syntax/registries/parameters.py" in members
     assert "dsio/experimental/admission/syntax/registries/surfaces.py" in members
     assert set(requirements) == set(REQUIRED_DEPENDENCIES)
     for name, expected_specifier in REQUIRED_DEPENDENCIES.items():

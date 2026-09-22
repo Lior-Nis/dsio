@@ -5,15 +5,12 @@ from __future__ import annotations
 import ast
 
 from dsio.experimental.admission.syntax.imports import expression_name
+from dsio.experimental.admission.syntax.registries.escaping import escaping_local_mutator
+from dsio.experimental.admission.syntax.registries.initializers import initialized_registration
+from dsio.experimental.admission.syntax.registries.parameters import parameterized_registration
 
 
 def defines_registration_surface(tree: ast.AST) -> bool:
-    if any(
-        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.casefold() in {"register", "register_component", "register_plugin"}
-        for node in ast.walk(tree)
-    ):
-        return True
     if not isinstance(tree, ast.Module):
         return False
     declarations = tuple(_container_assignments(tree))
@@ -50,7 +47,9 @@ def defines_registration_surface(tree: ast.AST) -> bool:
         name for name in all_tables if _registration_table(name)
     }
     _expand_aliases(semantic_tables, table_assignments)
-    if _parameterized_registration(tree, aliases):
+    if any(initialized_registration(statement, semantic_tables) for statement in declarations):
+        return True
+    if parameterized_registration(tree, aliases) or escaping_local_mutator(tree):
         return True
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign | ast.AnnAssign | ast.Delete):
@@ -139,83 +138,6 @@ def _registration_table(name: str) -> bool:
         "tasks",
         "transforms",
     } or normalized.endswith(("_catalog", "_registries", "_registry"))
-
-
-def _parameterized_registration(tree: ast.Module, tables: set[str]) -> bool:
-    component_roles = {
-        "callback",
-        "collator",
-        "component",
-        "dataset",
-        "factory",
-        "handler",
-        "loss",
-        "metric",
-        "model",
-        "objective",
-        "plugin",
-        "runner",
-        "sampler",
-        "splitter",
-        "transform",
-    }
-    parameter_mutators: set[str] = set()
-    functions = (
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-    )
-    for function in functions:
-        parameters = {
-            argument.arg for argument in (*function.args.posonlyargs, *function.args.args)
-        } | {argument.arg for argument in function.args.kwonlyargs}
-        component_parameters = parameters & component_roles
-        if not component_parameters:
-            continue
-        for node in ast.walk(function):
-            if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                if not any(isinstance(target, ast.Subscript) for target in targets):
-                    continue
-                value_names = {
-                    candidate.id
-                    for candidate in ast.walk(node.value)
-                    if isinstance(candidate, ast.Name)
-                }
-                if not value_names & component_parameters:
-                    continue
-                receivers = {
-                    expression_name(target.value, {}).partition(".")[0]
-                    for target in targets
-                    if isinstance(target, ast.Subscript)
-                }
-                if any(
-                    _receiver_table(target.value, tables)
-                    for target in targets
-                    if isinstance(target, ast.Subscript)
-                ):
-                    return True
-                if receivers & parameters:
-                    parameter_mutators.add(function.name)
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                value_names = {
-                    candidate.id
-                    for argument in node.args
-                    for candidate in ast.walk(argument)
-                    if isinstance(candidate, ast.Name)
-                }
-                if value_names & component_parameters:
-                    if _receiver_table(node.func.value, tables):
-                        return True
-                    receiver = expression_name(node.func.value, {}).partition(".")[0]
-                    if receiver in parameters:
-                        parameter_mutators.add(function.name)
-    return any(
-        isinstance(node, ast.Call)
-        and expression_name(node.func, {}) in parameter_mutators
-        and any(expression_name(argument, {}) in tables for argument in node.args)
-        for node in ast.walk(tree)
-    )
 
 
 def _receiver_table(receiver: ast.expr, tables: set[str]) -> bool:

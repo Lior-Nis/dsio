@@ -2,6 +2,7 @@
 
 from dsio.experimental.admission.syntax.imports import (
     aliases,
+    aliases_at,
     assigned_aliases,
     dynamic_import_reference,
     expression_name,
@@ -23,6 +24,7 @@ from dsio.experimental.admission.syntax.registries import (
 
 __all__ = [
     "aliases",
+    "aliases_at",
     "assigned_aliases",
     "defines_registration_surface",
     "dynamic_import_reference",
