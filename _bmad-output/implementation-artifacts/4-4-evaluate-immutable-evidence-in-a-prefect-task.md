@@ -4,7 +4,7 @@ baseline_commit: 0572114
 
 # Story 4.4: Evaluate Immutable Evidence in a Prefect Task
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -22,19 +22,19 @@ so that I can recompute metrics independently of training and deployment decisio
 
 ## Tasks / Subtasks
 
-- [ ] Add one framework-light evaluation function under `dsio.eval` (AC: 1-5)
-  - [ ] Accept an evaluation child Run id, immutable Logged Model URI, immutable dataset source Run id, native prediction inputs/targets, and metric names.
-  - [ ] Reuse `dsio.inference.predict` and existing native metric implementations; do not invoke a trainer.
-  - [ ] Return a plain metric mapping rather than an evaluation result model.
-- [ ] Validate evidence and evaluation contracts before metric writes (AC: 1, 4)
-  - [ ] Require a writable child Run, READY DSIO model evidence with a FINISHED source Run, and one compatible native dataset input from a FINISHED source Run.
-  - [ ] Validate target/prediction/score fields, cardinality, shapes, configured metrics, and finite results.
-  - [ ] Revalidate source evidence before committing successful metrics.
-- [ ] Record native MLflow evaluation evidence (AC: 2-3)
-  - [ ] Link the Logged Model and dataset through native MLflow inputs and explicit source-Run tags.
-  - [ ] Log a native NPZ prediction artifact and metric configuration before logging native metrics last.
-  - [ ] Keep parent Run creation, Prefect decoration, retries, caching, and downstream lifecycle project-owned.
-- [ ] Prove tracked Prefect execution, downstream-only reruns, failure-before-metrics, immutable lineage, and absence of policy/training through tests and release gates (AC: 1-5)
+- [x] Add one framework-light evaluation function under `dsio.eval` (AC: 1-5)
+  - [x] Accept an evaluation child Run id, immutable Logged Model URI, immutable dataset source Run id, native prediction inputs/targets, and metric names.
+  - [x] Reuse `dsio.inference.predict` and existing native metric implementations; do not invoke a trainer.
+  - [x] Return a plain metric mapping rather than an evaluation result model.
+- [x] Validate evidence and evaluation contracts before metric writes (AC: 1, 4)
+  - [x] Require a writable child Run, READY DSIO model evidence with a FINISHED source Run, and one compatible native dataset input from a FINISHED source Run.
+  - [x] Validate target/prediction/score fields, cardinality, shapes, configured metrics, and finite results.
+  - [x] Revalidate source evidence before committing successful metrics.
+- [x] Record native MLflow evaluation evidence (AC: 2-3)
+  - [x] Link the Logged Model and dataset through native MLflow inputs and explicit source-Run tags.
+  - [x] Log a native NPZ prediction artifact and metric configuration before logging native metrics last.
+  - [x] Keep parent Run creation, Prefect decoration, retries, caching, and downstream lifecycle project-owned.
+- [x] Prove tracked Prefect execution, downstream-only reruns, failure-before-metrics, immutable lineage, and absence of policy/training through tests and release gates (AC: 1-5)
 
 ## Dev Notes
 
@@ -68,14 +68,25 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 4.3 at `0572114`; selected a plain evaluation function called from a project-owned Prefect task over any DSIO task/DAG abstraction.
+- 2026-09-22: Implemented immutable model/dataset validation, predictor reuse, native metrics, dataset/model inputs, lineage tags, and NPZ prediction artifacts on a caller-owned child Run.
+- 2026-09-22: Adversarial review closed non-finite and broadcast-prone metric inputs, identity-field misuse, unsafe dtype mixing, false parent lineage, child evidence collisions, and broad metric failures.
+- 2026-09-22: Exact candidate `836ee3c` passed 13 focused tests, 947 core tests, 8 built-distribution/consumer tests, package build, Ruff, mypy, import contracts, and three independent final reviews.
 
 ### Completion Notes List
+
+- Project code owns the Prefect task and composes `tracking.attempt` with the plain `evaluate` function; DSIO adds no scheduler, DAG, cache, or task wrapper.
+- Evaluation returns a native metric mapping and records native MLflow dataset/model inputs, dataset-scoped metrics, source-Run tags, and a prediction artifact.
+- A clean dedicated child Run and exact safe metric-array contract prevent stale artifacts, contradictory lineage, broadcasting, identity scoring, and non-finite evidence.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/4-4-evaluate-immutable-evidence-in-a-prefect-task.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/dsio/eval/__init__.py`
+- `src/dsio/eval/execution.py`
+- `tests/eval/test_execution.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 4.4 and started implementation.
+- 2026-09-22: Completed immutable evaluation and closed the independent acceptance, blind, and edge-case review gates.
