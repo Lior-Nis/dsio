@@ -69,7 +69,7 @@ def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str,
         manifest = generate(
             examples,
             "group_shuffle",
-            name="supervised-holdout",
+            name="synthetic-holdout",
             seed=seed,
             parameters={"test_size": 0.25},
         )

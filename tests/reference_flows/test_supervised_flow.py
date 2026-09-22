@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
-import mlflow
 import numpy as np
 import pytest
 from lightning import Trainer
@@ -18,26 +16,12 @@ from dsio.model.module import DsioModule
 from dsio.tracking import TrackingError, experiment
 
 
-def _isolate_services(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in tuple(os.environ):
-        if name.startswith(("PREFECT_", "MLFLOW_")):
-            monkeypatch.delenv(name)
-    monkeypatch.setenv("PREFECT_HOME", str(tmp_path / "prefect"))
-    monkeypatch.setenv("PREFECT_SERVER_ANALYTICS_ENABLED", "false")
-    monkeypatch.setenv("PREFECT_LOGGING_LEVEL", "ERROR")
-    monkeypatch.setenv("DO_NOT_TRACK", "1")
-    tracking_uri = (tmp_path / "mlruns").resolve().as_uri()
-    monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
-    mlflow.set_tracking_uri(tracking_uri)
-
-
 def test_supervised_reference_flow_replays_and_reevaluates_without_training(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    reference_services: None,
 ) -> None:
-    _isolate_services(tmp_path, monkeypatch)
-    monkeypatch.syspath_prepend(str(Path(__file__).parents[2]))
+    del reference_services
     from prefect.testing.utilities import prefect_test_harness
     from reference_projects.supervised.components import build_synthetic_store
     from reference_projects.supervised.flow import reevaluate, supervised_flow

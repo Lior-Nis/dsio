@@ -76,5 +76,5 @@ development_status:
   epic-5: in-progress
   5-1-govern-components-from-experimental-to-stable: done
   5-2-run-the-supervised-reference-flow: done
-  5-3-run-the-self-supervised-reference-flow: in-progress
+  5-3-run-the-self-supervised-reference-flow: review
   epic-5-retrospective: optional

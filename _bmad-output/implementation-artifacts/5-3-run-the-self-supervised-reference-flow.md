@@ -4,7 +4,7 @@ baseline_commit: af1bfaf
 
 # Story 5.3: Run the Self-Supervised Reference Flow
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -21,17 +21,17 @@ so that I can verify DSio supports a distinct training paradigm without a second
 
 ## Tasks / Subtasks
 
-- [ ] Add a consumer-owned self-supervised reference package (AC: 1, 4)
-  - [ ] Reuse the supervised reference project's ordinary data, split, evaluation, and inference tasks.
-  - [ ] Define only the named embedding model, contrastive objective, and export normalizer needed by SSL.
-- [ ] Execute the SSL path through the exact reusable classes (AC: 1-2)
-  - [ ] Instantiate `DsioModule` and `DsioDataModule` directly.
-  - [ ] Inject `TwoView` accelerator-side augmentation and a named contrastive objective.
-  - [ ] Record every behavior-changing component and parameter in execution provenance.
-- [ ] Export, evaluate, and infer through the shared public contracts (AC: 3-4)
-  - [ ] Build and log an immutable predictor from successful checkpoint evidence.
-  - [ ] Reuse the same downstream MLflow evaluation and inference tasks as supervised training.
-- [ ] Prove deterministic views, outputs, identity preservation, lineage, and installed-wheel execution in CI (AC: 1-4)
+- [x] Add a consumer-owned self-supervised reference package (AC: 1, 4)
+  - [x] Reuse the supervised reference project's ordinary data, split, evaluation, and inference tasks.
+  - [x] Define only the named embedding model, contrastive objective, and export normalizer needed by SSL.
+- [x] Execute the SSL path through the exact reusable classes (AC: 1-2)
+  - [x] Instantiate `DsioModule` and `DsioDataModule` directly.
+  - [x] Inject `TwoView` accelerator-side augmentation and a named contrastive objective.
+  - [x] Record every behavior-changing component and parameter in execution provenance.
+- [x] Export, evaluate, and infer through the shared public contracts (AC: 3-4)
+  - [x] Build and log an immutable predictor from successful checkpoint evidence.
+  - [x] Reuse the same downstream MLflow evaluation and inference tasks as supervised training.
+- [x] Prove deterministic views, outputs, identity preservation, lineage, and installed-wheel execution in CI (AC: 1-4)
 
 ## Dev Notes
 
@@ -58,14 +58,33 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 5.2 at `af1bfaf`; chose shared consumer tasks plus SSL-only named components over a parallel flow framework.
+- 2026-09-22: Focused tests passed for exact class reuse, in-step deterministic views, stable outcomes, MLflow lineage, and both reference projects.
+- 2026-09-22: Installed-wheel probe passed with supervised and self-supervised consumer projects copied outside the checkout package.
+- 2026-09-22: Full gate passed: 1047 tests, Ruff, mypy, import contracts, and wheel/sdist build.
 
 ### Completion Notes List
+
+- Added one ordinary Prefect SSL flow that reuses the supervised data, split, evaluation, and inference tasks unchanged.
+- Added only three project-specific components: a tiny embedding model, NT-Xent objective adapter, and semantically validated embedding-norm output.
+- Multi-view augmentation remains the existing `TwoView` injected into the exact `DsioModule`; the test observes it only while `training_step()` is active and proves device, source/view identity, and deterministic tensors.
+- Training identity includes all named components, augmentation identity, seed, optimizer, objective, loader, and Trainer settings.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/5-3-run-the-self-supervised-reference-flow.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `README.md`
+- `reference_projects/self_supervised/__init__.py`
+- `reference_projects/self_supervised/components.py`
+- `reference_projects/self_supervised/flow.py`
+- `reference_projects/self_supervised/tasks.py`
+- `reference_projects/supervised/tasks/data.py`
+- `tests/reference_flows/conftest.py`
+- `tests/reference_flows/test_self_supervised_flow.py`
+- `tests/reference_flows/test_supervised_flow.py`
+- `tests/test_built_distribution.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 5.3 and started implementation.
+- 2026-09-22: Implemented and validated the self-supervised reference flow; moved to review.
