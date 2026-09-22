@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import io
+import math
 import pickle
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
@@ -189,10 +190,39 @@ def _arrays(
                 array = np.asarray(value)
             except (TypeError, ValueError) as error:
                 raise ExportError(f"{role} field {field!r} is not array-compatible") from error
+            if isinstance(value, Sequence) and not _losslessly_converted(
+                value, array.tolist()
+            ):
+                raise ExportError(
+                    f"{role} field {field!r} cannot be converted to an array losslessly"
+                )
         if array.dtype == np.dtype("O"):
             raise ExportError(f"{role} field {field!r} has unsupported object values")
         arrays[field] = array
     return arrays
+
+
+def _losslessly_converted(original: object, converted: object) -> bool:
+    if isinstance(original, Sequence) and not isinstance(original, str | bytes):
+        return (
+            isinstance(converted, list)
+            and len(original) == len(converted)
+            and all(
+                _losslessly_converted(before, after)
+                for before, after in zip(original, converted, strict=True)
+            )
+        )
+    if type(original) is not type(converted):
+        return False
+    try:
+        return bool(original == converted) or bool(
+            isinstance(original, float)
+            and isinstance(converted, float)
+            and math.isnan(original)
+            and math.isnan(converted)
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def _preflight(

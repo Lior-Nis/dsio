@@ -34,6 +34,12 @@ class MetaBufferPreprocessor(nn.Module):
         return value
 
 
+class MixedSequenceOutput(nn.Module):
+    def forward(self, value: Tensor) -> Mapping[str, list[object]]:
+        del value
+        return {"prediction": [1, "2"]}
+
+
 class DeepcopyOnlyState:
     def __deepcopy__(self, memo: dict[int, Any]) -> DeepcopyOnlyState:
         del memo
@@ -64,6 +70,10 @@ def require_finite_nonnegative_prediction(output: Mapping[str, Any]) -> None:
         raise PredictorError("prediction must be finite")
     if bool((prediction < 0).any()):
         raise PredictorError("prediction must be non-negative")
+
+
+def accept_prediction(output: Mapping[str, Any]) -> None:
+    del output
 
 
 def _predictor() -> Predictor:
@@ -341,6 +351,32 @@ def test_numpy_incompatible_dtype_names_form_and_field() -> None:
                 "sample_id": ["bfloat"],
                 "x": torch.ones(1, 2, dtype=torch.bfloat16),
             },
+            forms=("pyfunc",),
+        )
+
+    assert (
+        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
+    )
+
+
+def test_lossy_sequence_output_fails_before_logging() -> None:
+    experiment_id, run_id = _run()
+    predictor = Predictor(
+        model=nn.Identity(),
+        preprocessor=nn.Identity(),
+        normalizer=MixedSequenceOutput(),
+        validator=accept_prediction,
+        checkpoint_uri="runs:/training/checkpoint",
+        checkpoint_digest="c" * 64,
+    )
+
+    with pytest.raises(
+        ValueError, match="pyfunc export form.*prediction.*losslessly"
+    ):
+        log_predictor(
+            predictor,
+            run_id=run_id,
+            input_example=_example(),
             forms=("pyfunc",),
         )
 
