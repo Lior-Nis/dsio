@@ -66,7 +66,7 @@ def _audit_source(
         )
     try:
         tree = ast.parse(source_path.read_text(), filename=str(source_path))
-    except (OSError, SyntaxError, UnicodeError) as error:
+    except (OSError, SyntaxError, UnicodeError, ValueError) as error:
         failures.append(f"source: cannot parse {source_path}: {error}")
         return tuple(failures)
 
@@ -115,8 +115,9 @@ def _audit_source(
     explicit_match = _matched_project(tree, explicit_projects)
     if explicit_match is not None:
         failures.append(f"genericity: source references consumer project {explicit_match!r}")
-    if syntax.references_project_identity(tree):
-        known_match = _matched_project(tree, known_projects)
+    string_constants = syntax.string_constants(tree)
+    for context in syntax.project_contexts(tree):
+        known_match = _matched_project(context, known_projects, string_constants)
         if known_match is not None:
             failures.append(
                 f"genericity: source references consumer project {known_match!r}"
@@ -179,12 +180,12 @@ def _experimental_source(imported: str) -> tuple[str, Path] | None:
     return None
 
 
-def _matched_project(branch: ast.AST, projects: set[str]) -> str | None:
-    values = [
-        node.value.casefold()
-        for node in ast.walk(branch)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    ]
+def _matched_project(
+    branch: ast.AST,
+    projects: set[str],
+    constants: dict[str, set[str]] | None = None,
+) -> str | None:
+    values = (value.casefold() for value in syntax.string_values(branch, constants or {}))
     return next(
         (
             project

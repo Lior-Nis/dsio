@@ -86,6 +86,10 @@ def test_named_component_audit_and_enforcement_are_plain(
         require_admissible_component("dsio.experimental.missing:Component")
 
 
+def test_admission_package_passes_its_own_static_policy() -> None:
+    assert audit_component("dsio.experimental.admission:audit_source") == ()
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -121,6 +125,7 @@ def test_indirect_project_flag_is_rejected(tmp_path: Path) -> None:
 def test_domain_value_named_like_project_is_not_project_branching(tmp_path: Path) -> None:
     assert _audit(tmp_path, "if signal_kind == 'pulse':\n    value = 1\n") == ()
     assert _audit(tmp_path, "if projection == 'pulse':\n    value = 1\n") == ()
+    assert _audit(tmp_path, '"""Pulse transform."""\nvalue = project_axis + 1\n') == ()
 
 
 def test_explicit_consumer_name_needs_no_project_identifier(tmp_path: Path) -> None:
@@ -166,6 +171,10 @@ def test_project_alias_and_match_guard_are_rejected(tmp_path: Path) -> None:
 def test_project_name_constant_is_rejected(tmp_path: Path) -> None:
     source = "PROJECT_PULSE = 'pulse'\nif project == PROJECT_PULSE:\n    value = 1\n"
     assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+    assert any(
+        message.startswith("genericity:")
+        for message in _audit(tmp_path, "if project == 'pu' + 'lse':\n    value = 1\n")
+    )
 
 
 @pytest.mark.parametrize(
@@ -236,6 +245,7 @@ def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path
         "from dsio.train.torch_task import TASKS\n",
         "REGISTRY = {}\nREGISTRY['x'] = component\n",
         "COMPONENTS = {}\ndef register(name):\n    COMPONENTS[name] = component\n",
+        "HANDLERS = {}\ndef enroll(name):\n    HANDLERS[name] = component\n",
     ):
         assert any(
             message.startswith("runtime-registration:")
@@ -272,11 +282,39 @@ def test_closed_registry_references_cannot_be_passed_indirectly(
     )
 
 
+def test_reflective_dsio_registry_access_is_rejected(tmp_path: Path) -> None:
+    for reference in (
+        "NAME = 'METRICS'\ngetattr(metrics, NAME).clear()",
+        "metrics.__dict__['MET' + 'RICS'].clear()",
+        "mutate(vars(metrics)['METRICS'])",
+    ):
+        source = f"import dsio.eval.metrics as metrics\n{reference}\n"
+        assert any(
+            message.startswith("runtime-registration:")
+            for message in _audit(tmp_path, source)
+        )
+
+
+def test_generic_component_collections_are_not_registries(tmp_path: Path) -> None:
+    source = """
+from torch import nn
+class Ensemble(nn.Module):
+    def __init__(self, components):
+        super().__init__()
+        self.components = nn.ModuleList(components)
+def apply_plugins(value, plugins):
+    return tuple(plugin(value) for plugin in plugins)
+"""
+    assert _audit(tmp_path, source) == ()
+
+
 @pytest.mark.parametrize(
     "source",
     [
         "import builtins\nbuiltins.__import__('consumer_x.private')\n",
         "import importlib\ngetattr(importlib, 'import_module')('consumer_x.private')\n",
+        "import builtins\nbuiltins.eval(source)\n",
+        "from builtins import exec as run\nrun(source)\n",
         "eval(source)\n",
     ],
 )
@@ -381,6 +419,7 @@ def test_one_project_name_string_is_normalized(tmp_path: Path) -> None:
         ("candidate.py", None, ()),
         ("candidate.py", "dsio.experimental.candidate", b"consumer_x"),
         ("candidate.py", "dsio.experimental.candidate", ("consumer_x", 1)),
+        ("bad\0.py", "dsio.experimental.candidate", ()),
     ],
 )
 def test_malformed_audit_inputs_return_an_input_rule(
@@ -388,7 +427,7 @@ def test_malformed_audit_inputs_return_an_input_rule(
 ) -> None:
     failures = audit_source(path, module=module, project_names=project_names)
 
-    assert failures[0].startswith("input:")
+    assert failures[0].startswith(("input:", "source:"))
 
 
 def test_named_audit_validates_before_importing(
