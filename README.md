@@ -188,7 +188,7 @@ MLflow remains the record: the source Run owns the manifest artifact and native 
 the consumer links that same dataset plus the immutable artifact URI without copying either.
 
 Supported names are owned by DSIO; projects cannot register splitters at runtime. Novel
-algorithms enter through DSIO's reviewed experimental-admission path.
+algorithms enter through DSIO's reviewed [component-admission path](docs/component-admission.md).
 
 Replay those exact assignments through the one Lightning data composition root:
 
