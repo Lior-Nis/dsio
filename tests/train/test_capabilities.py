@@ -329,8 +329,15 @@ def test_representative_batch_never_initializes_persistent_training_workers() ->
     )
 
     representative_batch(loader)
-
-    assert next(iter(loader))["sample_id"] == next(iter(control))["sample_id"]
+    left = iter(loader)
+    right = iter(control)
+    try:
+        assert next(left)["sample_id"] == next(right)["sample_id"]
+    finally:
+        left._shutdown_workers()  # type: ignore[attr-defined]
+        right._shutdown_workers()  # type: ignore[attr-defined]
+        loader._iterator = None  # type: ignore[attr-defined]
+        control._iterator = None  # type: ignore[attr-defined]
 
 
 def test_cuda_zero_rng_is_never_replaced_by_the_current_device(
