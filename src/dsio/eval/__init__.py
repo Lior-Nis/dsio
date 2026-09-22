@@ -9,3 +9,7 @@ This package is still a leaf. It imports nothing from dsio except :mod:`dsio.con
 which is what lets a runner in :mod:`dsio.train` depend on this package's artifact
 contract without this package ever depending back on a runner, a store, or a split.
 """
+
+from dsio.eval.execution import EvaluationError, evaluate
+
+__all__ = ["EvaluationError", "evaluate"]
