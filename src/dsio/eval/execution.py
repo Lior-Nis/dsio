@@ -22,7 +22,7 @@ from mlflow.entities import (
     Run,
 )
 
-from dsio.eval.metrics import MetricError, compute
+from dsio.eval.metrics import compute
 from dsio.inference.loading import InferenceError, predict
 
 _LOGGED_MODEL_URI = re.compile(r"models:/(m-[0-9a-f]{32})")
@@ -46,7 +46,8 @@ def evaluate(
 ) -> dict[str, float]:
     """Compute and record evaluation evidence on one caller-owned child Run."""
     client = MlflowClient()
-    _child_run(client, run_id)
+    child = _child_run(client, run_id)
+    _require_clean_child(client, child)
     model_id, model_source_run_id = _model_evidence(client, model_uri)
     dataset_input = _dataset_evidence(client, dataset_run_id)
     names = _metric_names(metrics)
@@ -71,21 +72,17 @@ def evaluate(
             f"{prediction_field!r} shape {predicted.shape}"
         )
     score = None if score_field is None else _output(outputs, score_field, "score")
-    if score is not None and (score.ndim == 0 or score.shape[0] != targets.shape[0]):
-        raise EvaluationError(
-            f"evaluation score field {score_field!r} has {score.shape} for "
-            f"{targets.shape[0]} target rows"
-        )
+    _validate_metric_arrays(targets, predicted, score, score_field)
     try:
         values = compute(names, targets, predicted, score)
-    except (MetricError, KeyError, TypeError, ValueError) as error:
+    except Exception as error:
         raise EvaluationError(
             f"metric inputs or configuration are incompatible: {error}"
         ) from error
     if any(not math.isfinite(value) for value in values.values()):
         raise EvaluationError("evaluation metrics must all be finite")
 
-    _child_run(client, run_id)
+    _require_clean_child(client, _child_run(client, run_id))
     _model_evidence(client, model_uri)
     _dataset_evidence(client, dataset_run_id)
     linked_dataset = _evaluation_dataset_input(dataset_input, dataset_run_id)
@@ -147,11 +144,46 @@ def _child_run(client: MlflowClient, run_id: str) -> Run:
         ) from error
     if run.info.lifecycle_stage != "active" or run.info.status != "RUNNING":
         raise EvaluationError(f"evaluation child Run {run_id!r} must be active and RUNNING")
-    if not run.data.tags.get(_PARENT_RUN_TAG):
+    parent_run_id = run.data.tags.get(_PARENT_RUN_TAG)
+    if not parent_run_id or parent_run_id == run_id:
         raise EvaluationError(
             f"evaluation Run {run_id!r} must be a tracked child of a project flow"
         )
+    try:
+        parent = client.get_run(parent_run_id)
+    except Exception as error:
+        raise EvaluationError(
+            f"evaluation parent Run {parent_run_id!r} cannot be resolved: {error}"
+        ) from error
+    if (
+        parent.info.lifecycle_stage != "active"
+        or parent.info.status != "RUNNING"
+        or parent.info.experiment_id != run.info.experiment_id
+        or parent.data.tags.get(_PARENT_RUN_TAG)
+    ):
+        raise EvaluationError(
+            f"evaluation parent Run {parent_run_id!r} must be an active RUNNING "
+            "top-level Run in the child's experiment"
+        )
     return run
+
+
+def _require_clean_child(client: MlflowClient, run: Run) -> None:
+    inputs = run.inputs
+    has_inputs = inputs is not None and bool(inputs.dataset_inputs or inputs.model_inputs)
+    evaluation_metadata = any(key.startswith("evaluation.") for key in run.data.params) or any(
+        key.startswith("dsio.evaluation.") for key in run.data.tags
+    )
+    try:
+        artifacts = client.list_artifacts(run.info.run_id, "evaluation")
+    except Exception as error:
+        raise EvaluationError(
+            f"evaluation child Run {run.info.run_id!r} artifacts cannot be inspected: {error}"
+        ) from error
+    if run.data.metrics or has_inputs or evaluation_metadata or artifacts:
+        raise EvaluationError(
+            f"evaluation child Run {run.info.run_id!r} already contains evaluation evidence"
+        )
 
 
 def _model_evidence(client: MlflowClient, model_uri: str) -> tuple[str, str]:
@@ -230,8 +262,8 @@ def _metric_names(metrics: Sequence[str]) -> tuple[str, ...]:
 
 
 def _field_name(name: str, role: str) -> None:
-    if not isinstance(name, str) or not name:
-        raise EvaluationError(f"evaluation {role} field must be a non-empty string")
+    if not isinstance(name, str) or not name or name == "sample_id":
+        raise EvaluationError(f"evaluation {role} field must be a non-empty non-identity string")
 
 
 def _output(
@@ -243,3 +275,57 @@ def _output(
             f"evaluation {role} field {field!r} is missing or is not a NumPy array"
         )
     return value
+
+
+def _validate_metric_arrays(
+    targets: np.ndarray[Any, Any],
+    predicted: np.ndarray[Any, Any],
+    score: np.ndarray[Any, Any] | None,
+    score_field: str | None,
+) -> None:
+    target_family = _dtype_family(targets, "target")
+    prediction_family = _dtype_family(predicted, "prediction")
+    if target_family != prediction_family:
+        raise EvaluationError(
+            f"evaluation target dtype {targets.dtype} is incompatible with prediction "
+            f"dtype {predicted.dtype}"
+        )
+    _require_finite(targets, "target")
+    _require_finite(predicted, "prediction")
+    if score is None:
+        return
+    if score.dtype.kind not in "buif":
+        raise EvaluationError(
+            f"evaluation score field {score_field!r} must contain real numeric values"
+        )
+    if targets.ndim != 1 or predicted.ndim != 1:
+        raise EvaluationError(
+            "evaluation targets and predictions must be one-dimensional when a score "
+            "field is configured"
+        )
+    if score.ndim not in {1, 2} or score.shape[0] != targets.shape[0]:
+        raise EvaluationError(
+            f"evaluation score field {score_field!r} has incompatible shape {score.shape}"
+        )
+    if score.ndim == 2 and score.shape[1] != 2:
+        raise EvaluationError(
+            f"evaluation score field {score_field!r} must have one value or two class "
+            "columns per target"
+        )
+    _require_finite(score, "score")
+
+
+def _dtype_family(value: np.ndarray[Any, Any], role: str) -> str:
+    if value.dtype.kind in "buif":
+        return "numeric"
+    if value.dtype.kind in "US":
+        return "text"
+    raise EvaluationError(
+        f"evaluation {role} dtype {value.dtype} is unsupported; object and complex "
+        "arrays are not safe metric evidence"
+    )
+
+
+def _require_finite(value: np.ndarray[Any, Any], role: str) -> None:
+    if value.dtype.kind in "buif" and not bool(np.isfinite(value).all()):
+        raise EvaluationError(f"evaluation {role} values must all be finite")

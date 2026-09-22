@@ -78,6 +78,15 @@ def _inputs() -> dict[str, np.ndarray[Any, Any]]:
     }
 
 
+def _evaluation_child(client: MlflowClient, experiment_id: str) -> tuple[str, str]:
+    parent_run_id = client.create_run(experiment_id).info.run_id
+    child_run_id = client.create_run(
+        experiment_id,
+        tags={"mlflow.parentRunId": parent_run_id},
+    ).info.run_id
+    return parent_run_id, child_run_id
+
+
 def _isolate_prefect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in tuple(os.environ):
         if name.startswith("PREFECT_"):
@@ -193,10 +202,7 @@ def test_invalid_target_fails_before_logging_successful_metrics() -> None:
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()
     experiment_id = client.create_experiment("evaluation-invalid")
-    child_run_id = client.create_run(
-        experiment_id,
-        tags={"mlflow.parentRunId": "parent"},
-    ).info.run_id
+    _, child_run_id = _evaluation_child(client, experiment_id)
 
     with pytest.raises(EvaluationError, match="target.*shape"):
         evaluate(
@@ -222,10 +228,9 @@ def test_invalid_dataset_source_fails_before_metrics(source: str) -> None:
         dataset_run_id = replacement
     else:
         client.set_terminated(dataset_run_id, "FAILED")
-    child_run_id = client.create_run(
-        client.get_run(dataset_run_id).info.experiment_id,
-        tags={"mlflow.parentRunId": "parent"},
-    ).info.run_id
+    parent_run_id, child_run_id = _evaluation_child(
+        client, client.get_run(dataset_run_id).info.experiment_id
+    )
 
     with pytest.raises(EvaluationError, match="dataset source Run.*FINISHED"):
         evaluate(
@@ -238,3 +243,107 @@ def test_invalid_dataset_source_fails_before_metrics(source: str) -> None:
         )
 
     assert client.get_run(child_run_id).data.metrics == {}
+    assert client.get_run(parent_run_id).info.status == "RUNNING"
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        np.asarray([[np.nan], [3.0]], dtype=np.float32),
+        np.asarray([[2.0], [3.0]], dtype=object),
+        np.asarray([["2"], ["3"]]),
+    ],
+)
+def test_unsafe_target_values_fail_before_writes(targets: np.ndarray[Any, Any]) -> None:
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("evaluation-unsafe-target")
+    _, child_run_id = _evaluation_child(client, experiment_id)
+
+    with pytest.raises(EvaluationError, match="target"):
+        evaluate(
+            run_id=child_run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=targets,
+            metrics=("mae",),
+        )
+
+    child = client.get_run(child_run_id)
+    assert child.data.metrics == {}
+    assert child.inputs.dataset_inputs == []
+    assert child.inputs.model_inputs == []
+
+
+@pytest.mark.parametrize("role", ["prediction_field", "score_field"])
+def test_identity_cannot_be_selected_as_a_metric_field(role: str) -> None:
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("evaluation-identity-field")
+    _, child_run_id = _evaluation_child(client, experiment_id)
+
+    arguments = {role: "sample_id"}
+    with pytest.raises(EvaluationError, match="non-identity"):
+        evaluate(
+            run_id=child_run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=np.asarray([[2.0], [3.0]], dtype=np.float32),
+            metrics=("mae",),
+            **arguments,
+        )
+
+
+def test_incompatible_score_rank_fails_before_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.eval.execution as execution
+
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("evaluation-score-rank")
+    _, child_run_id = _evaluation_child(client, experiment_id)
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {
+            "sample_id": np.asarray(["a", "b"]),
+            "prediction": np.asarray([0, 1]),
+            "score": np.ones((2, 2, 2), dtype=np.float32),
+        },
+    )
+
+    with pytest.raises(EvaluationError, match="score.*shape"):
+        evaluate(
+            run_id=child_run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=np.asarray([0, 1]),
+            metrics=("average_precision",),
+            score_field="score",
+        )
+
+    assert client.get_run(child_run_id).data.metrics == {}
+
+
+def test_evaluation_requires_a_clean_dedicated_child() -> None:
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("evaluation-collision")
+    _, child_run_id = _evaluation_child(client, experiment_id)
+    client.log_param(child_run_id, "evaluation.metrics", '["old"]')
+
+    with pytest.raises(EvaluationError, match="already contains evaluation evidence"):
+        evaluate(
+            run_id=child_run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=np.asarray([[2.0], [3.0]], dtype=np.float32),
+            metrics=("mae",),
+        )
+
+    assert client.list_artifacts(child_run_id, "evaluation") == []
