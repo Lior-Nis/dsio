@@ -71,14 +71,16 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 3.3 at `9f5bd48`; compared declarative per-component capability metadata with a probe of the real assembled chain and chose the latter to avoid an unverifiable parallel registry.
-- 2026-09-22: Exact candidate passed distribution/consumer contracts (8 tests), the remaining repository suite (861 tests; 3 live tests deselected), Ruff, mypy across 78 source files, and all three import contracts.
+- 2026-09-22: First independent review blocked the candidate on detached losses, retained lazy/parameter/Python state, incomplete objective validation, unproved optimizer construction, string multi-device selectors, non-Torch RNG leakage, CUDA device-zero handling, and raw transfer failures. Every finding was reproduced and fixed test-first.
+- 2026-09-22: Hardened candidate passed distribution/consumer contracts (8 tests), the remaining repository suite (871 tests; 3 live tests deselected), Ruff, mypy across 78 source files, and all three import contracts.
 
 ### Completion Notes List
 
 - Supervised and SSL runners now call one capability seam after native Trainer construction and before `fit()`.
 - Requested CUDA unavailability, multi-device execution, unsupported devices, and non-float32 precision fail closed without fallback and point to experimental admission.
 - The real assembled augmentation and model/objective boundary executes forward and backward on a representative batch using Lightning's resolved device and precision context.
-- Probe sampling and execution restore DataLoader order, RNG state, module modes, buffers, and gradients so validation does not alter training semantics.
+- Probe sampling preserves DataLoader order and all seeded RNG streams. Execution uses an isolated module clone so parameters, lazy initialization, caches, buffers, metrics, modes, and arbitrary component state cannot alter the real training module.
+- The proof validates the complete objective result, executes backward, and constructs the native optimizer/scheduler before reporting support.
 - Requested and resolved execution settings plus PyTorch, CUDA, cuDNN, strategy, and device identity are native MLflow parameters on the training Run.
 
 ### File List
