@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 from mlflow.tracking import MlflowClient
+from mlflow.types.schema import Schema, TensorSpec
 from torch import Tensor, nn
 
 from dsio.inference import (
@@ -108,6 +109,14 @@ def test_predict_rejects_missing_logged_model() -> None:
         predict(f"models:/m-{'0' * 32}", _inputs())
 
 
+@pytest.mark.parametrize("inputs", [None, [1, 2]])
+def test_predict_rejects_non_mapping_inputs(inputs: Any) -> None:
+    model_uri = _logged_models()["pyfunc"].model_uri
+
+    with pytest.raises(InferenceError, match="inputs must be a mapping"):
+        predict(model_uri, inputs)
+
+
 def test_predict_rejects_native_form_and_unsupported_device() -> None:
     models = _logged_models()
 
@@ -148,6 +157,70 @@ def test_predict_preserves_packaged_semantic_validation() -> None:
         predict(model_uri, inputs)
 
     assert isinstance(caught.value.__cause__, PredictorError)
+
+
+def test_predict_translates_deserialization_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_uri = _logged_models()["pyfunc"].model_uri
+
+    def missing_dependency(_: str) -> None:
+        raise ModuleNotFoundError("consumer dependency is unavailable")
+
+    monkeypatch.setattr(mlflow.pyfunc, "load_model", missing_dependency)
+
+    with pytest.raises(InferenceError, match="cannot be loaded") as caught:
+        predict(model_uri, _inputs())
+
+    assert isinstance(caught.value.__cause__, ModuleNotFoundError)
+
+
+def test_predict_revalidates_model_evidence_after_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_uri = _logged_models()["pyfunc"].model_uri
+    model_id = model_uri.removeprefix("models:/")
+    real_load = mlflow.pyfunc.load_model
+
+    def load_then_retag(uri: str) -> Any:
+        loaded = real_load(uri)
+        MlflowClient().set_logged_model_tags(
+            model_id, {"dsio.export_form": "pytorch"}
+        )
+        return loaded
+
+    monkeypatch.setattr(mlflow.pyfunc, "load_model", load_then_retag)
+
+    with pytest.raises(InferenceError, match="pyfunc export form"):
+        predict(model_uri, _inputs())
+
+
+def test_predict_rejects_duplicate_signature_fields() -> None:
+    import dsio.inference.loading as loading
+
+    schema = Schema(
+        [
+            TensorSpec(np.dtype(str), (-1,), name="sample_id"),
+            TensorSpec(np.dtype(str), (-1,), name="sample_id"),
+        ]
+    )
+
+    with pytest.raises(InferenceError, match="duplicate field names"):
+        loading._tensor_specs(schema, "input")
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        TensorSpec(np.dtype(np.int64), (-1,), name="sample_id"),
+        TensorSpec(np.dtype(str), (-1, 1), name="sample_id"),
+    ],
+)
+def test_predict_rejects_invalid_identity_signature(identity: TensorSpec) -> None:
+    import dsio.inference.loading as loading
+
+    with pytest.raises(InferenceError, match="one-dimensional string tensor"):
+        loading._tensor_specs(Schema([identity]), "input")
 
 
 def test_predict_rejects_output_identity_or_signature_drift(

@@ -34,7 +34,11 @@ def predict(
         raise InferenceError(
             f"predictor device must be 'cpu'; requested device {device!r} is unsupported"
         )
-    loaded = _load_predictor(model_uri)
+    if not isinstance(inputs, Mapping):
+        raise InferenceError(
+            f"predictor inputs must be a mapping, got {type(inputs).__name__}"
+        )
+    loaded, model_id = _load_predictor(model_uri)
     input_schema = loaded.metadata.get_input_schema()
     output_schema = loaded.metadata.get_output_schema()
     _validate_arrays(inputs, input_schema, "input")
@@ -48,10 +52,11 @@ def predict(
         )
     _validate_arrays(result, output_schema, "output")
     _require_identity(inputs, result)
+    _require_logged_predictor(model_id, model_uri)
     return dict(result)
 
 
-def _load_predictor(model_uri: str) -> PyFuncModel:
+def _load_predictor(model_uri: str) -> tuple[PyFuncModel, str]:
     if not isinstance(model_uri, str):
         raise InferenceError("model_uri must be an immutable MLflow Logged Model URI")
     matched = _LOGGED_MODEL_URI.fullmatch(model_uri)
@@ -61,9 +66,21 @@ def _load_predictor(model_uri: str) -> PyFuncModel:
             "in the form 'models:/m-<id>'"
         )
     model_id = matched.group(1)
+    _require_logged_predictor(model_id, model_uri)
+    try:
+        loaded = mlflow.pyfunc.load_model(model_uri)
+    except Exception as error:
+        raise InferenceError(
+            f"immutable Logged Model {model_id!r} cannot be loaded: {error}"
+        ) from error
+    _require_logged_predictor(model_id, model_uri)
+    return loaded, model_id
+
+
+def _require_logged_predictor(model_id: str, model_uri: str) -> None:
     try:
         logged = mlflow.get_logged_model(model_id)
-    except (MlflowException, OSError) as error:
+    except Exception as error:
         raise InferenceError(
             f"immutable Logged Model {model_id!r} cannot be resolved: {error}"
         ) from error
@@ -78,12 +95,6 @@ def _load_predictor(model_uri: str) -> PyFuncModel:
         raise InferenceError(
             f"immutable Logged Model {model_id!r} must be a DSIO pyfunc export form"
         )
-    try:
-        return mlflow.pyfunc.load_model(model_uri)
-    except (MlflowException, OSError, TypeError, ValueError) as error:
-        raise InferenceError(
-            f"immutable Logged Model {model_id!r} cannot be loaded: {error}"
-        ) from error
 
 
 def _validate_arrays(values: Mapping[str, Any], schema: Schema | None, role: str) -> None:
@@ -127,16 +138,27 @@ def _tensor_specs(schema: Schema | None, role: str) -> list[TensorSpec]:
     if schema is None or not schema.inputs:
         raise InferenceError(f"logged predictor is missing its {role} signature")
     specs: list[TensorSpec] = []
+    field_names: list[str] = []
     for spec in schema.inputs:
         if not isinstance(spec, TensorSpec) or spec.name is None:
             raise InferenceError(
                 f"logged predictor {role} signature must contain named tensor fields"
             )
         specs.append(spec)
-    names = {spec.name for spec in specs}
+        field_names.append(spec.name)
+    if len(set(field_names)) != len(field_names):
+        raise InferenceError(
+            f"logged predictor {role} signature contains duplicate field names"
+        )
+    names = set(field_names)
     if "sample_id" not in names:
         raise InferenceError(
             f"logged predictor {role} signature must declare sample_id identity"
+        )
+    identity = next(spec for spec in specs if spec.name == "sample_id")
+    if identity.type.kind != "U" or len(identity.shape) != 1:
+        raise InferenceError(
+            f"logged predictor {role} sample_id must be a one-dimensional string tensor"
         )
     return specs
 
