@@ -166,12 +166,15 @@ def build_predictor(
         checkpoint_digest=checkpoint.digest,
     )
     try:
-        predictor(input_example)
+        probe = copy.deepcopy(predictor)
+        with torch.random.fork_rng():
+            probe(input_example)
+        torch.save(probe, io.BytesIO())
         torch.save(predictor, io.BytesIO())
     except PredictorError as error:
         raise PredictorError(f"predictor components are incompatible: {error}") from error
     except Exception as error:
-        raise PredictorError(f"predictor is not serializable: {error}") from error
+        raise PredictorError(f"predictor cannot be isolated or serialized: {error}") from error
     _require_successful_run(checkpoint, uri)
     return predictor
 

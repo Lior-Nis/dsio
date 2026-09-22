@@ -66,6 +66,17 @@ class ThresholdValidator:
             raise ValueError("prediction exceeds maximum")
 
 
+class CountingPreprocessor(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.call_count: Tensor
+        self.register_buffer("call_count", torch.tensor(0))
+
+    def forward(self, value: Tensor) -> Tensor:
+        self.call_count.add_(1)
+        return value
+
+
 def corrupting_validator(output: Mapping[str, Any]) -> None:
     output["sample_id"].clear()
 
@@ -273,6 +284,15 @@ def test_in_place_preprocessing_does_not_mutate_caller_input(tmp_path: Path) -> 
     predictor(batch)
 
     torch.testing.assert_close(batch["x"], original)
+
+
+def test_construction_probe_does_not_mutate_the_returned_predictor(tmp_path: Path) -> None:
+    predictor = _build(_checkpoint(tmp_path), preprocessor=CountingPreprocessor())
+    assert isinstance(predictor.preprocessor, CountingPreprocessor)
+
+    assert predictor.preprocessor.call_count.item() == 0
+    predictor({"sample_id": ["first"], "x": torch.ones(1, 2)})
+    assert predictor.preprocessor.call_count.item() == 1
 
 
 def test_checkpoint_and_predictor_remain_distinct_artifacts(tmp_path: Path) -> None:
