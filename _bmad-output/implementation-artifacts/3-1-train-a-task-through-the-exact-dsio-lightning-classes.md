@@ -73,6 +73,7 @@ Codex (GPT-5)
 - 2026-09-22: Blind review found two window-ID encodings; identity now has one implementation on `WindowIndex`, shared by governed examples and full or reordered datasets.
 - 2026-09-22: Edge review closed non-finite optimizer values, Lightning loss-name collisions, diagnostic loss replacement, and prediction type/cardinality mismatches at their narrow boundaries.
 - 2026-09-22: Edge re-review added fail-closed validation for optional prediction rows, malformed window entity codes, and oversized numeric hyperparameters.
+- 2026-09-22: Final edge pass moved entity-code validation before narrowing conversion and required legacy prediction rows to be a flat vector.
 
 ### Completion Notes List
 

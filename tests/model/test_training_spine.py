@@ -219,7 +219,10 @@ def test_prediction_output_must_match_sample_identity(
         module.predict_step({"sample_id": sample_ids, "x": x}, 0)
 
 
-@pytest.mark.parametrize("row", [torch.tensor([7]), torch.tensor(7), [7]])
+@pytest.mark.parametrize(
+    "row",
+    [torch.tensor([7]), torch.tensor(7), torch.tensor([[7], [8]]), [7]],
+)
 def test_prediction_rows_must_match_sample_identity(row: object) -> None:
     module = DsioModule(model=nn.Identity(), objective=ClassificationObjective())
 

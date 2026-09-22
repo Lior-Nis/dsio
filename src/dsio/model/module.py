@@ -138,10 +138,11 @@ class DsioModule(LightningModule):
             row = batch["row"]
             if not isinstance(row, Tensor):
                 raise ModuleError(f"prediction row must be a tensor, got {type(row).__name__}")
-            if row.ndim == 0 or row.shape[0] != len(sample_ids):
+            if row.ndim != 1 or row.shape[0] != len(sample_ids):
                 size = None if row.ndim == 0 else row.shape[0]
                 raise ModuleError(
-                    f"prediction batch has {size} rows for {len(sample_ids)} sample_id values"
+                    f"prediction row must be one-dimensional with {len(sample_ids)} values; "
+                    f"got shape {tuple(row.shape)} with leading size {size}"
                 )
             result["row"] = row
         return result
