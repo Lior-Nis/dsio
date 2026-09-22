@@ -4,7 +4,7 @@ baseline_commit: 9f5bd48
 
 # Story 3.4: Reject Unsupported Training Configurations Before Execution
 
-Status: review
+Status: done
 
 ## Story
 
@@ -74,6 +74,7 @@ Codex (GPT-5)
 - 2026-09-22: First independent review blocked the candidate on detached losses, retained lazy/parameter/Python state, incomplete objective validation, unproved optimizer construction, string multi-device selectors, non-Torch RNG leakage, CUDA device-zero handling, and raw transfer failures. Every finding was reproduced and fixed test-first.
 - 2026-09-22: Second review found persistent-worker loader initialization changed the real shuffled training order and requested component identities in transfer diagnostics. The probe now samples through a separate one-shot loader, and both closures have regressions.
 - 2026-09-22: Hardened candidate passed distribution/consumer contracts (8 tests), the remaining repository suite (872 tests; 3 live tests deselected), Ruff, mypy across 78 source files, and all three import contracts.
+- 2026-09-22: Exact candidate `80f6fe5` was approved independently by the acceptance, blind, and edge review layers with AC1-AC4 satisfied and no remaining actionable finding.
 
 ### Completion Notes List
 
@@ -99,3 +100,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 3.4 and started implementation.
 - 2026-09-22: Added the shared fail-closed capability proof and MLflow execution evidence; moved the story to review after the full release gate passed.
+- 2026-09-22: Completed Story 3.4 and Epic 3 after the hardened exact candidate passed all release and independent review gates.
