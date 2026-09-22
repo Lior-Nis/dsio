@@ -237,6 +237,24 @@ def test_prediction_rows_must_match_sample_identity(row: object) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "row",
+    [torch.tensor([0.0, 1.0]), torch.tensor([False, True]), torch.tensor([0j, 1j])],
+)
+def test_prediction_rows_must_be_integral(row: torch.Tensor) -> None:
+    module = DsioModule(model=nn.Identity(), objective=ClassificationObjective())
+
+    with pytest.raises(ModuleError, match="row must contain integers"):
+        module.predict_step(
+            {
+                "sample_id": ["left", "right"],
+                "x": torch.ones(2, 1),
+                "row": row,
+            },
+            0,
+        )
+
+
 class CallableModel(nn.Module):
     def __init__(self, function: Any) -> None:
         super().__init__()

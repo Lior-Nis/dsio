@@ -144,6 +144,8 @@ class DsioModule(LightningModule):
                     f"prediction row must be one-dimensional with {len(sample_ids)} values; "
                     f"got shape {tuple(row.shape)} with leading size {size}"
                 )
+            if row.dtype == torch.bool or row.is_floating_point() or row.is_complex():
+                raise ModuleError(f"prediction row must contain integers, got {row.dtype}")
             result["row"] = row
         return result
 

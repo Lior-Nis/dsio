@@ -74,6 +74,7 @@ Codex (GPT-5)
 - 2026-09-22: Edge review closed non-finite optimizer values, Lightning loss-name collisions, diagnostic loss replacement, and prediction type/cardinality mismatches at their narrow boundaries.
 - 2026-09-22: Edge re-review added fail-closed validation for optional prediction rows, malformed window entity codes, and oversized numeric hyperparameters.
 - 2026-09-22: Final edge pass moved entity-code validation before narrowing conversion and required legacy prediction rows to be a flat vector.
+- 2026-09-22: Exact-SHA edge review closed the same narrowing gap for window starts and rejected non-integral prediction row coordinates.
 
 ### Completion Notes List
 

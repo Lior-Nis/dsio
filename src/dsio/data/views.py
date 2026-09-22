@@ -144,7 +144,7 @@ class WindowIndex:
         labels: np.ndarray | None = None,
         metrics: dict[str, np.ndarray] | None = None,
     ) -> None:
-        self.starts = np.ascontiguousarray(starts, dtype=np.int64)
+        raw_starts = np.asarray(starts)
         raw_entity_codes = np.asarray(entity_codes)
         self.entity_names = list(entity_names)
         self.entity_groups = list(entity_groups)
@@ -153,9 +153,13 @@ class WindowIndex:
         self.store_digest = store_digest
         self.labels = labels
         self.metrics = dict(metrics or {})
+        if raw_starts.ndim != 1 or raw_starts.dtype.kind not in "iu":
+            raise ViewError("starts must be a one-dimensional integer array")
+        if np.any(raw_starts < 0) or np.any(raw_starts > np.iinfo(np.int64).max):
+            raise ViewError("starts must be non-negative int64 values")
         if raw_entity_codes.ndim != 1 or raw_entity_codes.dtype.kind not in "iu":
             raise ViewError("entity_codes must be a one-dimensional integer array")
-        if self.starts.size != raw_entity_codes.size:
+        if raw_starts.size != raw_entity_codes.size:
             raise ViewError("starts and entity_codes must be the same length")
         if len(self.entity_names) != len(self.entity_groups):
             raise ViewError("entity_names and entity_groups must be the same length")
@@ -164,6 +168,7 @@ class WindowIndex:
                 f"entity_codes must be within [0, {len(self.entity_names)}); "
                 "the index contains an invalid entity code"
             )
+        self.starts = np.ascontiguousarray(raw_starts, dtype=np.int64)
         self.entity_codes = np.ascontiguousarray(raw_entity_codes, dtype=np.int32)
 
     def __len__(self) -> int:

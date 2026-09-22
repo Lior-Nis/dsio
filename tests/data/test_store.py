@@ -121,6 +121,29 @@ def test_window_index_rejects_invalid_entity_codes(entity_codes: np.ndarray) -> 
         )
 
 
+@pytest.mark.parametrize(
+    "starts",
+    [
+        np.array([-1]),
+        np.array([2**63], dtype=np.uint64),
+        np.array([0.5]),
+        np.array(["10"]),
+        np.array([[10]]),
+    ],
+)
+def test_window_index_rejects_invalid_starts(starts: np.ndarray) -> None:
+    with pytest.raises(ViewError, match="starts must be"):
+        WindowIndex(
+            starts=starts,
+            entity_codes=np.array([0]),
+            entity_names=["first"],
+            entity_groups=["one"],
+            spec=WindowSpec(length=4, stride=4),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
 # --- store --------------------------------------------------------------------------
 
 
