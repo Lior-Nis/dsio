@@ -4,7 +4,7 @@ baseline_commit: 902e8a3
 
 # Story 4.2: Log a Signed MLflow Model with Explicit Export Forms
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -21,19 +21,19 @@ so that its accepted inputs, produced outputs, and supported representations are
 
 ## Tasks / Subtasks
 
-- [ ] Add one MLflow export seam under `dsio.inference` (AC: 1-4)
-  - [ ] Accept an existing Predictor, one representative identity-bearing batch, an active Run id, and explicit export-form names.
-  - [ ] Infer one canonical MLflow signature from the validated input/output fixture.
-  - [ ] Return native MLflow `ModelInfo` objects rather than a DSIO export result model.
-- [ ] Log only declared native forms (AC: 2-4)
-  - [ ] Log the complete predictor through `mlflow.pytorch.log_model` for the native form.
-  - [ ] Use one minimal `PythonModel` adapter for MLflow-compatible arrays and structured predictor input/output.
-  - [ ] Keep the semantic validator inside both serialized predictors and create no registered-model entity.
-- [ ] Fail before logging at explicit export boundaries (AC: 4)
-  - [ ] Reject empty, duplicate, unknown, or component-incompatible form declarations before the first flavor call.
-  - [ ] Validate the representative fixture and signature conversion before creating model artifacts.
-  - [ ] Do not synthesize a fallback form when a requested form cannot be represented.
-- [ ] Prove signatures, examples, immutable references, form selection, semantic validation, and native round trips through tests and release gates (AC: 1-4)
+- [x] Add one MLflow export seam under `dsio.inference` (AC: 1-4)
+  - [x] Accept an existing Predictor, one representative identity-bearing batch, an active Run id, and explicit export-form names.
+  - [x] Infer one canonical MLflow signature from the validated input/output fixture.
+  - [x] Return native MLflow `ModelInfo` objects rather than a DSIO export result model.
+- [x] Log only declared native forms (AC: 2-4)
+  - [x] Log the complete predictor through `mlflow.pytorch.log_model` for the native form.
+  - [x] Use one minimal `PythonModel` adapter for MLflow-compatible arrays and structured predictor input/output.
+  - [x] Keep the semantic validator inside both serialized predictors and create no registered-model entity.
+- [x] Fail before logging at explicit export boundaries (AC: 4)
+  - [x] Reject empty, duplicate, unknown, or component-incompatible form declarations before the first flavor call.
+  - [x] Validate the representative fixture and signature conversion before creating model artifacts.
+  - [x] Do not synthesize a fallback form when a requested form cannot be represented.
+- [x] Prove signatures, examples, immutable references, form selection, semantic validation, and native round trips through tests and release gates (AC: 1-4)
 
 ## Dev Notes
 
@@ -46,7 +46,7 @@ so that its accepted inputs, produced outputs, and supported representations are
 ### Native MLflow contract
 
 - Infer a single signature from numpy-compatible input and validated output fixtures, then pass it and the same input example to each native MLflow flavor logger.
-- Use MLflow 3's immutable `ModelInfo.model_uri`, `run_id`, `artifact_path`, and `model_id` as the recorded references. Do not create a DSIO registry or call MLflow Model Registry APIs.
+- Use MLflow 3's immutable `ModelInfo.model_uri`, `model_id`, and `artifact_path`, plus the `LoggedModel.source_run_id`, as the recorded references. Do not create a DSIO registry or call MLflow Model Registry APIs.
 - Attach checkpoint URI/digest and export-form identity as primitive MLflow model metadata/tags rather than duplicating them in a new DSIO object.
 
 ### Export compatibility
@@ -71,14 +71,25 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 4.1 at `902e8a3`; verified MLflow 3.16 native flavor behavior locally and selected native `ModelInfo` references plus one private PyFunc adapter over any DSIO export hierarchy.
+- 2026-09-22: Implemented native PyTorch/PyFunc export, one shared signature and input example, immutable source-Run linkage, flavor-attributed preflight, and actual serialize/load/execute equivalence checks.
+- 2026-09-22: Adversarial review found and closed stale Run snapshots, wrong multi-form error attribution, forced CPU remapping, and lossy heterogeneous sequence conversion while preserving homogeneous NumPy scalar and NaN outputs.
+- 2026-09-22: Exact candidate `dd67610` passed 19 focused tests, 910 core tests, 8 built-distribution/consumer tests, package build, Ruff, mypy, import contracts, and three independent final reviews.
 
 ### Completion Notes List
+
+- `log_predictor` returns only MLflow `ModelInfo` values and logs exactly the explicitly requested native forms; DSIO adds no registry, export result, or deployment abstraction.
+- Both representations package the complete semantic validator and are preflighted through deserialization and representative inference before the first MLflow model is initialized.
+- Source Run state is revalidated across the operation, and exported model metadata/tags retain checkpoint and form provenance.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/4-2-log-a-signed-mlflow-model-with-explicit-export-forms.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/dsio/inference/__init__.py`
+- `src/dsio/inference/export.py`
+- `tests/inference/test_export.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 4.2 and started implementation.
+- 2026-09-22: Completed native signed MLflow export with explicit forms and closed the independent acceptance, blind, and edge-case review gates.
