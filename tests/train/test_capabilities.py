@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 from torch import Tensor, nn
@@ -13,8 +17,9 @@ pytest.importorskip("lightning")
 
 from lightning import Trainer  # noqa: E402
 
+import dsio.train.capabilities as capabilities  # noqa: E402
 from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.model.components import CrossEntropy  # noqa: E402
+from dsio.model.components import CrossEntropy, EmbeddingEncoder  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
 from dsio.train.capabilities import (  # noqa: E402
     CapabilityError,
@@ -46,8 +51,40 @@ class UnavailableObjective(nn.Module):
         raise RuntimeError("imaginary_fft is unavailable")
 
 
+class DetachedObjective(nn.Module):
+    def forward(
+        self, model: nn.Module, batch: dict[str, Any], stage: str
+    ) -> dict[str, Tensor]:
+        del model, batch, stage
+        return {"loss": torch.tensor(1.0)}
+
+
+class StatefulObjective(nn.Module):
+    def forward(
+        self, model: nn.Module, batch: dict[str, Any], stage: str
+    ) -> dict[str, Tensor]:
+        del stage
+        random.random()
+        np.random.random()
+        prediction = model(batch["x"])
+        with torch.no_grad():
+            next(model.parameters()).add_(100)
+        return {"loss": prediction.sum()}
+
+
+class InvalidExtraOutputObjective(nn.Module):
+    def forward(
+        self, model: nn.Module, batch: dict[str, Any], stage: str
+    ) -> dict[str, Tensor]:
+        del stage
+        return {"loss": model(batch["x"]).sum(), "vector": torch.ones(2)}
+
+
 def _module(
-    *, objective: nn.Module | None = None, backbone: nn.Module | None = None
+    *,
+    objective: nn.Module | None = None,
+    backbone: nn.Module | None = None,
+    optimizer_parameters: dict[str, Any] | None = None,
 ) -> DsioModule:
     return DsioModule(
         model=ComponentChain(
@@ -55,6 +92,7 @@ def _module(
             head=nn.Linear(8, 2),
         ),
         objective=objective or LossObjective(CrossEntropy(threshold=0.5)),
+        optimizer_parameters=optimizer_parameters,
     )
 
 
@@ -134,6 +172,12 @@ def test_an_unavailable_declared_accelerator_never_falls_back(
     assert "will not fall back to CPU" in message
 
 
+@pytest.mark.parametrize("devices", ["2", "-1", "0,1"])
+def test_string_multi_device_selectors_are_not_a_single_device(devices: str) -> None:
+    with pytest.raises(CapabilityError, match="single-device"):
+        check_requested_capabilities(TrainerConfig(accelerator="cpu", devices=devices))
+
+
 def test_an_unavailable_operation_names_the_configured_boundary() -> None:
     with pytest.raises(CapabilityError) as caught:
         check_training_capabilities(
@@ -151,6 +195,103 @@ def test_an_unavailable_operation_names_the_configured_boundary() -> None:
     assert "fallback" not in message.lower()
 
 
+def test_a_detached_training_loss_is_rejected_before_fit() -> None:
+    with pytest.raises(CapabilityError) as caught:
+        check_training_capabilities(
+            _trainer(),
+            _module(objective=DetachedObjective()),
+            _batch(),
+            requested=TrainerConfig(accelerator="cpu", devices=1),
+        )
+
+    assert "does not require gradients" in str(caught.value)
+
+
+def test_the_complete_objective_result_contract_is_checked() -> None:
+    with pytest.raises(CapabilityError, match="objective result 'vector'.*scalar"):
+        check_training_capabilities(
+            _trainer(),
+            _module(objective=InvalidExtraOutputObjective()),
+            _batch(),
+            requested=TrainerConfig(accelerator="cpu", devices=1),
+        )
+
+
+def test_optimizer_construction_is_part_of_the_proof() -> None:
+    with pytest.raises(CapabilityError) as caught:
+        check_training_capabilities(
+            _trainer(),
+            _module(optimizer_parameters={"bogus": 1}),
+            _batch(),
+            requested=TrainerConfig(accelerator="cpu", devices=1),
+        )
+
+    message = str(caught.value)
+    assert "optimizer/scheduler" in message
+    assert "bogus" in message
+
+
+def test_module_transfer_failures_keep_capability_context() -> None:
+    meta_backbone = nn.Sequential(nn.Flatten(), nn.Linear(8, 8, device="meta"))
+
+    with pytest.raises(CapabilityError) as caught:
+        check_training_capabilities(
+            _trainer(),
+            _module(backbone=meta_backbone),
+            _batch(),
+            requested=TrainerConfig(accelerator="cpu", devices=1),
+        )
+
+    message = str(caught.value)
+    assert "module transfer to cpu/32-true" in message
+    assert "experimental admission" in message
+
+
+def test_the_probe_cannot_consume_lazy_state_from_the_real_module() -> None:
+    encoder = EmbeddingEncoder(vocab_size=16, embed_dim=4, out_dim=8)
+    module = _module(backbone=encoder)
+
+    check_training_capabilities(
+        _trainer(),
+        module,
+        _batch(),
+        requested=TrainerConfig(accelerator="cpu", devices=1),
+    )
+
+    assert not encoder._range_checked
+
+
+def test_the_probe_isolates_parameters_lazy_modules_and_seeded_rngs() -> None:
+    lazy = nn.LazyLinear(8)
+    module = _module(
+        backbone=nn.Sequential(nn.Flatten(), lazy),
+        objective=StatefulObjective(),
+    )
+    assert isinstance(module.model, ComponentChain)
+    assert isinstance(module.model.head, nn.Linear)
+    head = module.model.head
+    original_head = head.weight.detach().clone()
+    random.seed(17)
+    np.random.seed(17)
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+
+    check_training_capabilities(
+        _trainer(),
+        module,
+        _batch(),
+        requested=TrainerConfig(accelerator="cpu", devices=1),
+    )
+
+    assert lazy.has_uninitialized_params()
+    torch.testing.assert_close(head.weight, original_head)
+    assert random.getstate() == python_state
+    restored_numpy = np.random.get_state()
+    assert restored_numpy[0] == numpy_state[0]
+    np.testing.assert_array_equal(restored_numpy[1], numpy_state[1])
+    assert restored_numpy[2:] == numpy_state[2:]
+
+
 def test_representative_batch_does_not_advance_the_training_order() -> None:
     left_generator = torch.Generator().manual_seed(41)
     right_generator = torch.Generator().manual_seed(41)
@@ -165,3 +306,26 @@ def test_representative_batch_does_not_advance_the_training_order() -> None:
 
     assert len(probed["sample_id"]) == 3
     assert next(iter(loader))["sample_id"] == next(iter(control))["sample_id"]
+
+
+def test_cuda_zero_rng_is_never_replaced_by_the_current_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[int] = []
+
+    @contextmanager
+    def fake_fork_rng(*, devices: list[int]) -> Iterator[None]:
+        captured.extend(devices)
+        yield
+
+    monkeypatch.setattr(capabilities.torch.random, "fork_rng", fake_fork_rng)
+    monkeypatch.setattr(
+        capabilities.torch.cuda,
+        "current_device",
+        lambda: pytest.fail("cuda:0 has an explicit index"),
+    )
+
+    with capabilities._rng_context(torch.device("cuda:0")):
+        pass
+
+    assert captured == [0]

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from contextlib import nullcontext
+import copy
+import random
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
 from torch import Tensor
-from torchmetrics import Metric
 
 if TYPE_CHECKING:
     from lightning import Trainer
@@ -30,7 +32,7 @@ def check_requested_capabilities(requested: TrainerConfig) -> None:
         )
     if requested.accelerator == "cuda" and not torch.cuda.is_available():
         errors.append("requested accelerator 'cuda' is unavailable; DSIO will not fall back to CPU")
-    if isinstance(requested.devices, int) and requested.devices != 1:
+    if requested.devices not in {1, "auto"}:
         errors.append(f"devices={requested.devices} is outside the stable single-device matrix")
     if requested.precision != "32-true":
         errors.append(
@@ -45,12 +47,16 @@ def representative_batch(loader: Any) -> Any:
     generator = loader.generator
     generator_state = None if generator is None else generator.get_state()
     torch_state = torch.random.get_rng_state()
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
     try:
         return next(iter(loader))
     except StopIteration:
         raise CapabilityError("training capability preflight requires a non-empty loader") from None
     finally:
         torch.random.set_rng_state(torch_state)
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
         if generator is not None and generator_state is not None:
             generator.set_state(generator_state)
 
@@ -80,56 +86,63 @@ def check_training_capabilities(
         errors.append(f"batch transfer to {device}: {type(error).__name__}: {error}")
         transferred = None
 
-    original_modes = [(child, child.training) for child in module.modules()]
-    buffers = {name: value.detach().clone() for name, value in module.named_buffers()}
-    try:
-        module.to(device)
-        module.train()
-        with _rng_context(device):
-            if transferred is not None:
-                augmented = transferred
-                if module.training_augmentation is not None:
-                    try:
-                        with _precision_context(trainer):
-                            augmented = module.training_augmentation(
-                                transferred,
-                                seed=module.augmentation_seed,
-                                epoch=0,
-                                step=0,
-                                identity=module.augmentation_identity,
-                            )
-                    except Exception as error:  # noqa: BLE001 - component boundary
-                        errors.append(
-                            "training augmentation "
-                            f"{_name(module.training_augmentation)} on {device}/{precision}: "
-                            f"{type(error).__name__}: {error}"
+    with _rng_context(device):
+        try:
+            probe = copy.deepcopy(module)
+        except Exception as error:  # noqa: BLE001 - arbitrary native module state
+            errors.append(f"module isolation: {type(error).__name__}: {error}")
+            probe = None
+
+        ready = probe is not None
+        if probe is not None:
+            try:
+                probe.to(device)
+                probe.train()
+            except Exception as error:  # noqa: BLE001 - component boundary
+                errors.append(
+                    f"module transfer to {device}/{precision}: "
+                    f"{type(error).__name__}: {error}"
+                )
+                ready = False
+        if probe is not None and ready and transferred is not None:
+            augmented = transferred
+            if probe.training_augmentation is not None:
+                try:
+                    with _precision_context(trainer):
+                        augmented = probe.training_augmentation(
+                            transferred,
+                            seed=probe.augmentation_seed,
+                            epoch=0,
+                            step=0,
+                            identity=probe.augmentation_identity,
                         )
-                        augmented = None
-                if augmented is not None:
-                    try:
-                        with _precision_context(trainer):
-                            result = module.objective(module.model, augmented, "train")
-                        loss = _require_loss(result)
-                        if loss.requires_grad:
-                            loss.backward()
-                    except Exception as error:  # noqa: BLE001 - component boundary
-                        errors.append(
-                            "model/objective "
-                            f"{_name(module.model)} + {_name(module.objective)} "
-                            f"on {device}/{precision}: {type(error).__name__}: {error}"
-                        )
-    finally:
-        current_buffers = dict(module.named_buffers())
-        with torch.no_grad():
-            for name, value in buffers.items():
-                if name in current_buffers:
-                    current_buffers[name].copy_(value.to(current_buffers[name].device))
-        for metric in module.modules():
-            if isinstance(metric, Metric):
-                metric.reset()
-        module.zero_grad(set_to_none=True)
-        for child, training in original_modes:
-            child.training = training
+                except Exception as error:  # noqa: BLE001 - component boundary
+                    errors.append(
+                        "training augmentation "
+                        f"{_name(probe.training_augmentation)} on {device}/{precision}: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                    augmented = None
+            if augmented is not None:
+                try:
+                    with _precision_context(trainer):
+                        result = probe.objective(probe.model, augmented, "train")
+                    values = probe.validate_objective_result(result)
+                    loss = values["loss"]
+                    if not isinstance(loss, Tensor) or not loss.requires_grad:
+                        raise TypeError("objective loss does not require gradients")
+                    loss.backward()
+                except Exception as error:  # noqa: BLE001 - component boundary
+                    errors.append(
+                        "model/objective "
+                        f"{_name(probe.model)} + {_name(probe.objective)} "
+                        f"on {device}/{precision}: {type(error).__name__}: {error}"
+                    )
+        if probe is not None:
+            try:
+                probe.configure_optimizers()
+            except Exception as error:  # noqa: BLE001 - component boundary
+                errors.append(f"optimizer/scheduler: {type(error).__name__}: {error}")
 
     if errors:
         raise CapabilityError(_message(errors))
@@ -157,19 +170,20 @@ def _precision_context(trainer: Trainer) -> Any:
     return context() if callable(context) else nullcontext()
 
 
-def _rng_context(device: torch.device) -> Any:
-    devices = [] if device.type != "cuda" else [device.index or torch.cuda.current_device()]
-    return torch.random.fork_rng(devices=devices)
-
-
-def _require_loss(result: Any) -> Tensor:
-    if not isinstance(result, Mapping):
-        raise TypeError(f"objective returned {type(result).__name__}, expected a mapping")
-    loss = result.get("loss")
-    if not isinstance(loss, Tensor) or loss.ndim != 0:
-        shape = None if not isinstance(loss, Tensor) else tuple(loss.shape)
-        raise TypeError(f"objective loss must be a scalar tensor, got {shape!r}")
-    return loss
+@contextmanager
+def _rng_context(device: torch.device) -> Iterator[None]:
+    devices: list[int] = []
+    if device.type == "cuda":
+        index = device.index if device.index is not None else torch.cuda.current_device()
+        devices.append(index)
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    try:
+        with torch.random.fork_rng(devices=devices):
+            yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
 
 
 def _name(component: Any) -> str:
