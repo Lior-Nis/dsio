@@ -140,9 +140,13 @@ def _tensor_specs(schema: Schema | None, role: str) -> list[TensorSpec]:
     specs: list[TensorSpec] = []
     field_names: list[str] = []
     for spec in schema.inputs:
-        if not isinstance(spec, TensorSpec) or spec.name is None:
+        if (
+            not isinstance(spec, TensorSpec)
+            or not isinstance(spec.name, str)
+            or not spec.name
+        ):
             raise InferenceError(
-                f"logged predictor {role} signature must contain named tensor fields"
+                f"logged predictor {role} signature must contain non-empty named tensor fields"
             )
         specs.append(spec)
         field_names.append(spec.name)

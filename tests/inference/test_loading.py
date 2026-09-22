@@ -209,6 +209,21 @@ def test_predict_rejects_duplicate_signature_fields() -> None:
         loading._tensor_specs(schema, "input")
 
 
+@pytest.mark.parametrize("name", [1, b"prediction", ""])
+def test_predict_rejects_invalid_signature_field_names(name: Any) -> None:
+    import dsio.inference.loading as loading
+
+    schema = Schema(
+        [
+            TensorSpec(np.dtype(str), (-1,), name="sample_id"),
+            TensorSpec(np.dtype(np.float32), (-1,), name=name),
+        ]
+    )
+
+    with pytest.raises(InferenceError, match="non-empty named tensor fields"):
+        loading._tensor_specs(schema, "output")
+
+
 @pytest.mark.parametrize(
     "identity",
     [
