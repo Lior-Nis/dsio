@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from mlflow import MlflowClient
 
+from dsio.config.components import ComponentError, validate_component_config
 from dsio.contracts import NonCanonicalValueError, canonical_json, sha256_of
 from dsio.tracking._lifecycle import TrackingError, is_cancellation, require_writable_run
 
@@ -31,7 +32,7 @@ def normalize(
 def execution_identity(
     config: Mapping[str, Any],
     *,
-    components: Mapping[str, str] | None = None,
+    components: Mapping[str, str | Mapping[str, Any]] | None = None,
     secrets: Collection[str] = (),
     ephemeral: Collection[str] = (),
 ) -> str:
@@ -50,7 +51,7 @@ def record_provenance(
     run_id: str,
     config: Mapping[str, Any],
     *,
-    components: Mapping[str, str] | None = None,
+    components: Mapping[str, str | Mapping[str, Any]] | None = None,
     secrets: Collection[str] = (),
     ephemeral: Collection[str] = (),
 ) -> str:
@@ -88,30 +89,44 @@ def record_provenance(
 def _identity_document(
     config: Mapping[str, Any],
     *,
-    components: Mapping[str, str] | None,
+    components: Mapping[str, str | Mapping[str, Any]] | None,
     secrets: Collection[str],
     ephemeral: Collection[str],
 ) -> dict[str, Any]:
-    component_references = dict(components or {})
+    secret_names = _field_names(secrets)
+    ephemeral_names = _field_names(ephemeral)
+    omitted = secret_names | ephemeral_names
+    component_references = components if components is not None else {}
     invalid_key_types = sorted(
         {type(name).__name__ for name in component_references if not isinstance(name, str)}
     )
     if invalid_key_types:
         types = ", ".join(invalid_key_types)
         raise NonCanonicalValueError(f"component names must be str, got: {types}")
-    invalid = [
-        name
-        for name, reference in component_references.items()
-        if not isinstance(reference, str)
-    ]
-    if invalid:
-        names = ", ".join(sorted(invalid))
-        raise NonCanonicalValueError(f"component reference must be str for: {names}")
+    normalized_components: dict[str, Any] = {}
+    for name in component_references:
+        if name in omitted:
+            continue
+        component = component_references[name]
+        if isinstance(component, str):
+            normalized_components[name] = component
+            continue
+        try:
+            filtered = _filter_fields(component, omitted)
+            normalized_components[name] = validate_component_config(filtered)
+        except ComponentError as error:
+            raise NonCanonicalValueError(
+                f"component reference or configuration is invalid for {name!r}: {error}"
+            ) from None
     return {
         "schema_version": _SCHEMA_VERSION,
         "dsio_version": version("dsio"),
-        "configuration": normalize(config, secrets=secrets, ephemeral=ephemeral),
-        "components": normalize(component_references),
+        "configuration": normalize(
+            config,
+            secrets=secret_names,
+            ephemeral=ephemeral_names,
+        ),
+        "components": normalize(normalized_components),
     }
 
 

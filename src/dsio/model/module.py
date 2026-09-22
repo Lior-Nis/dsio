@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
 
 import torch
 from lightning import LightningModule
 from torch import Tensor, nn
+from torchmetrics import Metric
 
 from dsio.batches import PredictionBatch
+from dsio.config.components import (
+    ComponentError as ConfiguredComponentError,
+)
+from dsio.config.components import require_importable_component, validate_component_config
 from dsio.model.chain import ComponentError, export_encoder
 
 Stage = Literal["train", "validate", "test"]
 type Batch = Mapping[str, Any]
-type ObjectiveResult = Mapping[str, Tensor]
+type ObjectiveValue = Tensor | Metric
+type ObjectiveResult = Mapping[str, ObjectiveValue]
 
 _INTEGER_ROW_DTYPES = {
     torch.uint8,
@@ -58,25 +63,62 @@ class DsioModule(LightningModule):
         *,
         model: nn.Module,
         objective: Objective,
-        lr: float = 1e-3,
-        weight_decay: float = 0.0,
+        optimizer_factory: Any = torch.optim.AdamW,
+        optimizer_parameters: Mapping[str, Any] | None = None,
+        scheduler_factory: Any | None = None,
+        scheduler_parameters: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__()
         if not isinstance(model, nn.Module):
             raise ModuleError(f"model must be a torch nn.Module, got {type(model).__name__}")
         if not callable(objective):
             raise ModuleError("objective must be callable")
-        lr = _finite_hyperparameter(lr, "lr", positive=True)
-        weight_decay = _finite_hyperparameter(
-            weight_decay,
-            "weight_decay",
-            positive=False,
-        )
+        if not callable(optimizer_factory):
+            raise ModuleError("optimizer_factory must be callable")
+        if scheduler_factory is not None and not callable(scheduler_factory):
+            raise ModuleError("scheduler_factory must be callable when configured")
+        if scheduler_factory is None and scheduler_parameters:
+            raise ModuleError("scheduler_parameters require a scheduler_factory")
+        try:
+            require_importable_component(model, "model")
+            require_importable_component(objective, "objective")
+            optimizer_reference = require_importable_component(
+                optimizer_factory, "optimizer_factory"
+            )
+            optimizer_config = validate_component_config(
+                {
+                    "reference": optimizer_reference,
+                    "parameters": dict(optimizer_parameters or {}),
+                }
+            )
+            scheduler_config = None
+            if scheduler_factory is not None:
+                scheduler_reference = require_importable_component(
+                    scheduler_factory, "scheduler_factory"
+                )
+                scheduler_config = validate_component_config(
+                    {
+                        "reference": scheduler_reference,
+                        "parameters": dict(scheduler_parameters or {}),
+                    }
+                )
+        except ConfiguredComponentError as error:
+            raise ModuleError(str(error)) from None
         self.model = model
         self.objective = objective
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.save_hyperparameters("lr", "weight_decay")
+        self.optimizer_factory = optimizer_factory
+        self.optimizer_parameters = optimizer_config["parameters"]
+        self.scheduler_factory = scheduler_factory
+        self.scheduler_parameters = (
+            {} if scheduler_config is None else scheduler_config["parameters"]
+        )
+        self._metric_log_names: dict[int, str] = {}
+        self.save_hyperparameters(
+            {
+                "optimizer": optimizer_config,
+                "scheduler": scheduler_config,
+            }
+        )
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Delegate inference to the configured native PyTorch model."""
@@ -99,15 +141,39 @@ class DsioModule(LightningModule):
         values = _objective_values(result)
         prefix = "val" if stage == "validate" else stage
         for name, value in values.items():
+            log_name = f"{prefix}/{name}"
+            metric_attribute = None
+            if isinstance(value, Metric):
+                metric_attribute = self._metric_attribute(value, log_name)
             self.log(
-                f"{prefix}/{name}",
+                log_name,
                 value,
                 batch_size=len(sample_ids),
                 on_step=stage == "train" and name == "loss",
                 on_epoch=True,
                 prog_bar=stage == "validate" and name == "loss",
+                metric_attribute=metric_attribute,
             )
-        return values["loss"]
+        loss = values["loss"]
+        assert isinstance(loss, Tensor)
+        return loss
+
+    def _metric_attribute(self, metric: Metric, log_name: str) -> str:
+        attribute = next(
+            (name for name, module in self.named_modules() if module is metric),
+            None,
+        )
+        if attribute is None:
+            raise ModuleError(
+                f"TorchMetric for {log_name!r} must be registered on the objective or model"
+            )
+        previous = self._metric_log_names.setdefault(id(metric), log_name)
+        if previous != log_name:
+            raise ModuleError(
+                "each TorchMetric instance may have one Lightning log name; "
+                f"{previous!r} and {log_name!r} need distinct metric instances"
+            )
+        return attribute
 
     def training_step(self, batch: Batch, batch_idx: int) -> Tensor:
         del batch_idx
@@ -162,12 +228,81 @@ class DsioModule(LightningModule):
             result["row"] = row
         return result
 
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.AdamW(
-            self.parameters(),
-            lr=self.lr,
-            weight_decay=self.weight_decay,
+    def configure_optimizers(self) -> Any:
+        optimizer = self.optimizer_factory(self.parameters(), **self.optimizer_parameters)
+        if not isinstance(optimizer, torch.optim.Optimizer):
+            raise ModuleError(
+                f"optimizer_factory must return a native torch optimizer, "
+                f"got {type(optimizer).__name__}"
+            )
+        if self.scheduler_factory is None:
+            return optimizer
+        scheduler = self.scheduler_factory(optimizer, **self.scheduler_parameters)
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            raise ModuleError(
+                "ReduceLROnPlateau requires a Lightning scheduler mapping with a "
+                "non-empty monitor"
+            )
+        if isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
+            configured_scheduler: torch.optim.lr_scheduler.LRScheduler | dict[str, Any] = (
+                scheduler
+            )
+        elif isinstance(scheduler, Mapping):
+            configured_scheduler = _scheduler_configuration(scheduler)
+        else:
+            raise ModuleError(
+                "scheduler_factory must return a native torch scheduler or "
+                f"Lightning scheduler mapping, got {type(scheduler).__name__}"
+            )
+        return {"optimizer": optimizer, "lr_scheduler": configured_scheduler}
+
+
+def _scheduler_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "scheduler",
+        "name",
+        "interval",
+        "frequency",
+        "reduce_on_plateau",
+        "monitor",
+        "strict",
+    }
+    unknown = set(value) - allowed
+    if unknown:
+        fields = ", ".join(sorted(str(field) for field in unknown))
+        raise ModuleError(f"Lightning scheduler mapping has unknown fields: {fields}")
+    scheduler = value.get("scheduler")
+    if not isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
+        raise ModuleError(
+            "Lightning scheduler mapping requires 'scheduler' as a native torch scheduler"
         )
+    interval = value.get("interval", "epoch")
+    if interval not in {"step", "epoch"}:
+        raise ModuleError("Lightning scheduler mapping interval must be 'step' or 'epoch'")
+    frequency = value.get("frequency", 1)
+    if isinstance(frequency, bool) or not isinstance(frequency, int) or frequency < 1:
+        raise ModuleError("Lightning scheduler mapping frequency must be a positive integer")
+    for name in ("name", "monitor"):
+        configured = value.get(name)
+        if configured is not None and not isinstance(configured, str):
+            raise ModuleError(f"Lightning scheduler mapping {name} must be a string")
+    for name in ("reduce_on_plateau", "strict"):
+        configured = value.get(name)
+        if configured is not None and not isinstance(configured, bool):
+            raise ModuleError(f"Lightning scheduler mapping {name} must be a boolean")
+    is_plateau = isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
+    reduce_on_plateau = value.get("reduce_on_plateau", is_plateau)
+    if is_plateau and reduce_on_plateau is False:
+        raise ModuleError(
+            "Lightning scheduler mapping cannot disable reduce_on_plateau for "
+            "ReduceLROnPlateau"
+        )
+    if reduce_on_plateau and not value.get("monitor"):
+        raise ModuleError(
+            "Lightning scheduler mapping requires a non-empty monitor for "
+            "reduce-on-plateau scheduling"
+        )
+    return dict(value)
 
 
 def _batch_ids(batch: object) -> list[str]:
@@ -182,34 +317,24 @@ def _batch_ids(batch: object) -> list[str]:
     return cast("list[str]", result)
 
 
-def _finite_hyperparameter(value: object, name: str, *, positive: bool) -> float:
-    if not isinstance(value, int | float) or isinstance(value, bool):
-        raise ModuleError(f"{name} must be a finite number")
-    try:
-        normalized = float(value)
-    except OverflowError:
-        raise ModuleError(f"{name} must be a finite number") from None
-    valid_range = normalized > 0 if positive else normalized >= 0
-    if not math.isfinite(normalized) or not valid_range:
-        qualifier = "positive" if positive else "non-negative"
-        raise ModuleError(f"{name} must be a {qualifier} finite number")
-    return normalized
-
-
-def _objective_values(result: object) -> dict[str, Tensor]:
+def _objective_values(result: object) -> dict[str, ObjectiveValue]:
     if not isinstance(result, Mapping):
         raise ModuleError(f"objective must return a mapping, got {type(result).__name__}")
     if "loss" not in result:
         raise ModuleError("objective result requires mandatory scalar tensor 'loss'")
-    values: dict[str, Tensor] = {}
+    values: dict[str, ObjectiveValue] = {}
     for name, value in result.items():
         if not isinstance(name, str) or not name or "/" in name:
             raise ModuleError("objective result names must be non-empty strings without '/'")
         if name in {"loss_step", "loss_epoch"}:
             raise ModuleError(f"objective result name {name!r} is reserved by Lightning")
+        if name != "loss" and isinstance(value, Metric):
+            values[name] = value
+            continue
         if not isinstance(value, Tensor):
             raise ModuleError(
-                f"objective result {name!r} must be a tensor, got {type(value).__name__}"
+                f"objective result {name!r} must be a tensor or TorchMetric, "
+                f"got {type(value).__name__}"
             )
         if value.ndim != 0:
             raise ModuleError(

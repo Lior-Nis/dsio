@@ -31,9 +31,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
+import torch
 from pydantic import Field, model_validator
 
 from dsio.batches import PredictionBatch
+from dsio.config.components import ComponentConfig, ConfiguredComponent, resolve_component
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.contracts import DsioModel, sha256_of
 from dsio.data.adapters import SignalExamples
@@ -45,17 +47,12 @@ from dsio.eval.contract import PREDICTIONS_FILE, EvalError, Fold, FoldPrediction
 from dsio.eval.metrics import METRICS, MetricError, compute
 from dsio.model.chain import ComponentChain, LossObjective
 from dsio.model.module import DsioModule
-from dsio.model.registry import (
-    BACKBONES,
-    HEADS,
-    LABELS,
-    LOSSES,
-    PREPROCESSORS,
-    TRANSFORMS,
-)
 from dsio.train.artifacts import ArtifactRef, load_artifact
-from dsio.train.assembly import Component as Component
-from dsio.train.assembly import accepted_shape_arguments, build_optional_component
+from dsio.train.assembly import (
+    accepted_shape_arguments,
+    build_optional_component,
+    component_factory,
+)
 from dsio.train.runner import preflight, runner
 from dsio.train.tracking import (
     finite_metrics,
@@ -69,8 +66,6 @@ from dsio.train.trainer import build_trainer
 from dsio.train.trainer import sanitise_metric as sanitise_metric
 
 if TYPE_CHECKING:
-    import torch
-
     from dsio.config.schema import RunConfig
     from dsio.runs.record import Run
 
@@ -137,7 +132,7 @@ class TorchTask(TaskConfig):
 
     store: str = Field(description="Store name under the data root.")
     window: WindowSpec
-    labels: str = Field(description="Registered per-row label provider.")
+    labels: ConfiguredComponent = Field(description="Named importable per-row label provider.")
     split: str = Field(description="Committed split family under splits_root.")
     splits_root: Path = SPLITS_ROOT
     fold: int = Field(
@@ -151,19 +146,32 @@ class TorchTask(TaskConfig):
         ),
     )
 
-    backbone: Component
-    head: Component = Component(name="linear")
-    loss: Component = Component(name="cross_entropy")
-    transform: Component | None = None
-    preprocessor: Component | None = None
+    backbone: ConfiguredComponent
+    head: ConfiguredComponent = Field(
+        default_factory=lambda: ComponentConfig(
+            reference="dsio.model.components:linear_head"
+        )
+    )
+    loss: ConfiguredComponent = Field(
+        default_factory=lambda: ComponentConfig(
+            reference="dsio.model.components:CrossEntropy"
+        )
+    )
+    transform: ConfiguredComponent | None = None
+    preprocessor: ConfiguredComponent | None = None
 
     encoder: EncoderRef | None = Field(
         default=None,
         description="A pretrained encoder pinned by MLflow run, artifact path and digest.",
     )
 
-    lr: float = Field(default=1e-3, gt=0.0)
-    weight_decay: float = Field(default=0.0, ge=0.0)
+    optimizer: ConfiguredComponent = Field(
+        default_factory=lambda: ComponentConfig(
+            reference="torch.optim:AdamW",
+            parameters={"lr": 1e-3, "weight_decay": 0.0},
+        )
+    )
+    scheduler: ConfiguredComponent | None = None
     batch_size: int = Field(default=32, ge=1)
     num_workers: int = Field(default=0, ge=0)
     trainer: TrainerConfig = TrainerConfig()
@@ -202,24 +210,24 @@ def check_torch(config: RunConfig) -> None:
     instantiation time, surfaces a typo only after the data has loaded. On a large corpus
     that is the difference between a typo costing microseconds and costing twenty minutes.
 
-    ``require_mlflow`` runs first, ahead of every registry lookup below: decision 7 makes
-    MLflow a run's hard dependency, and a run that cannot write to it should not spend even
-    a typo-check's worth of time before saying so.
+    ``require_mlflow`` runs first, ahead of every component import below: decision 7 makes
+    MLflow a run's hard dependency, and a run that cannot write to it should not proceed to
+    data access.
     """
     require_mlflow()
     task = config.task
     assert isinstance(task, TorchTask)
 
-    LABELS.get(task.labels)
-    BACKBONES.get(task.backbone.name)
-    HEADS.get(task.head.name)
-    LOSSES.get(task.loss.name)
-    for optional, registry in (
-        (task.transform, TRANSFORMS),
-        (task.preprocessor, PREPROCESSORS),
-    ):
+    component_factory(task.labels)
+    component_factory(task.backbone)
+    component_factory(task.head)
+    component_factory(task.loss)
+    component_factory(task.optimizer)
+    if task.scheduler is not None:
+        component_factory(task.scheduler)
+    for optional in (task.transform, task.preprocessor):
         if optional is not None:
-            registry.get(optional.name)
+            component_factory(optional)
     for name in task.metrics:
         METRICS.get(name)
 
@@ -239,28 +247,36 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
     snapshot looks equivalent and is not: optimiser state, BatchNorm running statistics and
     any lazily-built buffer survive it, so fold 2 would start from fold 1's normalisation.
     """
-    factory = BACKBONES.get(task.backbone.name)
+    factory, _ = component_factory(task.backbone)
     shape = accepted_shape_arguments(factory, {"channels": channels, "length": length})
-    backbone = factory(**{**shape, **task.backbone.params})
+    backbone = resolve_component(task.backbone, expected=torch.nn.Module, **shape)
     out_dim = getattr(backbone, "out_dim", None)
-    head_params = dict(task.head.params)
+    _, head_params = component_factory(task.head)
     if out_dim is not None:
         head_params.setdefault("in_dim", out_dim)
 
-    transform = build_optional_component(task.transform, TRANSFORMS)
+    transform = build_optional_component(task.transform)
     if task.encoder is not None:
         load_encoder(task.encoder, backbone=backbone, transform=transform)
+
+    optimizer_factory, optimizer_parameters = component_factory(task.optimizer)
+    scheduler_factory = None
+    scheduler_parameters: dict[str, Any] = {}
+    if task.scheduler is not None:
+        scheduler_factory, scheduler_parameters = component_factory(task.scheduler)
 
     return DsioModule(
         model=ComponentChain(
             backbone=backbone,
-            head=HEADS.get(task.head.name)(**head_params),
+            head=resolve_component(task.head, expected=torch.nn.Module, **head_params),
             transform=transform,
-            preprocessor=build_optional_component(task.preprocessor, PREPROCESSORS),
+            preprocessor=build_optional_component(task.preprocessor),
         ),
-        objective=LossObjective(LOSSES.get(task.loss.name)(**task.loss.params)),
-        lr=task.lr,
-        weight_decay=task.weight_decay,
+        objective=LossObjective(resolve_component(task.loss, expected=torch.nn.Module)),
+        optimizer_factory=optimizer_factory,
+        optimizer_parameters=optimizer_parameters,
+        scheduler_factory=scheduler_factory,
+        scheduler_parameters=scheduler_parameters,
     )
 
 
@@ -355,7 +371,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         require_fold(task.splits_root, task.split, task.fold)
 
         store = SignalStore(data_root() / task.store)
-        row_labels = np.asarray(LABELS.get(task.labels)(store))
+        row_labels = resolve_component(task.labels, store, expected=np.ndarray)
         if row_labels.size != store.n_rows:
             raise ValueError(
                 f"label provider {task.labels!r} returned {row_labels.size} values for "

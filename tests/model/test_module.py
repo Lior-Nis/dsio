@@ -23,7 +23,6 @@ from dsio.model.components import (  # noqa: E402
     vicreg_projector_head,
 )
 from dsio.model.module import ComponentError, DsioModule, export_encoder  # noqa: E402
-from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
 
 
 def tiny_module(**overrides) -> DsioModule:  # type: ignore[no-untyped-def]
@@ -300,15 +299,3 @@ def test_cross_entropy_accepts_soft_targets_with_one() -> None:
 def test_random_scale_rejects_an_inverted_range() -> None:
     with pytest.raises(ValueError, match="must not exceed"):
         RandomScale(low=1.5, high=0.5)
-
-
-def test_registries_expose_the_builtins() -> None:
-    assert {"mlp1d", "conv1d"} <= set(BACKBONES.names())
-    assert {"linear", "mlp", "identity"} <= set(HEADS.names())
-    assert {"cross_entropy", "bce", "mse"} <= set(LOSSES.names())
-    assert {"jitter", "random_scale", "none"} <= set(AUGMENTORS.names())
-
-
-def test_an_unknown_component_suggests_a_close_name() -> None:
-    with pytest.raises(KeyError, match="did you mean"):
-        BACKBONES.get("conv1D")

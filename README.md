@@ -225,20 +225,27 @@ Train through native Lightning with the exact reusable module and data module—
 an ordinary model and objective, not a runner or subclass:
 
 ```python
-import torch.nn.functional as F
+import torch
 from lightning import Trainer
 from torch import nn
 
+from dsio.config.components import resolve_component
 from dsio.model.module import DsioModule
+from project.training import ClassificationObjective
 
-
-def objective(model, batch, stage):
-    prediction = model(batch["x"])
-    loss = F.cross_entropy(prediction, batch["y"])
-    return {"loss": loss, "accuracy": (prediction.argmax(-1) == batch["y"]).float().mean()}
-
-
-module = DsioModule(model=nn.Sequential(...), objective=objective)
+model = resolve_component(
+    {
+        "reference": "project.models:Classifier",
+        "parameters": {"input_size": 64, "classes": 3},
+    },
+    expected=nn.Module,
+)
+module = DsioModule(
+    model=model,
+    objective=ClassificationObjective(),
+    optimizer_factory=torch.optim.AdamW,
+    optimizer_parameters={"lr": 1e-3, "weight_decay": 1e-2},
+)
 Trainer(max_epochs=10).fit(module, datamodule=data)
 ```
 
@@ -247,6 +254,13 @@ scalar tensor `loss`; every other entry is a named scalar tensor metric logged b
 `LightningModule.log()`. Native Lightning checkpoints remain the resumable training state.
 Projects inject components into `DsioModule` and `DsioDataModule`; both exact classes reject
 subclassing.
+
+Reusable components are plain `{"reference": "module:qualname", "parameters": {...}}`
+mappings. DSio imports and validates them before execution, and the same mapping belongs in
+execution provenance. There is no component registry or DSio optimizer/scheduler wrapper;
+native factories and native Lightning return structures are used directly. Lambdas,
+closures, local definitions, and `__main__` objects are rejected because another process
+cannot import them reliably.
 
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree

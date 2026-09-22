@@ -61,9 +61,8 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
     from dsio.data.splits.models import SplitFile, SplitFold
     from dsio.data.store import DATA_ROOT_ENV, SignalStore
     from dsio.data.views import WindowSpec
-    from dsio.model.registry import LABELS, labels
     from dsio.train import load_runners
-    from dsio.train.torch_task import Component, TorchTask, TrainerConfig
+    from dsio.train.torch_task import TorchTask, TrainerConfig
 
     load_runners()
 
@@ -80,15 +79,6 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
             builder.add(
                 f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
             )
-
-    if "tone" not in LABELS:
-
-        @labels("tone")
-        def _tone(store: SignalStore) -> np.ndarray:
-            out = np.zeros(store.n_rows, dtype=np.float32)
-            for entity in store.entities:
-                out[entity.start_row : entity.end_row] = float(entity.attrs["positive"])
-            return out
 
     store = SignalStore(root / "tone")
     digest = entity_examples(store).digest
@@ -109,14 +99,26 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
     task = TorchTask(
         store="tone",
         window=WindowSpec(length=64, stride=32, label_policy="majority"),
-        labels="tone",
+        labels={
+            "reference": "dsio.data.labels:entity_attribute_labels",
+            "parameters": {"attribute": "positive"},
+        },
         split="k1",
         fold=0,
         splits_root=tmp_path / "splits",
-        backbone=Component(name="conv1d", params={"hidden": 4, "out_dim": 4, "depth": 1}),
-        head=Component(name="linear", params={"out_dim": 2}),
-        loss=Component(name="cross_entropy", params={"threshold": 0.5}),
-        transform=Component(name="instance_standardize"),
+        backbone={
+            "reference": "dsio.model.components:Conv1dEncoder",
+            "parameters": {"hidden": 4, "out_dim": 4, "depth": 1},
+        },
+        head={
+            "reference": "dsio.model.components:linear_head",
+            "parameters": {"out_dim": 2},
+        },
+        loss={
+            "reference": "dsio.model.components:CrossEntropy",
+            "parameters": {"threshold": 0.5},
+        },
+        transform={"reference": "dsio.model.components:InstanceStandardize"},
         batch_size=4,
         metrics=("accuracy",),
         trainer=TrainerConfig(

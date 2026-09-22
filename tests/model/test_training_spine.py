@@ -13,6 +13,7 @@ from lightning import Trainer
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
+from torchmetrics import MeanMetric
 
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
@@ -68,6 +69,151 @@ class ClassificationObjective(nn.Module):
         }
 
 
+class StaticObjective:
+    def __init__(self, result: object) -> None:
+        self.result = result
+
+    def __call__(self, *args: object) -> object:
+        del args
+        return self.result
+
+
+class InvalidOptimizerFactory:
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return object()
+
+
+class SchedulerMappingFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        return {
+            "scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1),
+            "interval": "epoch",
+            "frequency": 1,
+        }
+
+
+class InvalidSchedulerMappingFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        del optimizer
+        return {"interval": "epoch"}
+
+
+class BarePlateauSchedulerFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> torch.optim.lr_scheduler.ReduceLROnPlateau:
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+
+
+class PlateauSchedulerMappingFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        return {
+            "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+            "monitor": "val/loss",
+        }
+
+
+class PlateauSchedulerWithoutMonitorFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        return {"scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)}
+
+
+class DisabledPlateauSchedulerFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        return {
+            "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+            "monitor": "val/loss",
+            "reduce_on_plateau": False,
+        }
+
+
+class TorchMetricsObjective(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.means = nn.ModuleDict(
+            {
+                "train_metric": MeanMetric(),
+                "validate_metric": MeanMetric(),
+                "test_metric": MeanMetric(),
+            }
+        )
+
+    def forward(
+        self,
+        model: nn.Module,
+        batch: Mapping[str, Any],
+        stage: str,
+    ) -> Mapping[str, object]:
+        prediction = model(batch["x"])
+        loss = prediction.square().mean()
+        metric = self.means[f"{stage}_metric"]
+        metric.update(prediction.detach().mean())
+        return {"loss": loss, "mean": metric}
+
+
+class SharedTorchMetricsObjective(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mean = MeanMetric()
+
+    def forward(
+        self,
+        model: nn.Module,
+        batch: Mapping[str, Any],
+        stage: str,
+    ) -> Mapping[str, object]:
+        del stage
+        prediction = model(batch["x"])
+        loss = prediction.square().mean()
+        self.mean.update(prediction.detach().mean())
+        return {"loss": loss, "mean": self.mean}
+
+
+class LazyTorchMetricsObjective(nn.Module):
+    def forward(
+        self,
+        model: nn.Module,
+        batch: Mapping[str, Any],
+        stage: str,
+    ) -> Mapping[str, object]:
+        attribute = f"{stage}_mean"
+        if not hasattr(self, attribute):
+            setattr(self, attribute, MeanMetric())
+        metric = getattr(self, attribute)
+        prediction = model(batch["x"])
+        loss = prediction.square().mean()
+        metric.update(prediction.detach().mean())
+        return {"loss": loss, "mean": metric}
+
+
+class UnregisteredTorchMetricsObjective:
+    def __init__(self) -> None:
+        self.mean = MeanMetric()
+
+    def __call__(
+        self,
+        model: nn.Module,
+        batch: Mapping[str, Any],
+        stage: str,
+    ) -> Mapping[str, object]:
+        del stage
+        prediction = model(batch["x"])
+        loss = prediction.square().mean()
+        self.mean.update(prediction.detach().mean())
+        return {"loss": loss, "mean": self.mean}
+
+
 def _data_module(path: Path) -> DsioDataModule:
     with SignalStore.builder(path, channels=1, dtype="float32") as builder:
         for index in range(8):
@@ -101,7 +247,8 @@ def _module() -> DsioModule:
     return DsioModule(
         model=nn.Sequential(nn.Flatten(), nn.Linear(2, 2)),
         objective=ClassificationObjective(),
-        lr=0.01,
+        optimizer_factory=torch.optim.AdamW,
+        optimizer_parameters={"lr": 0.01, "weight_decay": 0.0},
     )
 
 
@@ -156,7 +303,7 @@ def test_malformed_objective_results_fail_at_the_boundary(
     result: object,
     message: str,
 ) -> None:
-    module = DsioModule(model=nn.Identity(), objective=lambda *_: result)  # type: ignore[arg-type]
+    module = DsioModule(model=nn.Identity(), objective=StaticObjective(result))
     module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
     batch = {"sample_id": ["sample"], "x": torch.ones(1, 1)}
 
@@ -171,27 +318,177 @@ def test_training_batches_require_ordered_sample_identity() -> None:
         module.training_step({"x": torch.ones(1, 2), "y": torch.zeros(1)}, 0)
 
 
+def test_native_optimizer_and_scheduler_factories_return_lightning_configuration() -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        optimizer_factory=torch.optim.SGD,
+        optimizer_parameters={"lr": 0.25},
+        scheduler_factory=torch.optim.lr_scheduler.StepLR,
+        scheduler_parameters={"step_size": 2, "gamma": 0.5},
+    )
+
+    configured = module.configure_optimizers()
+
+    assert isinstance(configured, dict)
+    assert type(configured["optimizer"]) is torch.optim.SGD
+    assert configured["optimizer"].param_groups[0]["lr"] == 0.25
+    assert type(configured["lr_scheduler"]) is torch.optim.lr_scheduler.StepLR
+
+
+def test_native_lightning_scheduler_mapping_is_validated_and_preserved() -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        optimizer_factory=torch.optim.SGD,
+        optimizer_parameters={"lr": 0.25},
+        scheduler_factory=SchedulerMappingFactory(),
+    )
+
+    configured = module.configure_optimizers()
+
+    assert configured["lr_scheduler"]["interval"] == "epoch"
+    assert isinstance(
+        configured["lr_scheduler"]["scheduler"],
+        torch.optim.lr_scheduler.StepLR,
+    )
+
+
+def test_incomplete_lightning_scheduler_mapping_is_rejected() -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        scheduler_factory=InvalidSchedulerMappingFactory(),
+    )
+
+    with pytest.raises(ModuleError, match="mapping requires 'scheduler'"):
+        module.configure_optimizers()
+
+
 @pytest.mark.parametrize(
-    "kwargs",
+    ("factory", "message"),
     [
-        {"lr": float("nan")},
-        {"lr": float("inf")},
-        {"weight_decay": float("nan")},
-        {"weight_decay": float("inf")},
-        {"lr": 10**10000},
-        {"weight_decay": 10**10000},
+        (BarePlateauSchedulerFactory(), "mapping with a non-empty monitor"),
+        (PlateauSchedulerWithoutMonitorFactory(), "non-empty monitor"),
+        (DisabledPlateauSchedulerFactory(), "cannot disable"),
     ],
 )
-def test_optimizer_hyperparameters_must_be_finite(kwargs: dict[str, float]) -> None:
-    with pytest.raises(ModuleError, match="finite"):
-        DsioModule(model=nn.Linear(1, 1), objective=ClassificationObjective(), **kwargs)
+def test_plateau_scheduler_requires_a_consistent_monitored_mapping(
+    factory: object,
+    message: str,
+) -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        scheduler_factory=factory,
+    )
+
+    with pytest.raises(ModuleError, match=message):
+        module.configure_optimizers()
+
+
+def test_monitored_plateau_scheduler_completes_a_real_lightning_loop(
+    tmp_path: Path,
+) -> None:
+    module = DsioModule(
+        model=nn.Sequential(nn.Flatten(), nn.Linear(2, 2)),
+        objective=TorchMetricsObjective(),
+        scheduler_factory=PlateauSchedulerMappingFactory(),
+    )
+    trainer = _trainer(tmp_path / "plateau", max_epochs=1)
+
+    trainer.fit(module, datamodule=_data_module(tmp_path / "plateau-samples"))
+
+    assert trainer.global_step > 0
+
+
+def test_native_torchmetrics_are_emitted_only_through_lightning_log() -> None:
+    objective = TorchMetricsObjective()
+    module = DsioModule(model=nn.Identity(), objective=objective)  # type: ignore[arg-type]
+    logged: dict[str, object] = {}
+    module.log = lambda name, value, **kwargs: logged.setdefault(name, value)  # type: ignore[method-assign,assignment]
+
+    loss = module.training_step(
+        {"sample_id": ["left", "right"], "x": torch.tensor([[1.0], [3.0]])},
+        0,
+    )
+
+    assert loss == torch.tensor(5.0)
+    assert logged["train/mean"] is objective.means["train_metric"]
+
+
+def test_distinct_stage_metrics_complete_a_real_train_and_validation_loop(
+    tmp_path: Path,
+) -> None:
+    module = DsioModule(
+        model=nn.Sequential(nn.Flatten(), nn.Linear(2, 2)),
+        objective=TorchMetricsObjective(),
+    )
+    trainer = _trainer(tmp_path / "metrics", max_epochs=1)
+
+    trainer.fit(module, datamodule=_data_module(tmp_path / "metric-samples"))
+
+    assert torch.isfinite(trainer.callback_metrics["train/mean"])
+    assert torch.isfinite(trainer.callback_metrics["val/mean"])
+
+
+def test_lazily_registered_stage_metrics_complete_a_real_lightning_loop(
+    tmp_path: Path,
+) -> None:
+    module = DsioModule(
+        model=nn.Sequential(nn.Flatten(), nn.Linear(2, 2)),
+        objective=LazyTorchMetricsObjective(),
+    )
+    trainer = _trainer(tmp_path / "lazy-metrics", max_epochs=1)
+
+    trainer.fit(module, datamodule=_data_module(tmp_path / "lazy-metric-samples"))
+
+    assert torch.isfinite(trainer.callback_metrics["train/mean"])
+    assert torch.isfinite(trainer.callback_metrics["val/mean"])
+
+
+def test_one_torchmetric_instance_cannot_cross_stage_log_names() -> None:
+    module = DsioModule(model=nn.Identity(), objective=SharedTorchMetricsObjective())
+    module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
+    batch = {"sample_id": ["sample"], "x": torch.ones(1, 1)}
+
+    module.training_step(batch, 0)
+    with pytest.raises(ModuleError, match="distinct metric instances"):
+        module.validation_step(batch, 0)
+
+
+def test_torchmetric_must_be_registered_on_the_lightning_module() -> None:
+    module = DsioModule(model=nn.Identity(), objective=UnregisteredTorchMetricsObjective())
+    module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    with pytest.raises(ModuleError, match="must be registered"):
+        module.training_step(
+            {"sample_id": ["sample"], "x": torch.ones(1, 1)},
+            0,
+        )
+
+
+def test_optimizer_factory_must_return_a_native_optimizer() -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        optimizer_factory=InvalidOptimizerFactory(),
+    )
+
+    with pytest.raises(ModuleError, match="native torch optimizer"):
+        module.configure_optimizers()
+
+
+def test_anonymous_components_fail_before_training() -> None:
+    with pytest.raises(ModuleError, match="named importable"):
+        DsioModule(model=nn.Identity(), objective=lambda *_: {"loss": torch.tensor(1.0)})
 
 
 @pytest.mark.parametrize("name", ["loss_step", "loss_epoch"])
 def test_objective_metrics_cannot_collide_with_lightning_loss_names(name: str) -> None:
     module = DsioModule(
         model=nn.Identity(),
-        objective=lambda *_: {"loss": torch.tensor(1.0), name: torch.tensor(2.0)},
+        objective=StaticObjective({"loss": torch.tensor(1.0), name: torch.tensor(2.0)}),
     )
 
     with pytest.raises(ModuleError, match="reserved by Lightning"):

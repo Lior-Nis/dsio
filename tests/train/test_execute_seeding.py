@@ -26,11 +26,10 @@ from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
-from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
 from dsio.train import load_runners  # noqa: E402
 from dsio.train.runner import execute  # noqa: E402
-from dsio.train.torch_task import Component, TorchTask, TrainerConfig  # noqa: E402
+from dsio.train.torch_task import TorchTask, TrainerConfig  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -54,15 +53,6 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             builder.add(
                 f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
             )
-
-    if "tone" not in LABELS:
-
-        @labels("tone")
-        def _tone(store: SignalStore) -> np.ndarray:
-            out = np.zeros(store.n_rows, dtype=np.float32)
-            for entity in store.entities:
-                out[entity.start_row : entity.end_row] = float(entity.attrs["positive"])
-            return out
 
     store = SignalStore(root / "tone")
     digest = entity_examples(store).digest
@@ -122,14 +112,26 @@ def test_execute_is_deterministic_for_the_same_config_and_seed(corpus: Path) -> 
         task=TorchTask(
             store="tone",
             window=WindowSpec(length=64, stride=32, label_policy="majority"),
-            labels="tone",
+            labels={
+                "reference": "dsio.data.labels:entity_attribute_labels",
+                "parameters": {"attribute": "positive"},
+            },
             split="k1",
             fold=0,
             splits_root=corpus / "splits",
-            backbone=Component(name="conv1d", params={"hidden": 4, "out_dim": 4, "depth": 1}),
-            head=Component(name="linear", params={"out_dim": 2}),
-            loss=Component(name="cross_entropy", params={"threshold": 0.5}),
-            transform=Component(name="instance_standardize"),
+            backbone={
+                "reference": "dsio.model.components:Conv1dEncoder",
+                "parameters": {"hidden": 4, "out_dim": 4, "depth": 1},
+            },
+            head={
+                "reference": "dsio.model.components:linear_head",
+                "parameters": {"out_dim": 2},
+            },
+            loss={
+                "reference": "dsio.model.components:CrossEntropy",
+                "parameters": {"threshold": 0.5},
+            },
+            transform={"reference": "dsio.model.components:InstanceStandardize"},
             batch_size=4,
             # ``log_loss`` (continuous) is the sensitive half of this assertion --
             # ``accuracy`` alone saturates to 1.0 on this trivially separable toy corpus

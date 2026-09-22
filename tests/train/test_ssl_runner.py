@@ -18,19 +18,19 @@ pytest.importorskip("torch")
 pytest.importorskip("lightning")
 pytest.importorskip("sklearn")
 
+from dsio.config.components import ComponentError  # noqa: E402
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
-from dsio.model.registry import LABELS, labels  # noqa: E402
+from dsio.model.components import Conv1dEncoder  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
 from dsio.train.artifacts import ArtifactRef, load_artifact  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.ssl_task import SslPretrainTask  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
-    Component,
     EncoderRef,
     TorchTask,
     TrainerConfig,
@@ -53,15 +53,6 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             builder.add(
                 f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
             )
-
-    if "tone" not in LABELS:
-
-        @labels("tone")
-        def _tone(store: SignalStore) -> np.ndarray:
-            out = np.zeros(store.n_rows, dtype=np.float32)
-            for entity in store.entities:
-                out[entity.start_row : entity.end_row] = float(entity.attrs["positive"])
-            return out
 
     # Three hand-picked folds over the nine groups — this suite asserts on structure
     # (fold count, metric keys), not on prediction quality, so no balancing is needed.
@@ -96,19 +87,28 @@ WINDOW = WindowSpec(length=128, stride=64, label_policy="majority")
 #: exactly one of mask/augmentor.
 _METHOD_COMPONENTS: dict[str, dict[str, object]] = {
     "mae": {
-        "head": Component(name="mae_decoder"),
-        "loss": Component(name="masked_mse"),
-        "mask": Component(name="span", params={"ratio": 0.5, "span": 16}),
+        "head": {"reference": "dsio.model.components:mae_decoder_head"},
+        "loss": {"reference": "dsio.model.components:MaskedMSE"},
+        "mask": {
+            "reference": "dsio.model.masking:SpanMask",
+            "parameters": {"ratio": 0.5, "span": 16},
+        },
     },
     "simclr": {
-        "head": Component(name="simclr_projector"),
-        "loss": Component(name="nt_xent"),
-        "augmentor": Component(name="jitter", params={"sigma": 0.2}),
+        "head": {"reference": "dsio.model.components:simclr_projector_head"},
+        "loss": {"reference": "dsio.model.components:NTXent"},
+        "augmentor": {
+            "reference": "dsio.model.components:Jitter",
+            "parameters": {"sigma": 0.2},
+        },
     },
     "vicreg": {
-        "head": Component(name="vicreg_projector"),
-        "loss": Component(name="vicreg"),
-        "augmentor": Component(name="jitter", params={"sigma": 0.2}),
+        "head": {"reference": "dsio.model.components:vicreg_projector_head"},
+        "loss": {"reference": "dsio.model.components:VICReg"},
+        "augmentor": {
+            "reference": "dsio.model.components:Jitter",
+            "parameters": {"sigma": 0.2},
+        },
     },
 }
 
@@ -119,10 +119,16 @@ def pretrain_task(root: Path, method: str = "mae", **overrides) -> SslPretrainTa
         window=WINDOW,
         split="k3",
         splits_root=root / "splits",
-        backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 16, "depth": 1}),
-        transform=Component(name="instance_standardize"),
+        backbone={
+            "reference": "dsio.model.components:Conv1dEncoder",
+            "parameters": {"hidden": 8, "out_dim": 16, "depth": 1},
+        },
+        transform={"reference": "dsio.model.components:InstanceStandardize"},
         register_as=f"enc_{method}",
-        labels="tone",
+        labels={
+            "reference": "dsio.data.labels:entity_attribute_labels",
+            "parameters": {"attribute": "positive"},
+        },
         batch_size=16,
         trainer=TrainerConfig(max_epochs=2, accelerator="cpu", devices=1, checkpoint=False),
         **_METHOD_COMPONENTS[method],
@@ -159,13 +165,38 @@ def test_both_mask_and_augmentor_is_rejected(corpus: Path) -> None:
     rejected rather than silently preferring one."""
     with pytest.raises(ValueError, match="exactly one of"):
         pretrain_task(
-            corpus, "simclr", mask=Component(name="span", params={"ratio": 0.5, "span": 16})
+            corpus,
+            "simclr",
+            mask={
+                "reference": "dsio.model.masking:SpanMask",
+                "parameters": {"ratio": 0.5, "span": 16},
+            },
+        )
+
+
+def test_component_configuration_rejects_unknown_fields_without_altering_them(
+    corpus: Path,
+) -> None:
+    with pytest.raises(ValueError, match="accepts only reference and parameters"):
+        pretrain_task(
+            corpus,
+            backbone={
+                "reference": "dsio.model.components:Conv1dEncoder",
+                "parameters": {"hidden": 8, "out_dim": 16, "depth": 1},
+                "paramters": {"hidden": 16},
+            },
         )
 
 
 def test_preflight_resolves_probe_only_names(corpus: Path) -> None:
-    config = RunConfig(name="p", task=pretrain_task(corpus, labels="not_a_provider"))
-    with pytest.raises(KeyError, match="unknown labels"):
+    config = RunConfig(
+        name="p",
+        task=pretrain_task(
+            corpus,
+            labels={"reference": "project.labels:not_a_provider"},
+        ),
+    )
+    with pytest.raises(ComponentError, match="could not import"):
         check(config)
 
 
@@ -486,14 +517,26 @@ def downstream_task(root: Path, encoder: EncoderRef | None) -> TorchTask:
     return TorchTask(
         store="tone",
         window=WINDOW,
-        labels="tone",
+        labels={
+            "reference": "dsio.data.labels:entity_attribute_labels",
+            "parameters": {"attribute": "positive"},
+        },
         split="k3",
         fold=0,
         splits_root=root / "splits",
-        backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 16, "depth": 1}),
-        head=Component(name="linear", params={"out_dim": 2}),
-        loss=Component(name="cross_entropy", params={"threshold": 0.5}),
-        transform=Component(name="instance_standardize"),
+        backbone={
+            "reference": "dsio.model.components:Conv1dEncoder",
+            "parameters": {"hidden": 8, "out_dim": 16, "depth": 1},
+        },
+        head={
+            "reference": "dsio.model.components:linear_head",
+            "parameters": {"out_dim": 2},
+        },
+        loss={
+            "reference": "dsio.model.components:CrossEntropy",
+            "parameters": {"threshold": 0.5},
+        },
+        transform={"reference": "dsio.model.components:InstanceStandardize"},
         encoder=encoder,
         batch_size=16,
         metrics=("accuracy", "roc_auc"),
@@ -522,9 +565,7 @@ def test_a_pinned_encoder_loads_into_a_downstream_run(corpus: Path, pretrained: 
 def test_a_tampered_digest_fails_closed(corpus: Path, pretrained: EncoderRef) -> None:
     """There is no path to hardcode and no way to say 'latest', so the remaining risk is a
     swapped artifact — which the registry re-hashes and refuses."""
-    from dsio.model.registry import BACKBONES
-
-    backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
+    backbone = Conv1dEncoder(channels=2, hidden=8, out_dim=16, depth=1)
     wrong = pretrained.model_copy(update={"digest": "0" * 64})
     with pytest.raises(Exception, match="digest"):
         load_encoder(wrong, backbone=backbone)
@@ -547,9 +588,7 @@ def test_freezing_actually_freezes(corpus: Path, pretrained: EncoderRef) -> None
     """Both halves. A frozen BatchNorm whose running statistics keep updating is not
     frozen, and the difference shows up as a probe that mysteriously outperforms its own
     linear separability."""
-    from dsio.model.registry import BACKBONES
-
-    backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
+    backbone = Conv1dEncoder(channels=2, hidden=8, out_dim=16, depth=1)
     report = load_encoder(pretrained, backbone=backbone)
     assert report["loaded_tensors"] > 0
     assert report["frozen_parameters"] > 0
@@ -560,9 +599,7 @@ def test_freezing_actually_freezes(corpus: Path, pretrained: EncoderRef) -> None
 def test_finetuning_leaves_the_encoder_trainable(corpus: Path, pretrained: EncoderRef) -> None:
     """A probe measures what the representation already contains; a finetune measures what
     it is a good starting point for. Reporting one as the other overstates the result."""
-    from dsio.model.registry import BACKBONES
-
-    backbone = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
+    backbone = Conv1dEncoder(channels=2, hidden=8, out_dim=16, depth=1)
     load_encoder(pretrained.model_copy(update={"freeze": False}), backbone=backbone)
     assert all(p.requires_grad for p in backbone.parameters())
 
@@ -572,9 +609,7 @@ def test_loading_into_a_different_architecture_is_refused(
 ) -> None:
     """Silently loading a subset of weights produces a model that is part pretrained and
     part random, and reports as though it were fully pretrained."""
-    from dsio.model.registry import BACKBONES
-
-    mismatched = BACKBONES.get("conv1d")(channels=2, hidden=64, out_dim=16, depth=3)
+    mismatched = Conv1dEncoder(channels=2, hidden=64, out_dim=16, depth=3)
     with pytest.raises(Exception):
         load_encoder(pretrained, backbone=mismatched)
 
@@ -586,9 +621,7 @@ def test_the_loaded_weights_actually_differ_from_a_fresh_init(
     initialised — every other test here would still pass."""
     import torch
 
-    from dsio.model.registry import BACKBONES
-
-    fresh = BACKBONES.get("conv1d")(channels=2, hidden=8, out_dim=16, depth=1)
+    fresh = Conv1dEncoder(channels=2, hidden=8, out_dim=16, depth=1)
     before = [p.detach().clone() for p in fresh.parameters()]
     load_encoder(pretrained, backbone=fresh)
     assert not all(
