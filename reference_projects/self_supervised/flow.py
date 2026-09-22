@@ -21,7 +21,12 @@ def self_supervised_flow(workspace: str, *, seed: int = 23) -> dict[str, Any]:
     with experiment("dsio-self-supervised-reference") as parent:
         parent_run_id = parent.info.run_id
         data = build_data(workspace, parent_run_id, seed)
-        split = split_data(data, parent_run_id, seed)
+        split = split_data(
+            data,
+            parent_run_id,
+            seed,
+            split_name="self-supervised-holdout",
+        )
         training = train_model(data, split, parent_run_id, seed)
         exported = export_model(data, split, training, parent_run_id)
         sample_ids = list(split["assignments"]["test"])

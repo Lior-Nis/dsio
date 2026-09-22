@@ -61,13 +61,16 @@ Codex (GPT-5)
 - 2026-09-22: Focused tests passed for exact class reuse, in-step deterministic views, stable outcomes, MLflow lineage, and both reference projects.
 - 2026-09-22: Installed-wheel probe passed with supervised and self-supervised consumer projects copied outside the checkout package.
 - 2026-09-22: Full gate passed: 1047 tests, Ruff, mypy, import contracts, and wheel/sdist build.
+- 2026-09-22: Three-layer review exposed a time/channel layout mismatch that made jitter a no-op, plus split-name and resolved-environment identity gaps. Added regressions and corrected all three.
+- 2026-09-22: Post-fix full gate passed: 1048 tests, Ruff, mypy, import contracts, wheel/sdist build, and copied-consumer wheel execution.
 
 ### Completion Notes List
 
 - Added one ordinary Prefect SSL flow that reuses the supervised data, split, evaluation, and inference tasks unchanged.
 - Added only three project-specific components: a tiny embedding model, NT-Xent objective adapter, and semantically validated embedding-norm output.
 - Multi-view augmentation remains the existing `TwoView` injected into the exact `DsioModule`; the test observes it only while `training_step()` is active and proves device, source/view identity, and deterministic tensors.
-- Training identity includes all named components, augmentation identity, seed, optimizer, objective, loader, and Trainer settings.
+- Training identity includes all named components, augmentation identity, seed, optimizer, objective, loader, Trainer settings, and Lightning's resolved execution environment; the same evidence is logged as native MLflow parameters.
+- The SSL dataset factory presents the store's time-major arrays as channel-first tensors, and the integration test proves both views differ from the source and from each other while replaying exactly.
 
 ### File List
 
@@ -77,14 +80,19 @@ Codex (GPT-5)
 - `reference_projects/self_supervised/__init__.py`
 - `reference_projects/self_supervised/components.py`
 - `reference_projects/self_supervised/flow.py`
-- `reference_projects/self_supervised/tasks.py`
+- `reference_projects/self_supervised/tasks/__init__.py`
+- `reference_projects/self_supervised/tasks/export.py`
+- `reference_projects/self_supervised/tasks/training.py`
 - `reference_projects/supervised/tasks/data.py`
+- `src/dsio/train/capabilities.py`
 - `tests/reference_flows/conftest.py`
 - `tests/reference_flows/test_self_supervised_flow.py`
 - `tests/reference_flows/test_supervised_flow.py`
+- `tests/train/test_capabilities.py`
 - `tests/test_built_distribution.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 5.3 and started implementation.
 - 2026-09-22: Implemented and validated the self-supervised reference flow; moved to review.
+- 2026-09-22: Fixed all initial adversarial-review findings and split the growing SSL task module by responsibility.

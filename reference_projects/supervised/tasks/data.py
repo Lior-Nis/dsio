@@ -52,7 +52,13 @@ def build_data(workspace: str, parent_run_id: str, seed: int) -> dict[str, Any]:
 
 
 @task(persist_result=False)
-def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str, Any]:
+def split_data(
+    data: dict[str, Any],
+    parent_run_id: str,
+    seed: int,
+    *,
+    split_name: str = "supervised-holdout",
+) -> dict[str, Any]:
     with attempt(parent_run_id) as child:
         store = SignalStore(data["store_path"])
         examples = entity_examples(store)
@@ -61,6 +67,7 @@ def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str,
             {
                 "dataset_digest": examples.digest,
                 "algorithm": "group_shuffle",
+                "name": split_name,
                 "test_size": 0.25,
                 "seed": seed,
             },
@@ -69,7 +76,7 @@ def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str,
         manifest = generate(
             examples,
             "group_shuffle",
-            name="synthetic-holdout",
+            name=split_name,
             seed=seed,
             parameters={"test_size": 0.25},
         )

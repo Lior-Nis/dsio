@@ -1,4 +1,4 @@
-"""SSL-specific training and export tasks on the shared public spine."""
+"""SSL training through the shared Lightning spine."""
 
 from __future__ import annotations
 
@@ -15,19 +15,18 @@ from prefect import task
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
-from dsio.inference import build_predictor, log_predictor
 from dsio.model.components import Jitter
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
-from dsio.train.artifacts import ArtifactRef, save_artifact
+from dsio.train.artifacts import save_artifact
 from dsio.train.augmentation import TwoView
+from dsio.train.capabilities import log_capabilities, resolve_training_capabilities
+from dsio.train.trainer import TrainerConfig
 from reference_projects.self_supervised.components import (
     ContrastiveObjective,
-    EmbeddingNorm,
     TinyEmbedding,
-    validate_embedding_norm,
+    unlabelled_samples,
 )
-from reference_projects.supervised.components import evaluation_arrays, regression_samples
 
 _AUGMENTATION = {
     "kind": "two_view",
@@ -41,7 +40,7 @@ _COMPONENTS = {
     "augmentation": "dsio.train.augmentation:TwoView",
     "augmentor": "dsio.model.components:Jitter",
     "data_module": "dsio.data.loading.module:DsioDataModule",
-    "dataset_factory": "reference_projects.supervised.components:regression_samples",
+    "dataset_factory": "reference_projects.self_supervised.components:unlabelled_samples",
     "model": "reference_projects.self_supervised.components:TinyEmbedding",
     "module": "dsio.model.module:DsioModule",
     "objective": "reference_projects.self_supervised.components:ContrastiveObjective",
@@ -73,18 +72,6 @@ def train_model(
     with attempt(parent_run_id) as child:
         store = SignalStore(data["store_path"])
         examples = entity_examples(store)
-        configuration = {
-            **_TRAINING,
-            "augmentation_seed": seed,
-            "dataset_digest": data["dataset_digest"],
-            "seed": seed,
-            "split_digest": split["split_digest"],
-        }
-        identity = record_provenance(
-            child.info.run_id,
-            configuration,
-            components=_COMPONENTS,
-        )
         manifest = load_split_evidence(
             split["split_uri"],
             examples,
@@ -97,7 +84,7 @@ def train_model(
             manifest,
             fold=_TRAINING["fold"],
             roles=_TRAINING["roles"],
-            dataset_factory=regression_samples,
+            dataset_factory=unlabelled_samples,
             batch_size=_TRAINING["batch_size"],
             num_workers=_TRAINING["num_workers"],
             seed=seed,
@@ -120,11 +107,20 @@ def train_model(
             run_id=child.info.run_id,
             log_model=False,
         )
-        trainer = Trainer(
+        trainer_config = TrainerConfig(
             max_epochs=_TRAINING["max_epochs"],
             accelerator=_TRAINING["accelerator"],
             devices=_TRAINING["devices"],
             deterministic=_TRAINING["deterministic"],
+            checkpoint=False,
+            log_every_n_steps=1,
+        )
+        trainer = Trainer(
+            max_epochs=trainer_config.max_epochs,
+            accelerator=trainer_config.accelerator,
+            devices=trainer_config.devices,
+            precision=trainer_config.precision,
+            deterministic=trainer_config.deterministic,
             logger=logger,
             enable_checkpointing=False,
             enable_model_summary=False,
@@ -132,6 +128,21 @@ def train_model(
             limit_val_batches=_TRAINING["limit_val_batches"],
             log_every_n_steps=1,
         )
+        capabilities = resolve_training_capabilities(trainer, requested=trainer_config)
+        configuration = {
+            **_TRAINING,
+            "augmentation_seed": seed,
+            "dataset_digest": data["dataset_digest"],
+            "execution": capabilities,
+            "seed": seed,
+            "split_digest": split["split_digest"],
+        }
+        identity = record_provenance(
+            child.info.run_id,
+            configuration,
+            components=_COMPONENTS,
+        )
+        log_capabilities(logger, capabilities)
         trainer.fit(module, datamodule=data_module)
         checkpoint = Path(data["store_path"]).parent / "ssl-model.ckpt"
         trainer.save_checkpoint(checkpoint)
@@ -148,58 +159,5 @@ def train_model(
         return {
             "train_run_id": child.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
-            "identity": identity,
-        }
-
-
-@task(persist_result=False)
-def export_model(
-    data: dict[str, Any],
-    split: dict[str, Any],
-    training: dict[str, Any],
-    parent_run_id: str,
-) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
-        inputs, _ = evaluation_arrays(data["store_path"], split["assignments"]["test"])
-        reference = ArtifactRef.model_validate(training["checkpoint"])
-        identity = record_provenance(
-            child.info.run_id,
-            {
-                "checkpoint_digest": reference.digest,
-                "dataset_digest": data["dataset_digest"],
-                "export_form": "pyfunc",
-            },
-            components={
-                "builder": "dsio.inference.predictor:build_predictor",
-                "model": "reference_projects.self_supervised.components:TinyEmbedding",
-                "normalizer": "reference_projects.self_supervised.components:EmbeddingNorm",
-                "validator": (
-                    "reference_projects.self_supervised.components:validate_embedding_norm"
-                ),
-            },
-        )
-        input_example = {
-            "sample_id": inputs["sample_id"].tolist(),
-            "x": torch.from_numpy(inputs["x"]),
-        }
-        predictor = build_predictor(
-            reference,
-            model=TinyEmbedding(),
-            preprocessor=None,
-            normalizer=EmbeddingNorm(),
-            validator=validate_embedding_norm,
-            input_example=input_example,
-        )
-        info = log_predictor(
-            predictor,
-            run_id=child.info.run_id,
-            input_example=input_example,
-            forms=("pyfunc",),
-            name="self-supervised-reference",
-        )["pyfunc"]
-        return {
-            "export_run_id": child.info.run_id,
-            "model_uri": info.model_uri,
-            "checkpoint_digest": reference.digest,
             "identity": identity,
         }

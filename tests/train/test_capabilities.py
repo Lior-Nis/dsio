@@ -26,6 +26,7 @@ from dsio.train.capabilities import (  # noqa: E402
     check_requested_capabilities,
     check_training_capabilities,
     representative_batch,
+    resolve_training_capabilities,
 )
 from dsio.train.trainer import TrainerConfig  # noqa: E402
 
@@ -141,6 +142,18 @@ def test_supported_path_is_proved_on_the_resolved_device_without_changing_mode()
     assert evidence["resolved_precision"] == "32-true"
     assert evidence["resolved_devices"] == "1"
     assert evidence["torch_version"] == torch.__version__
+
+
+def test_resolved_capabilities_can_be_recorded_without_exercising_the_module() -> None:
+    evidence = resolve_training_capabilities(
+        _trainer(),
+        requested=TrainerConfig(accelerator="auto", devices=1),
+    )
+
+    assert evidence["requested_accelerator"] == "auto"
+    assert evidence["resolved_device"] == "cpu"
+    assert evidence["resolved_precision"] == "32-true"
+    assert evidence["strategy"] == "SingleDeviceStrategy"
 
 
 def test_unverified_precision_fails_closed_before_the_objective_runs() -> None:

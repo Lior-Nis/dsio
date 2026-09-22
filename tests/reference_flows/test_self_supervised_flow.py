@@ -71,6 +71,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
             {
                 "device": result["x"].device.type,
                 "sample_id": list(result["sample_id"]),
+                "source_x": batch["x"].detach().cpu().clone(),
                 "view_id": list(result["view_id"]),
                 "x": result["x"].detach().cpu().clone(),
                 "y": result["y"].detach().cpu().clone(),
@@ -94,12 +95,15 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
     assert all(isinstance(objective, ContrastiveObjective) for _, _, _, objective in fits)
     assert len(views[0]) == len(views[1]) > 0
     for left, right in zip(views[0], views[1], strict=True):
-        assert left["device"] == right["device"] == "cpu"
+        assert left["device"] == right["device"]
         assert left["sample_id"] == right["sample_id"]
         assert left["view_id"] == right["view_id"]
         midpoint = len(left["sample_id"]) // 2
         assert left["sample_id"][:midpoint] * 2 == left["sample_id"]
         assert left["view_id"] == ["online"] * midpoint + ["target"] * midpoint
+        assert not torch.equal(left["x"][:midpoint], left["source_x"])
+        assert not torch.equal(left["x"][midpoint:], left["source_x"])
+        assert not torch.equal(left["x"][:midpoint], left["x"][midpoint:])
         assert torch.equal(left["x"], right["x"])
         assert torch.equal(left["y"], right["y"])
 
@@ -122,6 +126,11 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
 
         training = client.get_run(result["train_run_id"])
         assert training.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
+        split_provenance_path = client.download_artifacts(
+            result["split_run_id"], "provenance.json", str(tmp_path / result["split_run_id"])
+        )
+        split_provenance = json.loads(Path(split_provenance_path).read_text())
+        assert split_provenance["configuration"]["name"] == "self-supervised-holdout"
         provenance_path = client.download_artifacts(
             result["train_run_id"], "provenance.json", str(tmp_path / result["train_run_id"])
         )
@@ -135,10 +144,15 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
             "target",
         ]
         assert provenance["configuration"]["augmentation_seed"] == 23
-        assert provenance["configuration"]["accelerator"] == "auto"
-        assert provenance["configuration"]["objective_parameters"] == {
-            "temperature": 0.2
-        }
+        execution = provenance["configuration"]["execution"]
+        assert execution["requested_accelerator"] == "auto"
+        assert execution["resolved_device"].split(":", maxsplit=1)[0] == views[0][0]["device"]
+        assert execution["resolved_precision"] == "32-true"
+        assert execution["strategy"]
+        assert execution["torch_version"] == torch.__version__
+        assert training.data.params["execution.resolved_device"] == execution["resolved_device"]
+        assert training.data.params["execution.torch_version"] == torch.__version__
+        assert provenance["configuration"]["objective_parameters"] == {"temperature": 0.2}
         evaluation = client.get_run(result["evaluation_run_id"])
         inference = client.get_run(result["inference_run_id"])
         model_id = result["model_uri"].removeprefix("models:/")
