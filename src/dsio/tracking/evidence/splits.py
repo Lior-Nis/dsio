@@ -44,7 +44,7 @@ def record_split_evidence(
     """Log one native dataset input and its content-addressed split manifest."""
     validate(examples, manifest)
     client = _client("record split evidence")
-    require_writable_run(client, run_id, action="record split evidence")
+    run = require_writable_run(client, run_id, action="record split evidence")
     artifact_path = _artifact_path(manifest.digest)
     uri = evidence_uri(run_id, artifact_path)
     dataset = _dataset_entity(examples, source)
@@ -54,16 +54,19 @@ def record_split_evidence(
         manifest_uri=uri,
         manifest_digest=manifest.digest,
     )
+    already_recorded = _preflight_input(run, dataset_input)
 
     try:
         with TemporaryDirectory(prefix="dsio-split-evidence-") as directory:
             local = Path(directory) / "manifest.yaml"
             manifest.save(local)
             client.log_artifact(run_id, str(local), artifact_path=str(Path(artifact_path).parent))
-        client.log_inputs(run_id, datasets=[dataset_input])
+        if not already_recorded:
+            client.log_inputs(run_id, datasets=[dataset_input])
     except BaseException as error:  # noqa: BLE001 - preserve cancellation
         _raise_tracking_error(f"record split evidence on MLflow Run {run_id!r}", error)
-    require_writable_run(client, run_id, action="record split evidence")
+    current = require_writable_run(client, run_id, action="record split evidence")
+    _require_persisted_input(current, dataset_input)
     return uri
 
 
@@ -87,7 +90,9 @@ def load_split_evidence(
         )
     validate(examples, manifest)
     uri = evidence_uri(source_run_id, path)
-    dataset = _source_dataset(source_run, manifest, uri)
+    _source_dataset(source_run, manifest, uri)
+    refreshed_source = require_evidence(source_run_id, required_artifacts={path})
+    dataset = _source_dataset(refreshed_source, manifest, uri)
     consumer_input = _dataset_input(
         dataset,
         context="split_reuse",
@@ -95,11 +100,21 @@ def load_split_evidence(
         manifest_digest=manifest.digest,
         source_run_id=source_run_id,
     )
+    consumer = require_writable_run(
+        client,
+        consumer_run_id,
+        action="record reused split lineage",
+    )
+    already_linked = _preflight_input(consumer, consumer_input)
     try:
-        client.log_inputs(consumer_run_id, datasets=[consumer_input])
+        if not already_linked:
+            client.log_inputs(consumer_run_id, datasets=[consumer_input])
     except BaseException as error:  # noqa: BLE001 - preserve cancellation
         _raise_tracking_error(f"record split lineage on MLflow Run {consumer_run_id!r}", error)
-    require_writable_run(client, consumer_run_id, action="record reused split lineage")
+    current = require_writable_run(client, consumer_run_id, action="record reused split lineage")
+    _require_persisted_input(current, consumer_input)
+    final_source = require_evidence(source_run_id, required_artifacts={path})
+    _source_dataset(final_source, manifest, uri)
     return manifest
 
 
@@ -121,32 +136,37 @@ def _dataset_entity(
     examples: Examples,
     source: DatasetSource | Path | str,
 ) -> Dataset:
-    if isinstance(source, Path):
-        resolved_source: DatasetSource = LocalArtifactDatasetSource(str(source.resolve()))
-    elif isinstance(source, str):
-        if not source:
-            raise TrackingError("Split dataset source must not be empty.")
-        resolved_source = LocalArtifactDatasetSource(source)
-    elif isinstance(source, DatasetSource):
-        resolved_source = source
-    else:
-        raise TrackingError(
-            f"Split dataset source must be a native MLflow DatasetSource or path, got "
-            f"{type(source).__name__}."
+    try:
+        if isinstance(source, Path):
+            resolved_source: DatasetSource = LocalArtifactDatasetSource(str(source.resolve()))
+        elif isinstance(source, str):
+            if not source:
+                raise TrackingError("Split dataset source must not be empty.")
+            resolved_source = LocalArtifactDatasetSource(source)
+        elif isinstance(source, DatasetSource):
+            resolved_source = source
+        else:
+            raise TrackingError(
+                f"Split dataset source must be a native MLflow DatasetSource or path, got "
+                f"{type(source).__name__}."
+            )
+        config = MetaDataset(  # type: ignore[abstract]
+            source=resolved_source,
+            name=examples.name,
+            digest=examples.digest,
+        ).to_dict()
+        return Dataset(
+            name=config["name"],
+            digest=config["digest"],
+            source_type=config["source_type"],
+            source=config["source"],
+            schema=config.get("schema"),
+            profile=config.get("profile"),
         )
-    config = MetaDataset(  # type: ignore[abstract]
-        source=resolved_source,
-        name=examples.name,
-        digest=examples.digest,
-    ).to_dict()
-    return Dataset(
-        name=config["name"],
-        digest=config["digest"],
-        source_type=config["source_type"],
-        source=config["source"],
-        schema=config.get("schema"),
-        profile=config.get("profile"),
-    )
+    except TrackingError:
+        raise
+    except BaseException as error:  # noqa: BLE001 - preserve cancellation
+        _raise_tracking_error("construct native MLflow split dataset", error)
 
 
 def _dataset_input(
@@ -194,21 +214,95 @@ def _source_dataset(run: Run, manifest: SplitFile, manifest_uri: str) -> Dataset
     inputs = run.inputs
     if inputs is None:
         raise TrackingError(f"MLflow Run {run.info.run_id!r} has no native dataset inputs.")
+    matches: list[DatasetInput] = []
     for dataset_input in inputs.dataset_inputs:
-        tags = {tag.key: tag.value for tag in dataset_input.tags}
+        tags = _input_tags(dataset_input)
         if tags.get(_CONTEXT) != "split" or tags.get(_MANIFEST_URI) != manifest_uri:
             continue
+        matches.append(dataset_input)
         if tags.get(_MANIFEST_DIGEST) != manifest.digest:
             raise TrackingError("Source dataset input manifest digest does not match the artifact.")
+        if tags != {
+            _CONTEXT: "split",
+            _MANIFEST_URI: manifest_uri,
+            _MANIFEST_DIGEST: manifest.digest,
+        }:
+            raise TrackingError("Source native split dataset input tags do not match the artifact.")
         dataset = dataset_input.dataset
         if dataset.name != manifest.store or dataset.digest != manifest.store_manifest_sha256:
             raise TrackingError(
                 "Source native MLflow dataset identity does not match the manifest."
             )
-        return dataset
+    if not matches:
+        raise TrackingError(
+            f"MLflow Run {run.info.run_id!r} has no native split dataset input for "
+            f"{manifest_uri!r}."
+        )
+    expected = matches[0]
+    if any(not _same_input(candidate, expected) for candidate in matches[1:]):
+        raise TrackingError("Source Run has conflicting native split dataset inputs.")
+    return expected.dataset
+
+
+def _preflight_input(run: Run, expected: DatasetInput) -> bool:
+    """Reject MLflow's silent dataset-input deduplication before a write."""
+    existing = _dataset_inputs(run)
+    same_dataset = [
+        item for item in existing if _same_dataset_identity(item.dataset, expected.dataset)
+    ]
+    if not same_dataset:
+        return False
+    if all(_same_input(item, expected) for item in same_dataset):
+        return True
     raise TrackingError(
-        f"MLflow Run {run.info.run_id!r} has no native split dataset input for {manifest_uri!r}."
+        f"MLflow Run {run.info.run_id!r} already links this dataset with different split lineage."
     )
+
+
+def _require_persisted_input(run: Run, expected: DatasetInput) -> None:
+    same_dataset = [
+        item
+        for item in _dataset_inputs(run)
+        if _same_dataset_identity(item.dataset, expected.dataset)
+    ]
+    if not same_dataset or any(not _same_input(item, expected) for item in same_dataset):
+        raise TrackingError(
+            f"MLflow did not persist the exact split lineage on Run {run.info.run_id!r}."
+        )
+
+
+def _dataset_inputs(run: Run) -> list[DatasetInput]:
+    return [] if run.inputs is None else run.inputs.dataset_inputs
+
+
+def _same_input(left: DatasetInput, right: DatasetInput) -> bool:
+    return _same_dataset(left.dataset, right.dataset) and _input_tags(left) == _input_tags(right)
+
+
+def _same_dataset(left: Dataset, right: Dataset) -> bool:
+    return (
+        left.name,
+        left.digest,
+        left.source_type,
+        left.source,
+        left.schema,
+        left.profile,
+    ) == (
+        right.name,
+        right.digest,
+        right.source_type,
+        right.source,
+        right.schema,
+        right.profile,
+    )
+
+
+def _same_dataset_identity(left: Dataset, right: Dataset) -> bool:
+    return (left.name, left.digest) == (right.name, right.digest)
+
+
+def _input_tags(dataset_input: DatasetInput) -> dict[str, str]:
+    return {tag.key: tag.value for tag in dataset_input.tags}
 
 
 def _client(operation: str) -> MlflowClient:

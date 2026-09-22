@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from mlflow import MlflowClient
+from mlflow.data.dataset_source import DatasetSource
 from mlflow.entities import Dataset, DatasetInput, InputTag
 from mlflow.store.artifact.runs_artifact_repo import RunsArtifactRepository
 
@@ -37,6 +38,16 @@ def _manifest(examples: TableExamples) -> SplitFile:
         "group_kfold",
         name="three-fold",
         seed=7,
+        parameters={"n_splits": 3},
+    )
+
+
+def _alternate_manifest(examples: TableExamples) -> SplitFile:
+    return generate(
+        examples,
+        "group_kfold",
+        name="alternate-three-fold",
+        seed=11,
         parameters={"n_splits": 3},
     )
 
@@ -120,6 +131,29 @@ def test_split_evidence_round_trips_as_native_mlflow_lineage(tmp_path: Path) -> 
     assert mlflow.active_run() is None
 
 
+def test_exact_record_and_reuse_retries_are_idempotent(tmp_path: Path) -> None:
+    client, experiment_id, source_run_id, examples, manifest, uri = _recorded_source(
+        tmp_path,
+        status="RUNNING",
+    )
+
+    assert (
+        record_split_evidence(
+            source_run_id,
+            examples,
+            manifest,
+            source=tmp_path / "cohort.store",
+        )
+        == uri
+    )
+    client.set_terminated(source_run_id, "FINISHED")
+    consumer_run_id = _run(client, experiment_id, "train")
+    assert load_split_evidence(uri, examples, consumer_run_id=consumer_run_id) == manifest
+    assert load_split_evidence(uri, examples, consumer_run_id=consumer_run_id) == manifest
+    assert len(client.get_run(source_run_id).inputs.dataset_inputs) == 1
+    assert len(client.get_run(consumer_run_id).inputs.dataset_inputs) == 1
+
+
 def test_recording_validates_before_writing_mlflow_evidence(tmp_path: Path) -> None:
     client = MlflowClient()
     experiment_id = _experiment(client)
@@ -137,6 +171,53 @@ def test_recording_validates_before_writing_mlflow_evidence(tmp_path: Path) -> N
 
     run = client.get_run(run_id)
     assert run.inputs.dataset_inputs == []
+    assert [entry.path for entry in client.list_artifacts(run_id)] == ["provenance.json"]
+
+
+def test_recording_rejects_mlflow_dataset_input_deduplication(tmp_path: Path) -> None:
+    client = MlflowClient()
+    experiment_id = _experiment(client)
+    run_id = _run(client, experiment_id, "split")
+    examples = _examples()
+    first = _manifest(examples)
+
+    first_uri = record_split_evidence(
+        run_id,
+        examples,
+        first,
+        source=tmp_path / "cohort.store",
+    )
+    with pytest.raises(TrackingError, match="different split lineage"):
+        record_split_evidence(
+            run_id,
+            examples,
+            _alternate_manifest(examples),
+            source=tmp_path / "cohort.store",
+        )
+
+    inputs = client.get_run(run_id).inputs.dataset_inputs
+    assert len(inputs) == 1
+    assert _tags(inputs[0])["dsio.split.manifest_uri"] == first_uri
+
+
+def test_recording_normalizes_dataset_source_serialization_failures(tmp_path: Path) -> None:
+    class BrokenSource(DatasetSource):
+        def to_dict(self) -> dict[str, object]:
+            raise RuntimeError("broken serialization")
+
+    client = MlflowClient()
+    experiment_id = _experiment(client)
+    run_id = _run(client, experiment_id, "split")
+
+    with pytest.raises(TrackingError, match="broken serialization"):
+        record_split_evidence(
+            run_id,
+            _examples(),
+            _manifest(_examples()),
+            source=BrokenSource(),
+        )
+
+    assert client.get_run(run_id).inputs.dataset_inputs == []
     assert [entry.path for entry in client.list_artifacts(run_id)] == ["provenance.json"]
 
 
@@ -299,6 +380,58 @@ def test_reuse_rejects_a_non_running_consumer_before_logging_lineage(tmp_path: P
         )
 
 
+def test_reuse_rejects_mlflow_dataset_input_deduplication(tmp_path: Path) -> None:
+    client, experiment_id, _, examples, _, first_uri = _recorded_source(tmp_path)
+    second_run_id = _run(client, experiment_id, "alternate-split")
+    second_uri = record_split_evidence(
+        second_run_id,
+        examples,
+        _alternate_manifest(examples),
+        source=tmp_path / "cohort.store",
+    )
+    client.set_terminated(second_run_id, "FINISHED")
+    consumer_run_id = _run(client, experiment_id, "train")
+
+    load_split_evidence(first_uri, examples, consumer_run_id=consumer_run_id)
+    with pytest.raises(TrackingError, match="different split lineage"):
+        load_split_evidence(second_uri, examples, consumer_run_id=consumer_run_id)
+
+    inputs = client.get_run(consumer_run_id).inputs.dataset_inputs
+    assert len(inputs) == 1
+    assert _tags(inputs[0])["dsio.split.manifest_uri"] == first_uri
+
+
+def test_source_lifecycle_change_during_load_leaves_consumer_unlinked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.tracking.evidence.splits as split_evidence
+
+    client, experiment_id, source_run_id, examples, _, uri = _recorded_source(tmp_path)
+    consumer_run_id = _run(client, experiment_id, "train")
+    real_require = split_evidence.require_evidence
+    attempts = 0
+
+    def delete_after_first_check(*args: object, **kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        result = real_require(*args, **kwargs)
+        if attempts == 1:
+            client.delete_run(source_run_id)
+        return result
+
+    monkeypatch.setattr(split_evidence, "require_evidence", delete_after_first_check)
+
+    with pytest.raises(TrackingError, match="lifecycle stage"):
+        load_split_evidence(
+            uri,
+            examples,
+            consumer_run_id=consumer_run_id,
+        )
+    assert attempts == 2
+    assert client.get_run(consumer_run_id).inputs.dataset_inputs == []
+
+
 @pytest.mark.parametrize(
     "uri",
     [
@@ -373,3 +506,31 @@ def test_partial_mlflow_write_fails_and_cannot_masquerade_as_complete_evidence(
         "provenance.json",
         "split-evidence",
     ]
+
+
+def test_silent_mlflow_input_drop_cannot_masquerade_as_complete_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.tracking.evidence.splits as split_evidence
+
+    real_client = MlflowClient()
+    experiment_id = _experiment(real_client)
+    run_id = _run(real_client, experiment_id, "split")
+
+    class DroppingInputsClient:
+        def __getattr__(self, name: str) -> object:
+            return getattr(real_client, name)
+
+        def log_inputs(self, *args: object, **kwargs: object) -> None:
+            return None
+
+    monkeypatch.setattr(split_evidence, "MlflowClient", DroppingInputsClient)
+
+    with pytest.raises(TrackingError, match="did not persist the exact split lineage"):
+        record_split_evidence(
+            run_id,
+            _examples(),
+            _manifest(_examples()),
+            source=tmp_path / "cohort.store",
+        )

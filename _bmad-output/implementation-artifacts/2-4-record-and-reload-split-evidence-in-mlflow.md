@@ -85,11 +85,14 @@ Codex (GPT-5)
 - 2026-09-22: Created from merged Story 2.3 at `b5da1696`; inspected existing immutable evidence resolution/provenance, native MLflow 3.16.1 dataset APIs, and split validation boundaries.
 - 2026-09-22: Implemented direct `runs:/` record/load composition with native `MetaDataset`/`DatasetInput` lineage, content-addressed manifest artifacts, provenance-aware source reuse, and concrete split validation.
 - 2026-09-22: Local gate passed: 768 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
+- 2026-09-22: Independent review exposed MLflow's silent dataset-input deduplication, a source lifecycle race, ambiguous source lineage, and unnormalized source serialization failures; fixed each with exact persisted-input checks and refreshed source validation.
+- 2026-09-22: Post-review gate passed: 773 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks. The repository-wide Ruff format check remains outside CI and reports pre-existing formatting drift; both changed Python files pass formatting.
 
 ### Completion Notes List
 
 - The source Run owns one native MLflow dataset input and one content-addressed manifest; the consumer links the exact same native dataset entity and immutable manifest URI without copying artifacts.
 - Reuse fails closed on mutable or invalid Runs, malformed references, missing/corrupt/wrongly-addressed manifests, source dataset mismatch, and partial MLflow writes.
+- Record/reuse retries are idempotent, while conflicting lineage for MLflow's same native dataset identity is rejected before a silent deduplicated write and verified again from persisted Run state.
 - The public API adds two functions and returns only a native URI or the existing `SplitFile`; no parallel evidence/result/reference model was introduced.
 
 ### File List
