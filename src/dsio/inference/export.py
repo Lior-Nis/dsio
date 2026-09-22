@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import io
+import pickle
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
@@ -60,7 +61,7 @@ class _PredictorPyFunc(PythonModel):
                 "x": torch.as_tensor(values),
             }
         )
-        return _arrays(result, "PyFunc output")
+        return _arrays(result, "pyfunc export form output")
 
 
 def log_predictor(
@@ -82,13 +83,14 @@ def log_predictor(
     probe = copy.deepcopy(predictor)
     with _preserve_rng():
         output = probe(input_example)
-    example = _input_arrays(input_example)
-    expected = _arrays(output, "predictor output")
+    example = _input_arrays(input_example, declared)
+    expected = _arrays(output, f"{_form_scope(declared)} predictor output")
     try:
         signature = infer_signature(example, expected)
     except Exception as error:
         raise ExportError(f"export form signature is incompatible: {error}") from error
-    _preflight(predictor, example, declared)
+    _preflight(predictor, input_example, example, expected, declared)
+    run = _running_run(run_id)
 
     metadata = {
         "dsio.checkpoint_uri": predictor.checkpoint_uri,
@@ -96,6 +98,7 @@ def log_predictor(
     }
     infos: dict[ExportForm, ModelInfo] = {}
     for form in declared:
+        run = _running_run(run_id)
         tags = {
             "dsio.export_form": form,
             "dsio.checkpoint_uri": predictor.checkpoint_uri,
@@ -125,6 +128,8 @@ def log_predictor(
                 input_example=example,
                 metadata={**metadata, "dsio.export_form": form},
             )
+        _running_run(run_id)
+    _running_run(run_id)
     return infos
 
 
@@ -132,6 +137,9 @@ def _forms(forms: Sequence[ExportForm]) -> tuple[ExportForm, ...]:
     if isinstance(forms, str) or not isinstance(forms, Sequence) or not forms:
         raise ExportError("at least one export form must be declared")
     declared = tuple(forms)
+    invalid = next((form for form in declared if not isinstance(form, str)), None)
+    if invalid is not None:
+        raise ExportError(f"unsupported export form {invalid!r}; expected pytorch or pyfunc")
     unknown = [form for form in declared if form not in _FORMS]
     if unknown:
         raise ExportError(f"unsupported export form {unknown[0]!r}")
@@ -154,7 +162,9 @@ def _running_run(run_id: str) -> Run:
     return run
 
 
-def _input_arrays(example: Mapping[str, Any]) -> dict[str, np.ndarray[Any, Any]]:
+def _input_arrays(
+    example: Mapping[str, Any], forms: tuple[ExportForm, ...]
+) -> dict[str, np.ndarray[Any, Any]]:
     identities = example.get("sample_id")
     values = example.get("x")
     if isinstance(identities, str) or not isinstance(identities, Sequence):
@@ -163,7 +173,7 @@ def _input_arrays(example: Mapping[str, Any]) -> dict[str, np.ndarray[Any, Any]]
         raise ExportError("input example requires x as a tensor")
     return {
         "sample_id": np.asarray(list(identities), dtype=np.str_),
-        "x": values.detach().cpu().numpy(),
+        "x": _tensor_array(values, f"{_form_scope(forms)} input example", "x"),
     }
 
 
@@ -173,7 +183,7 @@ def _arrays(
     arrays: dict[str, np.ndarray[Any, Any]] = {}
     for field, value in values.items():
         if isinstance(value, Tensor):
-            array = value.detach().cpu().numpy()
+            array = _tensor_array(value, role, field)
         else:
             try:
                 array = np.asarray(value)
@@ -187,22 +197,79 @@ def _arrays(
 
 def _preflight(
     predictor: Predictor,
+    input_example: Mapping[str, Any],
     example: dict[str, np.ndarray[Any, Any]],
+    expected: dict[str, np.ndarray[Any, Any]],
     forms: tuple[ExportForm, ...],
 ) -> None:
-    try:
-        if "pytorch" in forms:
-            torch.save(predictor, io.BytesIO())
-        if "pyfunc" in forms:
+    if "pytorch" in forms:
+        try:
+            buffer = io.BytesIO()
+            torch.save(predictor, buffer)
+            buffer.seek(0)
+            restored = torch.load(buffer, map_location="cpu", weights_only=False)
+            with _preserve_rng():
+                observed = restored(input_example)
+            _require_equivalent(
+                _arrays(observed, "pytorch export form output"),
+                expected,
+                "pytorch",
+            )
+        except ExportError:
+            raise
+        except Exception as error:
+            raise ExportError(f"pytorch export form is incompatible: {error}") from error
+    if "pyfunc" in forms:
+        try:
             if any(value.device.type != "cpu" for value in predictor.parameters()):
                 raise ExportError("pyfunc export form requires predictor parameters on CPU")
             if any(value.device.type != "cpu" for value in predictor.buffers()):
                 raise ExportError("pyfunc export form requires predictor buffers on CPU")
             wrapper = _PredictorPyFunc(copy.deepcopy(predictor))
+            serialized = pickle.dumps(wrapper)
+            restored = pickle.loads(serialized)
             with _preserve_rng():
-                wrapper.predict(None, example)
-    except ExportError:
-        raise
-    except Exception as error:
-        requested = "pyfunc" if "pyfunc" in forms else "pytorch"
-        raise ExportError(f"{requested} export form is incompatible: {error}") from error
+                observed = restored.predict(None, example)
+            _require_equivalent(observed, expected, "pyfunc")
+        except ExportError:
+            raise
+        except Exception as error:
+            raise ExportError(f"pyfunc export form is incompatible: {error}") from error
+
+
+def _tensor_array(
+    value: Tensor, role: str, field: str
+) -> np.ndarray[Any, Any]:
+    try:
+        return value.detach().cpu().numpy()
+    except (RuntimeError, TypeError) as error:
+        raise ExportError(
+            f"{role} field {field!r} with dtype {value.dtype} is not NumPy-compatible: {error}"
+        ) from error
+
+
+def _require_equivalent(
+    observed: Mapping[str, np.ndarray[Any, Any]],
+    expected: Mapping[str, np.ndarray[Any, Any]],
+    form: ExportForm,
+) -> None:
+    if observed.keys() != expected.keys():
+        raise ExportError(f"{form} export form changed the declared output fields")
+    for field, expected_value in expected.items():
+        actual = observed[field]
+        if actual.dtype != expected_value.dtype or actual.shape != expected_value.shape:
+            raise ExportError(
+                f"{form} export form changed output field {field!r} shape or dtype"
+            )
+        try:
+            equal = np.array_equal(actual, expected_value, equal_nan=True)
+        except TypeError:
+            equal = np.array_equal(actual, expected_value)
+        if not equal:
+            raise ExportError(f"{form} export form changed output field {field!r} values")
+
+
+def _form_scope(forms: tuple[ExportForm, ...]) -> str:
+    if len(forms) == 1:
+        return f"{forms[0]} export form"
+    return f"{'/'.join(forms)} export forms"
