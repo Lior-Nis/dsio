@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import torch
 from torch import Tensor
+from torch.utils.data import DataLoader
 
 if TYPE_CHECKING:
     from lightning import Trainer
@@ -43,22 +44,26 @@ def check_requested_capabilities(requested: TrainerConfig) -> None:
 
 
 def representative_batch(loader: Any) -> Any:
-    """Read one real batch without changing the loader's later shuffle order."""
-    generator = loader.generator
-    generator_state = None if generator is None else generator.get_state()
+    """Read one real batch through a throwaway loader, leaving training untouched."""
     torch_state = torch.random.get_rng_state()
     python_state = random.getstate()
     numpy_state = np.random.get_state()
     try:
-        return next(iter(loader))
+        probe = DataLoader(
+            loader.dataset,
+            batch_size=loader.batch_size,
+            shuffle=False,
+            num_workers=0,
+            collate_fn=loader.collate_fn,
+            drop_last=loader.drop_last,
+        )
+        return next(iter(probe))
     except StopIteration:
         raise CapabilityError("training capability preflight requires a non-empty loader") from None
     finally:
         torch.random.set_rng_state(torch_state)
         random.setstate(python_state)
         np.random.set_state(numpy_state)
-        if generator is not None and generator_state is not None:
-            generator.set_state(generator_state)
 
 
 def check_training_capabilities(
@@ -99,8 +104,11 @@ def check_training_capabilities(
                 probe.to(device)
                 probe.train()
             except Exception as error:  # noqa: BLE001 - component boundary
+                components = f"{_name(probe.model)} + {_name(probe.objective)}"
+                if probe.training_augmentation is not None:
+                    components += f" + {_name(probe.training_augmentation)}"
                 errors.append(
-                    f"module transfer to {device}/{precision}: "
+                    f"module transfer for {components} to {device}/{precision}: "
                     f"{type(error).__name__}: {error}"
                 )
                 ready = False

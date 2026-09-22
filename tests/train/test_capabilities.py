@@ -243,7 +243,7 @@ def test_module_transfer_failures_keep_capability_context() -> None:
         )
 
     message = str(caught.value)
-    assert "module transfer to cpu/32-true" in message
+    assert "module transfer for ComponentChain + LossObjective to cpu/32-true" in message
     assert "experimental admission" in message
 
 
@@ -305,6 +305,31 @@ def test_representative_batch_does_not_advance_the_training_order() -> None:
     probed = representative_batch(loader)
 
     assert len(probed["sample_id"]) == 3
+    assert next(iter(loader))["sample_id"] == next(iter(control))["sample_id"]
+
+
+def test_representative_batch_never_initializes_persistent_training_workers() -> None:
+    left_generator = torch.Generator().manual_seed(41)
+    right_generator = torch.Generator().manual_seed(41)
+    loader = DataLoader(
+        _BatchDataset(),
+        batch_size=3,
+        shuffle=True,
+        num_workers=2,
+        persistent_workers=True,
+        generator=left_generator,
+    )
+    control = DataLoader(
+        _BatchDataset(),
+        batch_size=3,
+        shuffle=True,
+        num_workers=2,
+        persistent_workers=True,
+        generator=right_generator,
+    )
+
+    representative_batch(loader)
+
     assert next(iter(loader))["sample_id"] == next(iter(control))["sample_id"]
 
 
