@@ -93,7 +93,10 @@ def _identity_document(
     secrets: Collection[str],
     ephemeral: Collection[str],
 ) -> dict[str, Any]:
-    component_references = dict(components or {})
+    secret_names = _field_names(secrets)
+    ephemeral_names = _field_names(ephemeral)
+    omitted = secret_names | ephemeral_names
+    component_references = components if components is not None else {}
     invalid_key_types = sorted(
         {type(name).__name__ for name in component_references if not isinstance(name, str)}
     )
@@ -101,12 +104,16 @@ def _identity_document(
         types = ", ".join(invalid_key_types)
         raise NonCanonicalValueError(f"component names must be str, got: {types}")
     normalized_components: dict[str, Any] = {}
-    for name, component in component_references.items():
+    for name in component_references:
+        if name in omitted:
+            continue
+        component = component_references[name]
         if isinstance(component, str):
             normalized_components[name] = component
             continue
         try:
-            normalized_components[name] = validate_component_config(component)
+            filtered = _filter_fields(component, omitted)
+            normalized_components[name] = validate_component_config(filtered)
         except ComponentError as error:
             raise NonCanonicalValueError(
                 f"component reference or configuration is invalid for {name!r}: {error}"
@@ -114,12 +121,12 @@ def _identity_document(
     return {
         "schema_version": _SCHEMA_VERSION,
         "dsio_version": version("dsio"),
-        "configuration": normalize(config, secrets=secrets, ephemeral=ephemeral),
-        "components": normalize(
-            normalized_components,
-            secrets=secrets,
-            ephemeral=ephemeral,
+        "configuration": normalize(
+            config,
+            secrets=secret_names,
+            ephemeral=ephemeral_names,
         ),
+        "components": normalize(normalized_components),
     }
 
 

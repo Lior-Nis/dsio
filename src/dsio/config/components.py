@@ -105,7 +105,7 @@ def importable_reference(value: object) -> str:
     if (
         not isinstance(module, str)
         or not module
-        or module == "__main__"
+        or module in {"__main__", "__mp_main__"}
         or not isinstance(qualname, str)
         or not qualname
         or qualname == "<lambda>"
@@ -164,7 +164,7 @@ def _split_reference(reference: str) -> tuple[str, str]:
     module, qualname = reference.split(":", 1)
     if (
         not module
-        or module == "__main__"
+        or module in {"__main__", "__mp_main__"}
         or module.startswith(".")
         or not qualname
         or "<" in qualname

@@ -103,6 +103,41 @@ class InvalidSchedulerMappingFactory:
         return {"interval": "epoch"}
 
 
+class BarePlateauSchedulerFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> torch.optim.lr_scheduler.ReduceLROnPlateau:
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+
+
+class PlateauSchedulerMappingFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        return {
+            "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+            "monitor": "val/loss",
+        }
+
+
+class PlateauSchedulerWithoutMonitorFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        return {"scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)}
+
+
+class DisabledPlateauSchedulerFactory:
+    def __call__(
+        self, optimizer: torch.optim.Optimizer
+    ) -> Mapping[str, object]:
+        return {
+            "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+            "monitor": "val/loss",
+            "reduce_on_plateau": False,
+        }
+
+
 class TorchMetricsObjective(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -311,6 +346,43 @@ def test_incomplete_lightning_scheduler_mapping_is_rejected() -> None:
 
     with pytest.raises(ModuleError, match="mapping requires 'scheduler'"):
         module.configure_optimizers()
+
+
+@pytest.mark.parametrize(
+    ("factory", "message"),
+    [
+        (BarePlateauSchedulerFactory(), "mapping with a non-empty monitor"),
+        (PlateauSchedulerWithoutMonitorFactory(), "non-empty monitor"),
+        (DisabledPlateauSchedulerFactory(), "cannot disable"),
+    ],
+)
+def test_plateau_scheduler_requires_a_consistent_monitored_mapping(
+    factory: object,
+    message: str,
+) -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        scheduler_factory=factory,
+    )
+
+    with pytest.raises(ModuleError, match=message):
+        module.configure_optimizers()
+
+
+def test_monitored_plateau_scheduler_completes_a_real_lightning_loop(
+    tmp_path: Path,
+) -> None:
+    module = DsioModule(
+        model=nn.Sequential(nn.Flatten(), nn.Linear(2, 2)),
+        objective=TorchMetricsObjective(),
+        scheduler_factory=PlateauSchedulerMappingFactory(),
+    )
+    trainer = _trainer(tmp_path / "plateau", max_epochs=1)
+
+    trainer.fit(module, datamodule=_data_module(tmp_path / "plateau-samples"))
+
+    assert trainer.global_step > 0
 
 
 def test_native_torchmetrics_are_emitted_only_through_lightning_log() -> None:

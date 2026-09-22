@@ -114,6 +114,67 @@ def test_component_secrets_and_ephemeral_values_do_not_change_identity() -> None
     )
 
 
+def test_one_shot_selectors_filter_configuration_and_components() -> None:
+    from dsio.tracking import execution_identity
+
+    def identity(password: str) -> str:
+        selectors: Any = (name for name in ["password"])
+        return execution_identity(
+            {"password": f"configuration-{password}"},
+            components={
+                "model": {
+                    "reference": "project.models:Model",
+                    "parameters": {"width": 32, "password": password},
+                }
+            },
+            secrets=selectors,
+        )
+
+    assert identity("SENTINEL-ONE") == identity("SENTINEL-TWO")
+
+
+def test_component_secret_is_omitted_before_its_value_is_fetched() -> None:
+    from dsio.tracking import execution_identity
+
+    class LazyParameters(Mapping[str, object]):
+        def __getitem__(self, key: str) -> object:
+            if key == "password":
+                raise RuntimeError("SENTINEL-SECRET-WAS-FETCHED")
+            return 32
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(("width", "password"))
+
+        def __len__(self) -> int:
+            return 2
+
+    assert execution_identity(
+        {},
+        components={
+            "model": {
+                "reference": "project.models:Model",
+                "parameters": LazyParameters(),
+            }
+        },
+        secrets={"password"},
+    )
+
+
+def test_noncanonical_component_secret_is_removed_before_validation() -> None:
+    from dsio.tracking import execution_identity
+
+    assert execution_identity(
+        {},
+        components={
+            "model": {
+                "reference": "project.models:Model",
+                "parameters": {"width": 32, "password": object()},
+            }
+        },
+        secrets={"password"},
+    )
+
+
 def test_component_references_must_be_explicit_strings() -> None:
     from dsio.contracts import NonCanonicalValueError
     from dsio.tracking import execution_identity

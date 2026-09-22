@@ -9,6 +9,10 @@ import torch
 from torch import nn
 
 
+def spawn_factory() -> None:
+    return None
+
+
 def test_resolve_component_builds_and_validates_a_named_native_object() -> None:
     from dsio.config.components import resolve_component
 
@@ -47,6 +51,7 @@ def test_runtime_arguments_and_declared_parameters_share_one_constructor_call() 
     [
         ({"reference": "torch.nn.Linear"}, "module:qualname"),
         ({"reference": "__main__:Linear"}, "absolutely importable"),
+        ({"reference": "__mp_main__:Linear"}, "absolutely importable"),
         ({"reference": ".relative:Linear"}, "absolutely importable"),
         ({"reference": "missing_package:Thing"}, "could not import"),
         ({"reference": "torch.nn:Missing"}, "does not resolve"),
@@ -106,3 +111,14 @@ def test_local_components_are_rejected() -> None:
 
     with pytest.raises(ComponentError, match="local|named importable"):
         importable_reference(local_factory)
+
+
+def test_spawn_process_main_components_are_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dsio.config.components import ComponentError, importable_reference
+
+    monkeypatch.setattr(spawn_factory, "__module__", "__mp_main__")
+
+    with pytest.raises(ComponentError, match="named importable"):
+        importable_reference(spawn_factory)
