@@ -418,6 +418,22 @@ def test_homogeneous_numpy_scalar_output_is_lossless() -> None:
     np.testing.assert_array_equal(result["prediction"], np.asarray([1, 2], dtype=np.float32))
 
 
+@pytest.mark.parametrize(
+    "values",
+    [
+        [np.longdouble(np.nan), np.longdouble(1)],
+        [np.complex128(complex(np.nan, 0)), np.complex128(1)],
+    ],
+)
+def test_numpy_nan_sequence_conversion_is_lossless(values: list[Any]) -> None:
+    import dsio.inference.export as export_module
+
+    array = export_module._arrays({"prediction": values}, "test output")["prediction"]
+
+    assert array.shape == (2,)
+    assert bool(np.isnan(array[0]))
+
+
 def test_source_run_is_refreshed_after_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import io
-import math
 import pickle
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
@@ -219,11 +218,20 @@ def _losslessly_converted(original: object, converted: object) -> bool:
     if type(original) is not type(converted):
         return False
     try:
-        return bool(original == converted) or bool(
-            isinstance(original, float)
-            and isinstance(converted, float)
-            and math.isnan(original)
-            and math.isnan(converted)
+        return bool(original == converted) or _both_nan(original, converted)
+    except (TypeError, ValueError):
+        return False
+
+
+def _both_nan(left: object, right: object) -> bool:
+    try:
+        left_value = np.asarray(left)
+        right_value = np.asarray(right)
+        return bool(
+            left_value.ndim == 0
+            and right_value.ndim == 0
+            and np.isnan(left_value).item()
+            and np.isnan(right_value).item()
         )
     except (TypeError, ValueError):
         return False
