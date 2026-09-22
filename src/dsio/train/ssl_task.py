@@ -51,6 +51,12 @@ from dsio.train.assembly import (
 )
 from dsio.train.augmentation import MaskedReconstruction, TwoView
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
+from dsio.train.capabilities import (
+    check_requested_capabilities,
+    check_training_capabilities,
+    log_capabilities,
+    representative_batch,
+)
 from dsio.train.runner import preflight, runner
 from dsio.train.tracking import (
     finite_metrics,
@@ -148,6 +154,7 @@ def check_ssl(config: RunConfig) -> None:
     require_mlflow()
     task = config.task
     assert isinstance(task, SslPretrainTask)
+    check_requested_capabilities(task.trainer)
     component_factory(task.backbone)
     component_factory(task.head)
     component_factory(task.loss)
@@ -258,6 +265,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         task = config.task
         assert isinstance(task, SslPretrainTask)
 
+        check_requested_capabilities(task.trainer)
         require_fold(task.splits_root, task.split, task.fold)
 
         store = SignalStore(data_root() / task.store)
@@ -331,6 +339,13 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
             mlflow_logger,
             callbacks,
         )
+        capabilities = check_training_capabilities(
+            trainer,
+            module,
+            representative_batch(train_loader),
+            requested=task.trainer,
+        )
+        log_capabilities(mlflow_logger, capabilities)
         trainer.fit(module, train_loader)
 
         buffer = io.BytesIO()

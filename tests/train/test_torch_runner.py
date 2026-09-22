@@ -308,6 +308,7 @@ def test_a_completed_run_logs_its_metrics_to_mlflow(corpus: Path, tmp_path: Path
     mlflow_runs = client.search_runs([experiment.experiment_id])
     assert len(mlflow_runs) == 1
     logged = mlflow_runs[0].data.metrics
+    capabilities = mlflow_runs[0].data.params
     for name, value in metrics.items():
         assert logged[name] == pytest.approx(value)
     # `val/loss` is never in `metrics` (the held-out `task.metrics` dict) -- it only ever
@@ -315,6 +316,10 @@ def test_a_completed_run_logs_its_metrics_to_mlflow(corpus: Path, tmp_path: Path
     # through `mlflow_logger`, i.e. only if `Trainer(..., logger=mlflow_logger)` really
     # wired the two together, not merely if the final `log_metrics` call happened to fire.
     assert "val/loss" in logged
+    assert capabilities["execution.requested_accelerator"] == "cpu"
+    assert capabilities["execution.resolved_device"] == "cpu"
+    assert capabilities["execution.resolved_precision"] == "32-true"
+    assert capabilities["execution.device_name"] == "cpu"
 
 
 def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(

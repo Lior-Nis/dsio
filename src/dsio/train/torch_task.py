@@ -53,6 +53,12 @@ from dsio.train.assembly import (
     build_optional_component,
     component_factory,
 )
+from dsio.train.capabilities import (
+    check_requested_capabilities,
+    check_training_capabilities,
+    log_capabilities,
+    representative_batch,
+)
 from dsio.train.runner import preflight, runner
 from dsio.train.tracking import (
     finite_metrics,
@@ -217,6 +223,7 @@ def check_torch(config: RunConfig) -> None:
     require_mlflow()
     task = config.task
     assert isinstance(task, TorchTask)
+    check_requested_capabilities(task.trainer)
 
     component_factory(task.labels)
     component_factory(task.backbone)
@@ -368,6 +375,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
         task = config.task
         assert isinstance(task, TorchTask)
 
+        check_requested_capabilities(task.trainer)
         require_fold(task.splits_root, task.split, task.fold)
 
         store = SignalStore(data_root() / task.store)
@@ -435,6 +443,13 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
             mlflow_logger,
             build_callbacks(task.trainer, directory, has_validation=validation is not None),
         )
+        capabilities = check_training_capabilities(
+            trainer,
+            module,
+            representative_batch(train_loader),
+            requested=task.trainer,
+        )
+        log_capabilities(mlflow_logger, capabilities)
         trainer.fit(module, train_loader, val_loader)
 
         predict_loader = make_loader(

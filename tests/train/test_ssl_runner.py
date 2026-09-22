@@ -302,6 +302,8 @@ def test_the_encoder_records_its_lineage(corpus: Path) -> None:
     hosting = MlflowClient(tracking_uri=resolve_tracking_uri()).get_run(ref.run_id)
     assert hosting.data.tags["config_hash"] == config.config_hash
     assert hosting.data.params["seed"] == str(config.seed)
+    assert hosting.data.params["execution.resolved_device"] == "cpu"
+    assert hosting.data.params["execution.resolved_precision"] == "32-true"
     assert load_artifact(ref), "the digest in encoder.json must match the stored bytes"
 
 
