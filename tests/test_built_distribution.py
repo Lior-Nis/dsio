@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -347,3 +348,28 @@ print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.j
     assert "DSIO_CHILD_PARENT_MATCH=True" in flow_result.stdout
     assert "DSIO_REUSED_RUN_MATCH=True" in flow_result.stdout
     assert "DSIO_REUSED_URI=runs:/" in flow_result.stdout
+
+    shutil.copytree(ROOT / "reference_projects", work / "reference_projects")
+    reference_probe = """
+from prefect.testing.utilities import prefect_test_harness
+from mlflow import MlflowClient
+from reference_projects.supervised.flow import supervised_flow
+
+with prefect_test_harness():
+    result = supervised_flow('reference-workspace', seed=19)
+client = MlflowClient()
+print('REFERENCE_PARENT_STATUS=' + client.get_run(result['parent_run_id']).info.status)
+print('REFERENCE_TRAIN_STATUS=' + client.get_run(result['train_run_id']).info.status)
+print('REFERENCE_PREDICTIONS=' + str(len(result['prediction'])))
+"""
+    reference_result = subprocess.run(
+        [str(python), "-B", "-c", reference_probe],
+        cwd=work,
+        env=env,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert "REFERENCE_PARENT_STATUS=FINISHED" in reference_result.stdout
+    assert "REFERENCE_TRAIN_STATUS=FINISHED" in reference_result.stdout
+    assert "REFERENCE_PREDICTIONS=2" in reference_result.stdout

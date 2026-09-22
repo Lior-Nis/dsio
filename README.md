@@ -100,6 +100,16 @@ For a downstream-only rerun, validate source Runs in the project flow with
 the project chooses. Record those Run IDs and URIs as ordinary provenance inputs; DSio does
 not infer a rerun plan or invoke upstream work.
 
+The runnable [supervised reference project](reference_projects/supervised/flow.py) shows the
+complete pattern with synthetic data: project-owned Prefect tasks build and split a store,
+train the exact `DsioModule` and `DsioDataModule`, log native MLflow lineage, export a predictor,
+and run evaluation and inference. Its separate `reevaluate` flow reuses immutable model and
+dataset evidence without retraining. Run its deterministic local proof with:
+
+```bash
+uv run pytest -q tests/reference_flows/test_supervised_flow.py
+```
+
 ## Shape
 
 A single versioned Python distribution rooted at one package:
