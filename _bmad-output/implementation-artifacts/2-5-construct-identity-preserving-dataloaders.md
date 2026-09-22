@@ -4,7 +4,7 @@ baseline_commit: a62680d
 
 # Story 2.5: Construct Identity-Preserving DataLoaders
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -36,11 +36,11 @@ so that every training paradigm shares one replayable CPU data path.
   - [x] Require factory length/order to match the exact role assignment and check each item at access time.
   - [x] Preserve ordered `sample_id` values through default and custom collation.
   - [x] Seed shuffle/workers explicitly and preflight multiprocessing picklability.
-- [ ] Verify and review (AC: 1-7)
+- [x] Verify and review (AC: 1-7)
   - [x] Cover phase/role replay, identity alignment, custom collation, deterministic worker counts, and exact class behavior.
   - [x] Cover invalid roles/stages/folds, malformed items/batches, worker-unsafe components, and loader arguments.
   - [x] Run full pytest, Ruff, mypy, import contracts, lock validation, build, and diff checks.
-  - [ ] Complete independent blind, edge-case, and acceptance reviews before merge.
+  - [x] Complete independent blind, edge-case, and acceptance reviews before merge.
 
 ## Dev Notes
 
@@ -90,6 +90,7 @@ Codex (GPT-5)
 - 2026-09-22: Re-review tightened the batch-tree grammar: sample-major ragged and zero-width native sequences remain valid, while unbatched scalars, opaque leaves, object arrays, and accelerator tensors fail closed.
 - 2026-09-22: Acceptance re-review closed the final cardinality edge by rejecting zero-dimensional batch tensors and arrays while retaining valid `(batch_size, 0)` fields.
 - 2026-09-22: Edge re-review extended the object-dtype rejection to structured NumPy scalars, preventing device tensors from being hidden inside `np.void` sample leaves.
+- 2026-09-22: Exact final candidate `0c7066c` received blind, edge-case, and acceptance approval; the release gate passed with 815 tests (3 deselected), Ruff, mypy, all import contracts, locked sync, source/wheel builds, and diff checks.
 
 ### Completion Notes List
 
@@ -99,6 +100,7 @@ Codex (GPT-5)
 - Loader construction is seeded, exact-membership (`drop_last=False`), and preflights dataset/collator picklability when workers are requested.
 - Canonical corpus identity now covers full signal, index, and entity-metadata digests, so changing ID-to-row topology invalidates examples, splits, loaders, and recorded fold evidence even when payload bytes are identical.
 - No registry, loader configuration hierarchy, accelerator augmentation hook, or second split abstraction was added.
+- The batch-tree guard admits numeric, ragged sample-major, and zero-width native forms while rejecting missing batch axes, opaque or unordered containers, object-bearing NumPy values, cycles, and non-CPU tensors.
 
 ### File List
 
@@ -116,3 +118,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 2.5 and started implementation.
 - 2026-09-22: Added the identity-preserving `DsioDataModule` loading path and passed the complete local quality gate.
+- 2026-09-22: Closed all independent review findings and completed Story 2.5.
