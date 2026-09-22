@@ -199,7 +199,7 @@ class WindowDataset(Dataset[WindowItem]):
         # row is carried regardless of which branch below runs: predictions are aligned to
         # folds by this identity, not by trusting the order a DataLoader hands batches back.
         item = WindowItem(
-            sample_id=f"{self.index.store_digest}:{self.index.digest}:{position}",
+            sample_id=self.index.sample_id(position),
             x=x,
             row=position,
         )

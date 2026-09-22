@@ -182,6 +182,14 @@ class WindowIndex:
         per_entity = np.array([table[g] for g in self.entity_groups], dtype=np.int32)
         return per_entity[self.entity_codes]
 
+    def sample_id(self, position: int) -> str:
+        """Return the one governed identity for a window position in this view."""
+        position = operator.index(position)
+        if position < 0 or position >= len(self):
+            raise IndexError(f"window position {position} is outside [0, {len(self)})")
+        entity = self.entity_names[int(self.entity_codes[position])]
+        return f"{entity}:{int(self.starts[position])}:{self.digest}"
+
     def subset(self, mask: np.ndarray) -> WindowIndex:
         """Restrict to a boolean mask, keeping every parallel array aligned."""
         mask = np.asarray(mask, dtype=bool)

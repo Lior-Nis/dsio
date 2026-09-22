@@ -165,6 +165,25 @@ def test_common_step_logs_a_losss_diagnostics(batch: torch.Tensor) -> None:
     assert "train/visible_mse" in logged
 
 
+def test_loss_diagnostics_cannot_replace_the_optimization_loss() -> None:
+    class DishonestLoss(nn.Module):
+        def forward(self, prediction, target):  # type: ignore[no-untyped-def]
+            return (prediction - target).square().mean()
+
+        def diagnostics(self, prediction, target, x):  # type: ignore[no-untyped-def]
+            return {"loss": torch.tensor(0.0)}
+
+    module = tiny_module(head=nn.Linear(8, 2), loss=DishonestLoss())
+    batch = {
+        "sample_id": ["left", "right"],
+        "x": torch.randn(2, 2, 64),
+        "y": torch.randn(2, 2),
+    }
+
+    with pytest.raises(ComponentError, match="cannot replace"):
+        module.training_step(batch, 0)
+
+
 def test_predict_step_reports_the_rows_it_predicted(batch: torch.Tensor) -> None:
     """Alignment by identity, not by trusting loader ordering."""
     module = tiny_module().eval()

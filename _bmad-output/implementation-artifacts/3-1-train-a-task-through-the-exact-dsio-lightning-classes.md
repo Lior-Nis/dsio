@@ -70,6 +70,8 @@ Codex (GPT-5)
 - 2026-09-22: Replaced the hard-coded training class chain with one model/objective contract; retained the proven chain and loss diagnostics as ordinary `ComponentChain` and `LossObjective` components.
 - 2026-09-22: Added stable sample identity to the predecessor window batches so every current training consumer enters the same identity-bearing module boundary.
 - 2026-09-22: Candidate release gate passed: 823 tests passed (3 deselected), locked sync, source/wheel builds, Ruff, mypy, all import contracts, and diff checks.
+- 2026-09-22: Blind review found two window-ID encodings; identity now has one implementation on `WindowIndex`, shared by governed examples and full or reordered datasets.
+- 2026-09-22: Edge review closed non-finite optimizer values, Lightning loss-name collisions, diagnostic loss replacement, and prediction type/cardinality mismatches at their narrow boundaries.
 
 ### Completion Notes List
 

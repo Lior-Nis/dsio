@@ -75,7 +75,14 @@ class LossObjective(nn.Module):
         result: dict[str, Tensor] = {"loss": value}
         diagnostics = getattr(self.loss, "diagnostics", None)
         if callable(diagnostics):
-            result.update(diagnostics(prediction, target, x))
+            reported = diagnostics(prediction, target, x)
+            if not isinstance(reported, Mapping):
+                raise ComponentError(
+                    f"loss diagnostics must return a mapping, got {type(reported).__name__}"
+                )
+            if "loss" in reported:
+                raise ComponentError("loss diagnostics cannot replace the optimization loss")
+            result.update(reported)
         return result
 
 

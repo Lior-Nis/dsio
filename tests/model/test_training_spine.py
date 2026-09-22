@@ -171,6 +171,61 @@ def test_training_batches_require_ordered_sample_identity() -> None:
         module.training_step({"x": torch.ones(1, 2), "y": torch.zeros(1)}, 0)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"lr": float("nan")},
+        {"lr": float("inf")},
+        {"weight_decay": float("nan")},
+        {"weight_decay": float("inf")},
+    ],
+)
+def test_optimizer_hyperparameters_must_be_finite(kwargs: dict[str, float]) -> None:
+    with pytest.raises(ModuleError, match="finite"):
+        DsioModule(model=nn.Linear(1, 1), objective=ClassificationObjective(), **kwargs)
+
+
+@pytest.mark.parametrize("name", ["loss_step", "loss_epoch"])
+def test_objective_metrics_cannot_collide_with_lightning_loss_names(name: str) -> None:
+    module = DsioModule(
+        model=nn.Identity(),
+        objective=lambda *_: {"loss": torch.tensor(1.0), name: torch.tensor(2.0)},
+    )
+
+    with pytest.raises(ModuleError, match="reserved by Lightning"):
+        module.training_step({"sample_id": ["sample"], "x": torch.ones(1, 1)}, 0)
+
+
+@pytest.mark.parametrize(
+    ("model", "sample_ids", "message"),
+    [
+        (nn.Identity(), ["only"], "2 predictions for 1 sample_id"),
+        (nn.Identity(), ["left", "right"], "1 predictions for 2 sample_id"),
+        (lambda _: {"prediction": torch.ones(1)}, ["only"], "must be a tensor"),
+    ],
+)
+def test_prediction_output_must_match_sample_identity(
+    model: object,
+    sample_ids: list[str],
+    message: str,
+) -> None:
+    configured = model if isinstance(model, nn.Module) else CallableModel(model)
+    module = DsioModule(model=configured, objective=ClassificationObjective())
+    x = torch.ones(2 if len(sample_ids) == 1 else 1, 1)
+
+    with pytest.raises(ModuleError, match=message):
+        module.predict_step({"sample_id": sample_ids, "x": x}, 0)
+
+
+class CallableModel(nn.Module):
+    def __init__(self, function: Any) -> None:
+        super().__init__()
+        self.function = function
+
+    def forward(self, x: torch.Tensor) -> Any:
+        return self.function(x)
+
+
 def test_dsio_lightning_classes_cannot_be_subclassed() -> None:
     with pytest.raises(TypeError, match="DsioModule.*cannot be subclassed"):
 

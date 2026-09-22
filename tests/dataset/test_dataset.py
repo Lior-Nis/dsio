@@ -83,6 +83,21 @@ def test_items_carry_the_position_they_came_from(store: SignalStore, index) -> N
     assert [dataset[i]["row"] for i in range(3)] == [5, 9, 2]
 
 
+def test_window_items_use_the_same_governed_identity_as_signal_examples(
+    store: SignalStore,
+    index,
+) -> None:
+    governed = SignalExamples(store, index).sample_ids.tolist()
+    full = WindowDataset(store, index)
+    positions = np.array([5, 2, 9])
+    reordered = WindowDataset(store, index, positions=positions)
+
+    assert [full[position]["sample_id"] for position in range(len(full))] == governed
+    assert [reordered[position]["sample_id"] for position in range(len(reordered))] == [
+        governed[position] for position in positions
+    ]
+
+
 def test_the_window_matches_a_direct_store_read(store: SignalStore, index) -> None:
     """The dataset must not quietly transform the signal on its way out."""
     dataset = WindowDataset(store, index, positions=np.array([7]))

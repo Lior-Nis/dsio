@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
 
@@ -54,14 +55,20 @@ class DsioModule(LightningModule):
             raise ModuleError(f"model must be a torch nn.Module, got {type(model).__name__}")
         if not callable(objective):
             raise ModuleError("objective must be callable")
-        if not isinstance(lr, int | float) or isinstance(lr, bool) or lr <= 0:
-            raise ModuleError("lr must be a positive number")
+        if (
+            not isinstance(lr, int | float)
+            or isinstance(lr, bool)
+            or not math.isfinite(lr)
+            or lr <= 0
+        ):
+            raise ModuleError("lr must be a positive finite number")
         if (
             not isinstance(weight_decay, int | float)
             or isinstance(weight_decay, bool)
+            or not math.isfinite(weight_decay)
             or weight_decay < 0
         ):
-            raise ModuleError("weight_decay must be a non-negative number")
+            raise ModuleError("weight_decay must be a non-negative finite number")
         self.model = model
         self.objective = objective
         self.lr = float(lr)
@@ -123,9 +130,17 @@ class DsioModule(LightningModule):
             x = batch["x"]
         except KeyError:
             raise ModuleError("prediction batch must contain 'x'") from None
+        prediction = self.model(x)
+        if not isinstance(prediction, Tensor):
+            raise ModuleError(f"model prediction must be a tensor, got {type(prediction).__name__}")
+        if prediction.ndim == 0 or prediction.shape[0] != len(sample_ids):
+            size = None if prediction.ndim == 0 else prediction.shape[0]
+            raise ModuleError(
+                f"model returned {size} predictions for {len(sample_ids)} sample_id values"
+            )
         result = PredictionBatch(
             sample_id=sample_ids,
-            prediction=self.model(x).detach(),
+            prediction=prediction.detach(),
         )
         if "row" in batch:
             result["row"] = batch["row"]
@@ -160,6 +175,8 @@ def _objective_values(result: object) -> dict[str, Tensor]:
     for name, value in result.items():
         if not isinstance(name, str) or not name or "/" in name:
             raise ModuleError("objective result names must be non-empty strings without '/'")
+        if name in {"loss_step", "loss_epoch"}:
+            raise ModuleError(f"objective result name {name!r} is reserved by Lightning")
         if not isinstance(value, Tensor):
             raise ModuleError(
                 f"objective result {name!r} must be a tensor, got {type(value).__name__}"
