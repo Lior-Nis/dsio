@@ -4,7 +4,7 @@ baseline_commit: e953e82
 
 # Story 3.1: Train a Task Through the Exact DSio Lightning Classes
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -34,7 +34,7 @@ so that every project exercises one battle-tested training path.
   - [x] Reject subclass definitions for both Lightning classes.
   - [x] Cover direct native fit/validation and native checkpoint resume with exact class assertions.
   - [x] Cover malformed batches/objective results and retained existing behavior.
-- [ ] Complete the full quality and independent review gates before merge (AC: 1-6)
+- [x] Complete the full quality and independent review gates before merge (AC: 1-6)
 
 ## Dev Notes
 
@@ -84,6 +84,7 @@ Codex (GPT-5)
 - Model and stateful objective modules participate in native checkpoint state; a fresh same-config instance resumes optimizer and loop progress through `ckpt_path`.
 - Existing supervised, self-supervised, token, and callback paths use the same generic module through ordinary components rather than a compatibility constructor branch.
 - Both Lightning composition roots reject subclass definitions and direct variation toward injected components.
+- Exact commit `0a42f27` passed blind, edge-case, and acceptance review plus the full release gate: 858 passed, 3 deselected, locked dependencies, Ruff, mypy, build, and diff checks.
 
 ### File List
 
@@ -91,13 +92,16 @@ Codex (GPT-5)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `README.md`
 - `src/dsio/batches.py`
+- `src/dsio/data/adapters.py`
 - `src/dsio/data/loading/module.py`
+- `src/dsio/data/views.py`
 - `src/dsio/dataset/dataset.py`
 - `src/dsio/model/chain.py`
 - `src/dsio/model/module.py`
 - `src/dsio/train/ssl_task.py`
 - `src/dsio/train/torch_task.py`
 - `tests/dataset/test_dataset.py`
+- `tests/data/test_store.py`
 - `tests/model/test_components.py`
 - `tests/model/test_module.py`
 - `tests/model/test_token_corpus.py`
@@ -109,3 +113,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 3.1 and started implementation.
 - 2026-09-22: Implemented the exact native-Lightning training path and passed the complete local quality gate.
+- 2026-09-22: Closed independent review findings, approved exact release candidate `0a42f27`, and completed Story 3.1.
