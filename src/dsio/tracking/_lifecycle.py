@@ -67,6 +67,28 @@ def status_for(error: BaseException) -> str:
     return "KILLED" if is_cancellation(error) else "FAILED"
 
 
+def require_writable_run(client: MlflowClient, run_id: str, *, action: str) -> Run:
+    """Return one active RUNNING Run or fail before a required evidence write."""
+    if not run_id:
+        raise TrackingError(f"A non-empty MLflow Run ID is required to {action}.")
+    try:
+        run = client.get_run(run_id)
+    except BaseException as error:
+        if is_cancellation(error) or not isinstance(error, Exception):
+            raise
+        raise TrackingError(f"Could not resolve MLflow Run {run_id!r}: {error}") from error
+    if run.info.lifecycle_stage != "active":
+        raise TrackingError(
+            f"MLflow Run {run_id!r} must have lifecycle stage 'active', not "
+            f"{run.info.lifecycle_stage!r}."
+        )
+    if run.info.status != "RUNNING":
+        raise TrackingError(
+            f"MLflow Run {run_id!r} must be RUNNING to {action}, not {run.info.status!r}."
+        )
+    return run
+
+
 def reconcile_creation(
     client: MlflowClient,
     experiment_id: str,

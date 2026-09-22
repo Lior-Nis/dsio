@@ -10,7 +10,7 @@ from typing import Any, cast
 from mlflow import MlflowClient
 
 from dsio.contracts import NonCanonicalValueError, canonical_json, sha256_of
-from dsio.tracking._lifecycle import TrackingError, is_cancellation
+from dsio.tracking._lifecycle import TrackingError, is_cancellation, require_writable_run
 
 _SCHEMA_VERSION = 1
 _SET_MARKER = "$dsio.set"
@@ -63,7 +63,7 @@ def record_provenance(
     )
     identity = sha256_of(document)
     client = MlflowClient()
-    _require_writable_run(client, run_id)
+    require_writable_run(client, run_id, action="record provenance")
 
     try:
         client.log_param(run_id, "dsio.execution_identity", identity)
@@ -81,7 +81,7 @@ def record_provenance(
         raise TrackingError(
             f"Could not record provenance for MLflow Run {run_id!r}: {error}"
         ) from error
-    _require_writable_run(client, run_id)
+    require_writable_run(client, run_id, action="record provenance")
     return identity
 
 
@@ -164,24 +164,3 @@ def _field_names(fields: Collection[str]) -> frozenset[str]:
         types = ", ".join(invalid_types)
         raise NonCanonicalValueError(f"field selectors must be str, got: {types}")
     return frozenset(values)
-
-
-def _require_writable_run(client: MlflowClient, run_id: str) -> None:
-    if not run_id:
-        raise TrackingError("A non-empty MLflow Run ID is required to record provenance.")
-    try:
-        run = client.get_run(run_id)
-    except BaseException as error:
-        if is_cancellation(error) or not isinstance(error, Exception):
-            raise
-        raise TrackingError(f"Could not resolve MLflow Run {run_id!r}: {error}") from error
-    if run.info.lifecycle_stage != "active":
-        raise TrackingError(
-            f"MLflow Run {run_id!r} must have lifecycle stage 'active', not "
-            f"{run.info.lifecycle_stage!r}."
-        )
-    if run.info.status != "RUNNING":
-        raise TrackingError(
-            f"MLflow Run {run_id!r} must be RUNNING to record provenance, not "
-            f"{run.info.status!r}."
-        )
