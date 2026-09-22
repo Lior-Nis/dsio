@@ -180,6 +180,23 @@ class SharedTorchMetricsObjective(nn.Module):
         return {"loss": loss, "mean": self.mean}
 
 
+class LazyTorchMetricsObjective(nn.Module):
+    def forward(
+        self,
+        model: nn.Module,
+        batch: Mapping[str, Any],
+        stage: str,
+    ) -> Mapping[str, object]:
+        attribute = f"{stage}_mean"
+        if not hasattr(self, attribute):
+            setattr(self, attribute, MeanMetric())
+        metric = getattr(self, attribute)
+        prediction = model(batch["x"])
+        loss = prediction.square().mean()
+        metric.update(prediction.detach().mean())
+        return {"loss": loss, "mean": metric}
+
+
 class UnregisteredTorchMetricsObjective:
     def __init__(self) -> None:
         self.mean = MeanMetric()
@@ -410,6 +427,21 @@ def test_distinct_stage_metrics_complete_a_real_train_and_validation_loop(
     trainer = _trainer(tmp_path / "metrics", max_epochs=1)
 
     trainer.fit(module, datamodule=_data_module(tmp_path / "metric-samples"))
+
+    assert torch.isfinite(trainer.callback_metrics["train/mean"])
+    assert torch.isfinite(trainer.callback_metrics["val/mean"])
+
+
+def test_lazily_registered_stage_metrics_complete_a_real_lightning_loop(
+    tmp_path: Path,
+) -> None:
+    module = DsioModule(
+        model=nn.Sequential(nn.Flatten(), nn.Linear(2, 2)),
+        objective=LazyTorchMetricsObjective(),
+    )
+    trainer = _trainer(tmp_path / "lazy-metrics", max_epochs=1)
+
+    trainer.fit(module, datamodule=_data_module(tmp_path / "lazy-metric-samples"))
 
     assert torch.isfinite(trainer.callback_metrics["train/mean"])
     assert torch.isfinite(trainer.callback_metrics["val/mean"])

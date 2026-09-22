@@ -142,8 +142,9 @@ class DsioModule(LightningModule):
         prefix = "val" if stage == "validate" else stage
         for name, value in values.items():
             log_name = f"{prefix}/{name}"
+            metric_attribute = None
             if isinstance(value, Metric):
-                self._validate_metric(value, log_name)
+                metric_attribute = self._metric_attribute(value, log_name)
             self.log(
                 log_name,
                 value,
@@ -151,13 +152,18 @@ class DsioModule(LightningModule):
                 on_step=stage == "train" and name == "loss",
                 on_epoch=True,
                 prog_bar=stage == "validate" and name == "loss",
+                metric_attribute=metric_attribute,
             )
         loss = values["loss"]
         assert isinstance(loss, Tensor)
         return loss
 
-    def _validate_metric(self, metric: Metric, log_name: str) -> None:
-        if not any(module is metric for module in self.modules()):
+    def _metric_attribute(self, metric: Metric, log_name: str) -> str:
+        attribute = next(
+            (name for name, module in self.named_modules() if module is metric),
+            None,
+        )
+        if attribute is None:
             raise ModuleError(
                 f"TorchMetric for {log_name!r} must be registered on the objective or model"
             )
@@ -167,6 +173,7 @@ class DsioModule(LightningModule):
                 "each TorchMetric instance may have one Lightning log name; "
                 f"{previous!r} and {log_name!r} need distinct metric instances"
             )
+        return attribute
 
     def training_step(self, batch: Batch, batch_idx: int) -> Tensor:
         del batch_idx
