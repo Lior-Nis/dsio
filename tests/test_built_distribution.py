@@ -74,6 +74,24 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     assert "dsio/tracking/evidence/references.py" in members
     assert "dsio/tracking/evidence/resolution.py" in members
     assert "dsio/tracking/provenance.py" in members
+    assert "dsio/experimental/__init__.py" in members
+    assert "dsio/experimental/admission/__init__.py" in members
+    assert "dsio/experimental/admission/source.py" in members
+    assert "dsio/experimental/admission/syntax/__init__.py" in members
+    assert "dsio/experimental/admission/syntax/imports/__init__.py" in members
+    assert "dsio/experimental/admission/syntax/imports/dynamic.py" in members
+    assert "dsio/experimental/admission/syntax/imports/names.py" in members
+    assert "dsio/experimental/admission/syntax/imports/resolution.py" in members
+    assert "dsio/experimental/admission/syntax/projects/__init__.py" in members
+    assert "dsio/experimental/admission/syntax/projects/consumers.py" in members
+    assert "dsio/experimental/admission/syntax/projects/contexts.py" in members
+    assert "dsio/experimental/admission/syntax/projects/identity.py" in members
+    assert "dsio/experimental/admission/syntax/registries/__init__.py" in members
+    assert "dsio/experimental/admission/syntax/registries/escaping.py" in members
+    assert "dsio/experimental/admission/syntax/registries/initializers.py" in members
+    assert "dsio/experimental/admission/syntax/registries/known.py" in members
+    assert "dsio/experimental/admission/syntax/registries/parameters.py" in members
+    assert "dsio/experimental/admission/syntax/registries/surfaces.py" in members
     assert set(requirements) == set(REQUIRED_DEPENDENCIES)
     for name, expected_specifier in REQUIRED_DEPENDENCIES.items():
         requirement = requirements[name]
@@ -213,10 +231,12 @@ def refuse_service_call(*args, **kwargs):
 
 socket.socket.connect = refuse_service_call
 import dsio
+from dsio.experimental import AdmissionError, audit_component, audit_source
 print(json.dumps({
     'state_unchanged': state_before == snapshot(state),
     'environment_unchanged': environment_before == snapshot(environment),
     'origin': dsio.__file__,
+    'experimental_api': [AdmissionError.__name__, audit_component.__name__, audit_source.__name__],
     'heavy': sorted({
         name.split('.', 1)[0]
         for name in sys.modules
@@ -259,6 +279,7 @@ print(json.dumps({
     assert result["state_unchanged"]
     assert result["environment_unchanged"]
     assert result["heavy"] == []
+    assert result["experimental_api"] == ["AdmissionError", "audit_component", "audit_source"]
     assert Path(result["origin"]).is_relative_to(environment)
 
     flow_probe = """
