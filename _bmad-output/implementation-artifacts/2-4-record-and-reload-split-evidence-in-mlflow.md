@@ -4,7 +4,7 @@ baseline_commit: b5da1696
 
 # Story 2.4: Record and Reload Split Evidence in MLflow
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -35,11 +35,11 @@ so that later training and evaluation Runs can reuse the exact dataset evidence.
   - [x] Verify the referenced path is a file, parse the YAML, verify its persisted digest and content-addressed path, and validate it against the supplied examples.
   - [x] Require the matching native source dataset input, then log that same MLflow dataset entity on the consumer with source-artifact lineage tags.
   - [x] Perform every validation before writing consumer lineage or returning the manifest.
-- [ ] Verify and review (AC: 1-5)
+- [x] Verify and review (AC: 1-5)
   - [x] Cover happy-path round-trip and exact native MLflow dataset/artifact lineage with the real local MLflow backend.
   - [x] Cover running/failed/deleted sources, missing/corrupt/mismatched artifacts, absent or mismatched dataset inputs, invalid consumers, and MLflow failures.
   - [x] Run focused and full tests, Ruff, mypy, import contracts, lock validation, build, and diff checks.
-  - [ ] Complete independent blind, edge-case, and acceptance reviews before merge.
+  - [x] Complete independent blind, edge-case, and acceptance reviews before merge.
 
 ## Dev Notes
 
@@ -88,6 +88,7 @@ Codex (GPT-5)
 - 2026-09-22: Independent review exposed MLflow's silent dataset-input deduplication, a source lifecycle race, ambiguous source lineage, and unnormalized source serialization failures; fixed each with exact persisted-input checks and refreshed source validation.
 - 2026-09-22: Post-review gate passed: 774 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks. The repository-wide Ruff format check remains outside CI and reports pre-existing formatting drift; both changed Python files pass formatting.
 - 2026-09-22: Edge re-review found that a manifest URI could already belong to another native dataset identity; collision checks now cover both MLflow dataset identity and immutable manifest URI on source and consumer Runs.
+- 2026-09-22: Final exact-commit blind, edge-case, and acceptance reviews approved; final gate passed with 776 tests (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
 
 ### Completion Notes List
 
@@ -112,3 +113,4 @@ Codex (GPT-5)
 
 - 2026-09-22: Created Story 2.4 and started implementation.
 - 2026-09-22: Added native MLflow split evidence recording/reload and passed the complete local quality gate.
+- 2026-09-22: Closed all independent review findings and completed Story 2.4.
