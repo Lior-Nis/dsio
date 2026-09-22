@@ -49,9 +49,7 @@ class MaskedReconstruction(nn.Module):
             raise AugmentationError("mask must remain on the input device")
         target = x
         if self.normalize_target:
-            target = (x - x.mean(dim=-1, keepdim=True)) / (
-                x.std(dim=-1, keepdim=True) + 1e-6
-            )
+            target = (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6)
         return {
             **batch,
             "x": apply_mask(x, hidden),

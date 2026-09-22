@@ -275,13 +275,10 @@ class DsioModule(LightningModule):
         scheduler = self.scheduler_factory(optimizer, **self.scheduler_parameters)
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             raise ModuleError(
-                "ReduceLROnPlateau requires a Lightning scheduler mapping with a "
-                "non-empty monitor"
+                "ReduceLROnPlateau requires a Lightning scheduler mapping with a non-empty monitor"
             )
         if isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
-            configured_scheduler: torch.optim.lr_scheduler.LRScheduler | dict[str, Any] = (
-                scheduler
-            )
+            configured_scheduler: torch.optim.lr_scheduler.LRScheduler | dict[str, Any] = scheduler
         elif isinstance(scheduler, Mapping):
             configured_scheduler = _scheduler_configuration(scheduler)
         else:
@@ -329,8 +326,7 @@ def _scheduler_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
     reduce_on_plateau = value.get("reduce_on_plateau", is_plateau)
     if is_plateau and reduce_on_plateau is False:
         raise ModuleError(
-            "Lightning scheduler mapping cannot disable reduce_on_plateau for "
-            "ReduceLROnPlateau"
+            "Lightning scheduler mapping cannot disable reduce_on_plateau for ReduceLROnPlateau"
         )
     if reduce_on_plateau and not value.get("monitor"):
         raise ModuleError(

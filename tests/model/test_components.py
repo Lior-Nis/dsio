@@ -21,7 +21,6 @@ torch = pytest.importorskip("torch")
 
 from torch import nn  # noqa: E402
 
-from dsio.dataset.dataset import TwoViewCollate  # noqa: E402
 from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
 from dsio.model.components import (  # noqa: E402
     Conv1dEncoder,
@@ -37,6 +36,7 @@ from dsio.model.components import (  # noqa: E402
     vicreg_projector_head,
 )
 from dsio.model.module import DsioModule  # noqa: E402
+from dsio.train.augmentation import TwoView  # noqa: E402
 
 CHANNELS, LENGTH, DIM = 2, 128, 16
 
@@ -196,20 +196,19 @@ def test_mae_trains_the_backbone_through_the_generic_step() -> None:
 #
 # Moved from the deleted tests/ssl/test_methods.py: SimCLR and VICReg were objects with
 # their own step(module, x); they are now an ordinary registered (prediction, target) loss
-# each, over a batch dsio.dataset.dataset.TwoViewCollate builds. These tests exercise the losses
+# each, over a batch dsio.train.augmentation.TwoView builds. These tests exercise the losses
 # directly, the same way test_masked_mse_* above does, rather than through a full module.
 
 
 @pytest.fixture
 def views() -> tuple[torch.Tensor, torch.Tensor]:
-    """A batch shaped like TwoViewCollate's output: (x, pair-index target). Built with
-    ``nn.Identity`` as the augmentor so both views are literally identical -- irrelevant
+    """A batch shaped like TwoView's output: (x, pair-index target). Built with
+    zero jitter so both views are literally identical -- irrelevant
     to the loss tests below, which only care about the pair-index contract, not about how
     the two views came to differ."""
     torch.manual_seed(0)
     signal = torch.randn(8, CHANNELS, LENGTH)
-    items = [{"sample_id": f"sample-{i}", "x": signal[i], "row": i} for i in range(signal.shape[0])]
-    batch = TwoViewCollate(nn.Identity())(items)
+    batch = _two_view(signal, Jitter(0.0))
     return batch["x"], batch["y"]
 
 
@@ -249,9 +248,8 @@ def test_nt_xent_loss_falls_when_views_agree() -> None:
     case, over the *same* backbone and head weights as the harder, jittered one."""
     torch.manual_seed(0)
     signal = torch.randn(8, CHANNELS, LENGTH)
-    items = [{"sample_id": f"sample-{i}", "x": signal[i], "row": i} for i in range(8)]
-    easy_batch = TwoViewCollate(nn.Identity())(items)
-    hard_batch = TwoViewCollate(Jitter(3.0))(items)
+    easy_batch = _two_view(signal, Jitter(0.0))
+    hard_batch = _two_view(signal, Jitter(3.0))
 
     backbone = Conv1dEncoder(channels=CHANNELS, hidden=8, out_dim=DIM, depth=1)
     head = simclr_projector_head(DIM, out_dim=8)
@@ -260,6 +258,21 @@ def test_nt_xent_loss_falls_when_views_agree() -> None:
     easy = loss_fn(head(backbone(easy_batch["x"])), easy_batch["y"])
     hard = loss_fn(head(backbone(hard_batch["x"])), hard_batch["y"])
     assert easy.item() < hard.item()
+
+
+def _two_view(signal: torch.Tensor, augmentor: nn.Module) -> dict[str, Any]:
+    batch = {
+        "sample_id": [f"sample-{i}" for i in range(signal.shape[0])],
+        "x": signal,
+        "row": torch.arange(signal.shape[0]),
+    }
+    return TwoView(augmentor)(
+        batch,
+        seed=0,
+        epoch=0,
+        step=0,
+        identity={"component": type(augmentor).__name__},
+    )
 
 
 def test_vicreg_produces_a_finite_loss_and_its_terms(

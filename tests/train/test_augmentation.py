@@ -105,6 +105,22 @@ def test_two_view_replays_from_explicit_identity_without_touching_global_rng() -
     assert torch.equal(first["y"], torch.tensor([2, 3, 0, 1]))
 
     changed_seed = augmentation(batch, seed=12, epoch=2, step=5, identity=identity)
+    changed_epoch = augmentation(batch, seed=11, epoch=3, step=5, identity=identity)
+    changed_step = augmentation(batch, seed=11, epoch=2, step=6, identity=identity)
+    changed_sample = augmentation(
+        {**batch, "sample_id": ["sample-a", "sample-c"]},
+        seed=11,
+        epoch=2,
+        step=5,
+        identity=identity,
+    )
+    changed_component = augmentation(
+        batch,
+        seed=11,
+        epoch=2,
+        step=5,
+        identity={**identity, "component": {"reference": "project:Other"}},
+    )
     changed_view = TwoView(Jitter(sigma=0.5), views=("first", "second"))(
         batch,
         seed=11,
@@ -113,6 +129,10 @@ def test_two_view_replays_from_explicit_identity_without_touching_global_rng() -
         identity={**identity, "views": ["first", "second"]},
     )
     assert not torch.equal(first["x"], changed_seed["x"])
+    assert not torch.equal(first["x"], changed_epoch["x"])
+    assert not torch.equal(first["x"], changed_step["x"])
+    assert not torch.equal(first["x"], changed_sample["x"])
+    assert not torch.equal(first["x"], changed_component["x"])
     assert not torch.equal(first["x"], changed_view["x"])
 
 

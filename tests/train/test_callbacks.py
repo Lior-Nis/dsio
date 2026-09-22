@@ -241,7 +241,7 @@ def test_the_probe_fires_on_schedule(module: DsioModule, loader: DataLoader) -> 
         num_sanity_val_steps=0,
         callbacks=[probe],
     )
-    trainer.fit(module, loader, loader)
+    trainer.fit(module, loader)
     assert [entry["epoch"] for entry in probe.history] == [1.0, 3.0]
 
 
@@ -278,7 +278,7 @@ def test_quality_callbacks_apply_the_same_schedule(
         sanity_checking=sanity_checking,
         current_epoch=current_epoch,
     )
-    callback.on_validation_epoch_end(  # type: ignore[arg-type]
+    callback.on_train_epoch_end(  # type: ignore[arg-type]
         trainer,
         SimpleNamespace(log=logged),
     )
@@ -302,6 +302,6 @@ def test_rankme_monitor_records_a_history(module: DsioModule, loader: DataLoader
         num_sanity_val_steps=0,
         callbacks=[monitor],
     )
-    trainer.fit(module, loader, loader)
+    trainer.fit(module, loader)
     assert len(monitor.history) == 2
     assert all(entry["rankme"] >= 1.0 for entry in monitor.history)

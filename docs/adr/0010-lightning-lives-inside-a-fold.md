@@ -43,12 +43,10 @@ instances, which are already captured structurally (registered name plus params)
 need a second, redundant record. Batch targets now have one static key, `y`; the pre-1.0
 `target_key` customization was removed so dataset, model, and prediction contracts can be
 checked end to end. Custom callers must emit and consume `y`. `SslPretrainTask` separately
-still carries an `augmentor` field, unrelated
-to the deleted model slot — see that task's own docstring for what it does now (building a
-two-view contrastive batch at collate time, `dsio.dataset.dataset.TwoViewCollate`) instead
-of being a slot on `DsioModule`. Plan 2b's Task 6b moved stochastic augmentation to the
-dataset (`dsio.dataset.dataset.WindowDataset`) instead of a runtime-flag-guarded slot on the
-model.*
+still carries an `augmentor` field, unrelated to the deleted chain slot. Story 3.3 adapts it
+into the one optional augmentation owned by `DsioModule.training_step`, after Lightning
+device transfer. Datasets and collation return raw windows; validation, test, prediction,
+and `forward` never call the stochastic lane.*
 
 `transform` defaults to identity rather than being optional, so the chain has one shape and
 `forward` needs no branch. One registry per slot, not one registry of models: FORGE's

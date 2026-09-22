@@ -50,9 +50,7 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             signal = (rng.standard_normal((1600, 2)) * 0.5).astype("float32")
             if positive:
                 signal[:, 0] += (np.sin(2 * np.pi * 5 * t) * 2.0).astype("float32")
-            builder.add(
-                f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
-            )
+            builder.add(f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)})
 
     # Three hand-picked folds over the nine groups — this suite asserts on structure
     # (fold count, metric keys), not on prediction quality, so no balancing is needed.
@@ -152,8 +150,7 @@ def run(config: RunConfig, root: Path):  # type: ignore[no-untyped-def]
 
 
 def test_neither_mask_nor_augmentor_is_rejected(corpus: Path) -> None:
-    """Without one of the two, nothing tells this task which training-dataset contract
-    to build."""
+    """Without one of the two, nothing tells this task which augmentation to build."""
     with pytest.raises(ValueError, match="exactly one of"):
         pretrain_task(corpus, "mae", mask=None)
 
@@ -230,33 +227,8 @@ def test_every_method_pretrains_and_registers_an_encoder(method: str, corpus: Pa
 
 
 @pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
-def test_every_method_produces_a_real_validation_loss(method: str, corpus: Path) -> None:
-    """There is no ``SslModule.validation_step`` any more to special-case this away: the
-    held-out fold goes through the same masked-dataset or two-view-collated contract as
-    training, so DsioModule's one generic step produces a genuine val/loss for every
-    method, not just the contrastive ones ``ContrastiveModule`` used to keep it for."""
-    config = RunConfig(name=f"pre_{method}", seed=0, task=pretrain_task(corpus, method))
-    _, metrics = run(config, corpus)
-    assert "val_loss" in metrics
-    assert np.isfinite(metrics["val_loss"])
-
-
-@pytest.mark.parametrize("method", ["mae", "simclr", "vicreg"])
-def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
-    method: str, corpus: Path
-) -> None:
-    """A fix-round-1 regression test: measured before the fix, five identical validation
-    passes over a **frozen** MAE module (never trained, weights never change) reported
-    val/loss in [0.97697, 1.01588, 1.00346, 0.99336, 0.99949] -- a 3.90% spread, with even
-    the hidden fraction moving between passes (0.3789 vs 0.4038). The validation mask (and,
-    for the contrastive methods, the two collated views) were being redrawn from torch's
-    global RNG on every call -- exactly the failure the deleted ``self.training`` guard
-    existed to prevent, reintroduced one layer down in the dataset. ``WindowDataset.
-    mask_seed`` and ``TwoViewCollate.seed``, wired in ``build_loaders`` for the validation
-    loader only, fix it: this asserts the spread is now exactly zero, not merely small.
-    """
-    from lightning import Trainer
-
+def test_ssl_uses_raw_workers_and_one_training_augmentation(method: str, corpus: Path) -> None:
+    """Workers return source windows; only DsioModule turns them into pretext batches."""
     from dsio.data.adapters import SignalExamples
     from dsio.data.splits.folds import load_folds, split_path
     from dsio.data.store import data_root
@@ -270,23 +242,16 @@ def test_frozen_module_validation_loss_is_stable_across_repeated_validations(
     folds = load_folds(examples, split_path(task.splits_root, task.split))
     fold = next(f for f in folds if f.index == task.fold)
 
-    module, _ = build_module(task, channels=store.channels, length=task.window.length)
-    module.eval()
-    _, val_loader = build_loaders(task, store, index, fold, seed=0)
-    assert val_loader is not None
+    module, _ = build_module(task, channels=store.channels, length=task.window.length, seed=29)
+    train_loader, val_loader = build_loaders(task, store, index, fold, seed=29)
+    raw = next(iter(train_loader))
 
-    trainer = Trainer(
-        accelerator="cpu",
-        devices=1,
-        logger=False,
-        enable_progress_bar=False,
-        enable_model_summary=False,
-        num_sanity_val_steps=0,
-    )
-    losses = [
-        trainer.validate(module, val_loader, verbose=False)[0]["val/loss"] for _ in range(5)
-    ]
-    assert losses == [losses[0]] * 5, f"{method}: val/loss moved across repeated passes: {losses}"
+    assert module.training_augmentation is not None
+    assert module.augmentation_seed == 29
+    assert val_loader is None
+    assert raw["x"].shape[0] == task.batch_size
+    assert "view_id" not in raw
+    assert "y" not in raw
 
 
 def test_pretraining_writes_no_held_out_predictions(corpus: Path) -> None:
@@ -320,7 +285,7 @@ def test_the_encoder_records_its_lineage(corpus: Path) -> None:
     hosting = MlflowClient(tracking_uri=resolve_tracking_uri()).get_run(ref.run_id)
     assert hosting.data.tags["config_hash"] == config.config_hash
     assert hosting.data.params["seed"] == str(config.seed)
-    assert load_artifact(ref) , "the digest in encoder.json must match the stored bytes"
+    assert load_artifact(ref), "the digest in encoder.json must match the stored bytes"
 
 
 def test_the_online_probe_runs_during_pretraining(corpus: Path) -> None:
@@ -405,11 +370,7 @@ def test_a_completed_pretrain_run_logs_its_metrics_to_mlflow(corpus: Path) -> No
     logged = mlflow_runs[0].data.metrics
     for name, value in metrics.items():
         assert logged[name] == pytest.approx(value)
-    # `val/loss` is never in `metrics` (`run_ssl_pretrain`'s own returned dict) -- it only
-    # ever reaches MLflow if the Trainer's own `self.log(...)` calls were actually streamed
-    # through `mlflow_logger`, i.e. only if `Trainer(..., logger=mlflow_logger)` really
-    # wired the two together, not merely if the final `log_metrics` call happened to fire.
-    assert "val/loss" in logged
+    assert "train/loss_epoch" in logged
 
 
 def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
@@ -453,13 +414,9 @@ def test_a_crash_while_stamping_provenance_still_fails_the_mlflow_run(
 # --- I1: checkpointing must do what `TrainerConfig.checkpoint` says, here too --------
 
 
-def test_checkpoint_false_writes_no_checkpoint_file_anywhere(
-    corpus: Path, tmp_path: Path
-) -> None:
+def test_checkpoint_false_writes_no_checkpoint_file_anywhere(corpus: Path, tmp_path: Path) -> None:
     """I1: `run_ssl_pretrain` used to read none of `TrainerConfig.checkpoint`,
-    `early_stopping_patience`, `monitor` or `monitor_mode` at all, even though
-    `SslPretrainTask`'s own field default (`trainer: TrainerConfig =
-    TrainerConfig(monitor="val/loss")`) is a deliberate choice for this exact runner. Its
+    `early_stopping_patience`, `monitor` or `monitor_mode` at all. Its
     `Trainer(...)` also never set `enable_checkpointing`, so Lightning installed its own
     default `ModelCheckpoint` regardless of `checkpoint=False` -- the same leak `run_torch`
     had, reproduced here on fold 1, which this fixture's own split family declares with no
@@ -547,9 +504,7 @@ def downstream_task(root: Path, encoder: EncoderRef | None) -> TorchTask:
 @pytest.fixture
 def pretrained(corpus: Path) -> EncoderRef:
     active, _ = run(RunConfig(name="pre", seed=0, task=pretrain_task(corpus)), corpus)
-    ref = ArtifactRef.model_validate_json(
-        (active.artifacts_dir / "encoder.json").read_text()
-    )
+    ref = ArtifactRef.model_validate_json((active.artifacts_dir / "encoder.json").read_text())
     return EncoderRef(run_id=ref.run_id, path=ref.path, digest=ref.digest)
 
 
@@ -624,6 +579,4 @@ def test_the_loaded_weights_actually_differ_from_a_fresh_init(
     fresh = Conv1dEncoder(channels=2, hidden=8, out_dim=16, depth=1)
     before = [p.detach().clone() for p in fresh.parameters()]
     load_encoder(pretrained, backbone=fresh)
-    assert not all(
-        torch.equal(a, b) for a, b in zip(before, fresh.parameters(), strict=True)
-    )
+    assert not all(torch.equal(a, b) for a, b in zip(before, fresh.parameters(), strict=True))

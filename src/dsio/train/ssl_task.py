@@ -14,9 +14,9 @@ has since been written there; a verified artifact reference can do neither.
 **There is no pretext-objective registry.** A pretraining run is built from the same pieces
 a supervised one is
 (:class:`~dsio.model.module.DsioModule`, an importable ``backbone``/``head``/``loss``), plus
-exactly one of ``mask`` or ``augmentor`` telling this module which of the two
-training-dataset contracts to build — masked-reconstruction (MAE's shape) or two-view
-contrastive collation (SimCLR/VICReg's shape). Which one is set is what used to be implied
+exactly one of ``mask`` or ``augmentor`` telling this module which accelerator batch
+augmentation to inject — masked reconstruction (MAE's shape) or two-view contrastive
+augmentation (SimCLR/VICReg's shape). Which one is set is what used to be implied
 by a ``method`` name resolved through a registry; making it structural here is the
 config-level twin of there no longer being a paradigm subclass to resolve it into.
 """
@@ -32,20 +32,14 @@ import numpy as np
 import torch
 from pydantic import Field, model_validator
 
-from dsio.batches import BatchLoader, TrainingBatch
+from dsio.batches import BatchLoader, WindowBatch
 from dsio.config.components import ComponentConfig, ConfiguredComponent, resolve_component
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.splits.folds import load_folds, require_fold, split_path
 from dsio.data.store import SignalStore, data_root
 from dsio.data.views import WindowIndex, WindowSpec, load_or_build
-from dsio.dataset.dataset import (
-    TwoViewCollate,
-    make_loader,
-    make_target_loader,
-    masked_dataset,
-    val_dataset,
-)
+from dsio.dataset.dataset import make_loader, val_dataset
 from dsio.eval.contract import Fold
 from dsio.model.chain import ComponentChain, LossObjective
 from dsio.model.module import DsioModule, export_encoder
@@ -55,6 +49,7 @@ from dsio.train.assembly import (
     build_optional_component,
     component_factory,
 )
+from dsio.train.augmentation import MaskedReconstruction, TwoView
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
 from dsio.train.tracking import (
@@ -69,6 +64,7 @@ if TYPE_CHECKING:
     from dsio.config.schema import RunConfig
     from dsio.runs.record import Run
 
+
 @TASKS.register("ssl_pretrain")
 class SslPretrainTask(TaskConfig):
     """Pretrain an encoder on unlabelled windows and register it.
@@ -78,8 +74,8 @@ class SslPretrainTask(TaskConfig):
     TorchTask` names them. What used to select between MAE, SimCLR and VICReg was a
     ``method`` string resolved into an object that built its own head and drove its own
     step; here it is simply which importable head/loss a caller names, plus exactly one of
-    ``mask`` (draws a masked-reconstruction training dataset) or ``augmentor`` (builds two
-    augmented views at collate time) — see :func:`build_loaders`.
+    ``mask`` (builds a masked-reconstruction batch) or ``augmentor`` (builds two views)
+    inside :meth:`DsioModule.training_step`; loaders return raw windows in both cases.
     """
 
     kind: Literal["ssl_pretrain"] = "ssl_pretrain"
@@ -122,7 +118,7 @@ class SslPretrainTask(TaskConfig):
     scheduler: ConfiguredComponent | None = None
     batch_size: int = Field(default=64, ge=2)
     num_workers: int = Field(default=0, ge=0)
-    trainer: TrainerConfig = TrainerConfig(monitor="val/loss")
+    trainer: TrainerConfig = TrainerConfig()
 
     @model_validator(mode="after")
     def _check(self) -> SslPretrainTask:
@@ -130,7 +126,7 @@ class SslPretrainTask(TaskConfig):
             raise ValueError(
                 "an ssl_pretrain task needs exactly one of `mask` (a masked-reconstruction "
                 "objective, e.g. MAE) or `augmentor` (a two-view contrastive objective, "
-                f"e.g. SimCLR/VICReg) to know which training-dataset contract to build; "
+                f"e.g. SimCLR/VICReg) to know which training augmentation to build; "
                 f"got mask={self.mask!r}, augmentor={self.augmentor!r}"
             )
         return self
@@ -164,7 +160,9 @@ def check_ssl(config: RunConfig) -> None:
     require_fold(task.splits_root, task.split, task.fold)
 
 
-def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[DsioModule, int]:
+def build_module(
+    task: SslPretrainTask, *, channels: int, length: int, seed: int = 0
+) -> tuple[DsioModule, int]:
     """Assemble the pretraining module: the same chain
     :func:`~dsio.train.torch_task.build_module` assembles for a supervised run, with a head
     and loss the task names directly rather than a pretext objective building its own.
@@ -188,6 +186,28 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
     if task.scheduler is not None:
         scheduler_factory, scheduler_parameters = component_factory(task.scheduler)
 
+    training_augmentation: torch.nn.Module
+    if task.mask is not None:
+        training_augmentation = MaskedReconstruction(
+            resolve_component(task.mask), normalize_target=task.normalize_target
+        )
+        augmentation_identity: dict[str, Any] = {
+            "kind": "masked_reconstruction",
+            "component": dict(task.mask),
+            "normalize_target": task.normalize_target,
+        }
+    else:
+        assert task.augmentor is not None, "enforced by SslPretrainTask's model_validator"
+        views = ("view-0", "view-1")
+        training_augmentation = TwoView(
+            resolve_component(task.augmentor, expected=torch.nn.Module), views=views
+        )
+        augmentation_identity = {
+            "kind": "two_view",
+            "component": dict(task.augmentor),
+            "views": list(views),
+        }
+
     module = DsioModule(
         model=ComponentChain(
             backbone=backbone,
@@ -199,104 +219,26 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
         optimizer_parameters=optimizer_parameters,
         scheduler_factory=scheduler_factory,
         scheduler_parameters=scheduler_parameters,
+        training_augmentation=training_augmentation,
+        augmentation_seed=seed,
+        augmentation_identity=augmentation_identity,
     )
     return module, feature_dim
 
 
 def build_loaders(
     task: SslPretrainTask, store: SignalStore, index: WindowIndex, fold: Fold, seed: int
-) -> tuple[BatchLoader[TrainingBatch], BatchLoader[TrainingBatch] | None]:
-    """The training and validation loaders, shaped by whichever of ``mask``/``augmentor``
-    the task set — see :class:`SslPretrainTask`'s docstring for the two contracts.
-
-    Both branches also build a validation loader when the fold has one, over the *same*
-    contract as training: a masked reconstruction target or a two-view collated batch is
-    exactly as meaningful on held-out windows as on training ones, and giving Lightning's
-    validation loop a real batch to run is what lets :class:`~dsio.train.callbacks.
-    OnlineProbe` and :class:`~dsio.train.callbacks.RankMeMonitor` fire at all — both hook
-    ``on_validation_epoch_end``, which only runs when a validation loop actually happened.
-    This loader is never the one a downstream classifier is scored against — that is
-    :func:`val_dataset` used unmasked and uncollated, built separately below for the probe —
-    so masking or collating it here does not touch the guarantee that protects a downstream
-    evaluation split.
-
-    The validation loader's randomness is seeded (``mask_seed``/``TwoViewCollate.seed``);
-    the training loader's is not. A validation ``val/loss`` that redrew its mask or its
-    views on every call would move for reasons that have nothing to do with the model —
-    exactly the failure the deleted ``self.training`` guard existed to prevent, one layer
-    down in the dataset. Training keeps fresh randomness every epoch deliberately; that is
-    what makes it augmentation rather than a fixed transform.
-    """
-    validation = fold.val if fold.val is not None and fold.val.size else None
-
-    if task.mask is not None:
-        mask: Any = resolve_component(task.mask)
-        train_loader = make_target_loader(
-            masked_dataset(
-                store, index, fold.train, mask=mask, normalize_target=task.normalize_target
-            ),
-            batch_size=task.batch_size,
-            shuffle=True,
-            num_workers=task.num_workers,
-            seed=seed,
-            # A short final batch would still reconstruct fine; drop_last here is only for
-            # symmetry with the contrastive branch below, which genuinely needs it.
-            drop_last=True,
-        )
-        val_loader = (
-            None
-            if validation is None
-            else make_target_loader(
-                masked_dataset(
-                    store,
-                    index,
-                    validation,
-                    mask=mask,
-                    normalize_target=task.normalize_target,
-                    # Seeded here and only here: training wants a fresh mask every epoch,
-                    # but val/loss must measure the same held-out reconstruction problem
-                    # every time it is computed, not a freshly redrawn one — see
-                    # WindowDataset.mask_seed.
-                    mask_seed=seed,
-                ),
-                batch_size=task.batch_size,
-                num_workers=task.num_workers,
-                seed=seed,
-                drop_last=True,
-            )
-        )
-        return train_loader, val_loader
-
-    assert task.augmentor is not None, "enforced by SslPretrainTask's model_validator"
-    augment = resolve_component(task.augmentor, expected=torch.nn.Module)
+) -> tuple[BatchLoader[WindowBatch], None]:
+    """Build one raw-window loader; stochastic pretext work starts after device transfer."""
     train_loader = make_loader(
         val_dataset(store, index, fold.train),
         batch_size=task.batch_size,
         shuffle=True,
         num_workers=task.num_workers,
         seed=seed,
-        # SimCLR's negatives are the rest of the batch, so a short final batch changes the
-        # objective rather than merely the throughput.
         drop_last=True,
-        collate_fn=TwoViewCollate(augment),
     )
-    val_loader = (
-        None
-        if validation is None
-        else make_loader(
-            val_dataset(store, index, validation),
-            batch_size=task.batch_size,
-            num_workers=task.num_workers,
-            seed=seed,
-            drop_last=True,
-            # A separate, seeded collate instance: the same reasoning as mask_seed above.
-            # Correctness relies on this loader never shuffling (make_loader's shuffle
-            # defaults to False and nothing here overrides it), so the same rows land in
-            # the same batch, in the same order, every time this loader is iterated.
-            collate_fn=TwoViewCollate(augment, seed=seed),
-        )
-    )
-    return train_loader, val_loader
+    return train_loader, None
 
 
 @runner("ssl_pretrain")
@@ -332,17 +274,14 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         )
 
         module, feature_dim = build_module(
-            task, channels=store.channels, length=task.window.length
+            task, channels=store.channels, length=task.window.length, seed=config.seed
         )
-        train_loader, val_loader = build_loaders(task, store, index, fold, config.seed)
+        train_loader, _ = build_loaders(task, store, index, fold, config.seed)
 
         callbacks: list[Any] = []
         probe: OnlineProbe | None = None
-        if val_loader is not None and row_labels is not None:
+        if row_labels is not None:
             probe = OnlineProbe(
-                # Embeddings for the probe must come from an unmasked, uncollated view
-                # regardless of the pretext objective, so this always reaches for
-                # val_dataset, never train_dataset and never TwoViewCollate.
                 make_loader(
                     val_dataset(store, index, fold.train),
                     batch_size=task.batch_size,
@@ -359,9 +298,17 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
                 metrics=task.probe_metrics,
             )
             callbacks.append(probe)
-        elif val_loader is not None:
+        else:
             callbacks.append(
-                RankMeMonitor(val_loader, every_n_epochs=task.probe_every_n_epochs)
+                RankMeMonitor(
+                    make_loader(
+                        val_dataset(store, index, fold.test),
+                        batch_size=task.batch_size,
+                        num_workers=task.num_workers,
+                        seed=config.seed,
+                    ),
+                    every_n_epochs=task.probe_every_n_epochs,
+                )
             )
 
         # I1/"the rule": `task.trainer` is a full `TrainerConfig` here too, including a
@@ -371,9 +318,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         # patience=5` on a 500-epoch pretrain silently ran the full 500. Reusing
         # `build_callbacks` -- the same construction `run_torch` uses -- wires all four
         # for pretraining too, rather than leaving them honoured nowhere.
-        callbacks += build_callbacks(
-            task.trainer, run.artifacts_dir, has_validation=val_loader is not None
-        )
+        callbacks += build_callbacks(task.trainer, run.artifacts_dir, has_validation=False)
 
         trainer = build_trainer(
             task.trainer,
@@ -381,7 +326,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
             mlflow_logger,
             callbacks,
         )
-        trainer.fit(module, train_loader, val_loader)
+        trainer.fit(module, train_loader)
 
         buffer = io.BytesIO()
         torch.save(
@@ -416,7 +361,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
             "feature_dim": float(feature_dim),
         }
         logged = trainer.logged_metrics
-        for name in ("train/loss_epoch", "train/loss", "val/loss"):
+        for name in ("train/loss_epoch", "train/loss"):
             if name in logged:
                 metrics[name.replace("/", "_")] = float(logged[name])
         if probe is not None and probe.history:

@@ -280,9 +280,7 @@ class MaskedMSE(nn.Module):
     def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         valid = ~torch.isnan(target)
         if not valid.any():
-            raise ValueError(
-                "target has no masked positions to reconstruct; the mask hid nothing"
-            )
+            raise ValueError("target has no masked positions to reconstruct; the mask hid nothing")
         return nn.functional.mse_loss(prediction[valid], target[valid])
 
     def diagnostics(
@@ -319,7 +317,7 @@ def _pair_halves(
     at those positions gives the other, which recovers the two view-halves a loss like
     :class:`VICReg` needs without assuming how the batch is laid out (a contiguous "first
     half / second half", interleaved, or anything else) — only the index relationship
-    :class:`~dsio.dataset.dataset.TwoViewCollate` promises.
+    :class:`~dsio.train.augmentation.TwoView` promises.
     """
     order = torch.arange(target.shape[0], device=target.device)
     first = (order < target).nonzero(as_tuple=True)[0]
@@ -327,7 +325,7 @@ def _pair_halves(
 
 
 class NTXent(nn.Module):
-    """SimCLR's contrastive loss, over a batch :class:`~dsio.dataset.dataset.TwoViewCollate` built.
+    """SimCLR's contrastive loss over a batch :class:`~dsio.train.augmentation.TwoView` built.
 
     ``prediction`` is the whole batch's projected embeddings — ``2 * batch`` rows, two per
     window — and ``target`` is each row's pair index, exactly the ``(arange(2 * batch) +
@@ -411,9 +409,7 @@ class VICReg(nn.Module):
         variance = 0.5 * (self._variance(za) + self._variance(zb))
         covariance = 0.5 * (self._covariance(za) + self._covariance(zb))
         return (
-            self.sim_weight * invariance
-            + self.var_weight * variance
-            + self.cov_weight * covariance
+            self.sim_weight * invariance + self.var_weight * variance + self.cov_weight * covariance
         )
 
     def diagnostics(
@@ -504,9 +500,7 @@ class Jitter(nn.Module):
         super().__init__()
         self.sigma = sigma
 
-    def forward(
-        self, x: torch.Tensor, generator: torch.Generator | None = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
         _check_3d(x, "Jitter")
         scale = x.std(dim=-1, keepdim=True) * self.sigma
         noise = torch.randn(x.shape, dtype=x.dtype, device=x.device, generator=generator)
@@ -522,13 +516,11 @@ class RandomScale(nn.Module):
             raise ValueError(f"low {low} must not exceed high {high}")
         self.low, self.high = low, high
 
-    def forward(
-        self, x: torch.Tensor, generator: torch.Generator | None = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
         _check_3d(x, "RandomScale")
-        gain = torch.empty(
-            x.shape[0], x.shape[1], 1, dtype=x.dtype, device=x.device
-        ).uniform_(self.low, self.high, generator=generator)
+        gain = torch.empty(x.shape[0], x.shape[1], 1, dtype=x.dtype, device=x.device).uniform_(
+            self.low, self.high, generator=generator
+        )
         return x * gain
 
 
