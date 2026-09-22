@@ -35,7 +35,7 @@
 # - Re-run sprint planning to refresh statuses without downgrading existing progress.
 
 generated: "2026-09-21T18:15:08+03:00"
-last_updated: "2026-09-22T04:05:00+03:00"
+last_updated: "2026-09-22T04:15:00+03:00"
 project: DSio
 project_key: NOKEY
 tracking_system: file-system
@@ -59,8 +59,8 @@ development_status:
   2-5-construct-identity-preserving-dataloaders: done
   epic-2-retrospective: optional
 
-  epic-3: backlog
-  3-1-train-a-task-through-the-exact-dsio-lightning-classes: backlog
+  epic-3: in-progress
+  3-1-train-a-task-through-the-exact-dsio-lightning-classes: in-progress
   3-2-configure-training-with-native-importable-components: backlog
   3-3-apply-reproducible-stochastic-augmentation-on-the-accelerator: backlog
   3-4-reject-unsupported-training-configurations-before-execution: backlog
