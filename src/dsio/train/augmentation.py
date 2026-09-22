@@ -14,6 +14,17 @@ from dsio.model.masking import apply_mask
 type Batch = Mapping[str, Any]
 type Mask = Callable[[Tensor, torch.Generator | None], Tensor]
 
+_INTEGER_DTYPES = {
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+}
+
 
 class AugmentationError(ValueError):
     """A training batch or augmentation violated the accelerator-side contract."""
@@ -49,7 +60,9 @@ class MaskedReconstruction(nn.Module):
             raise AugmentationError("mask must remain on the input device")
         target = x
         if self.normalize_target:
-            target = (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6)
+            target = (x - x.mean(dim=-1, keepdim=True)) / (
+                x.std(dim=-1, keepdim=True, correction=0) + 1e-6
+            )
         return {
             **batch,
             "x": apply_mask(x, hidden),
@@ -69,7 +82,11 @@ class TwoView(nn.Module):
         super().__init__()
         if not isinstance(augmentor, nn.Module):
             raise AugmentationError("augmentor must be a torch nn.Module")
-        if len(set(views)) != 2 or any(not view for view in views):
+        if (
+            len(views) != 2
+            or any(not isinstance(view, str) or not view for view in views)
+            or views[0] == views[1]
+        ):
             raise AugmentationError("two-view identities must be distinct non-empty strings")
         self.augmentor = augmentor
         self.views = views
@@ -88,7 +105,7 @@ class TwoView(nn.Module):
         with torch.no_grad():
             for view in self.views:
                 generator = _generator(x, seed, epoch, step, sample_ids, identity, view)
-                value = self.augmentor(x, generator=generator)
+                value = self.augmentor(x.clone(), generator=generator)
                 if not isinstance(value, Tensor) or value.shape != x.shape:
                     shape = None if not isinstance(value, Tensor) else tuple(value.shape)
                     raise AugmentationError(
@@ -96,6 +113,8 @@ class TwoView(nn.Module):
                     )
                 if value.device != x.device:
                     raise AugmentationError("augmentor must remain on the input device")
+                if value.dtype != x.dtype:
+                    raise AugmentationError("augmentor must preserve input dtype")
                 generated.append(value)
         size = x.shape[0]
         result = dict(batch)
@@ -106,7 +125,13 @@ class TwoView(nn.Module):
             view_id=[self.views[0]] * size + [self.views[1]] * size,
         )
         row = batch.get("row")
-        if isinstance(row, Tensor):
+        if row is not None:
+            if not isinstance(row, Tensor) or row.ndim != 1:
+                raise AugmentationError("row must be a one-dimensional integer tensor")
+            if row.shape[0] != size:
+                raise AugmentationError(f"row must contain {size} source samples")
+            if row.layout != torch.strided or row.dtype not in _INTEGER_DTYPES:
+                raise AugmentationError("row must be a dense integer tensor")
             result["row"] = row.repeat(2)
         return result
 

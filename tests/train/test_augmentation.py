@@ -9,10 +9,10 @@ import pytest
 import torch
 from torch import nn
 
-from dsio.model.components import Jitter
-from dsio.model.masking import SpanMask
-from dsio.model.module import DsioModule
-from dsio.train.augmentation import MaskedReconstruction, TwoView
+from dsio.model.components import Jitter, no_augmentation
+from dsio.model.masking import CausalMask, SpanMask
+from dsio.model.module import DsioModule, ModuleError
+from dsio.train.augmentation import AugmentationError, MaskedReconstruction, TwoView
 
 
 class CaptureObjective(nn.Module):
@@ -45,6 +45,18 @@ class AddOne(nn.Module):
     ) -> Mapping[str, Any]:
         del seed, epoch, step, identity
         return {**batch, "x": batch["x"] + 1}
+
+
+class InPlaceAddOne(nn.Module):
+    def forward(self, x: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
+        del generator
+        return x.add_(1)
+
+
+class ToDouble(nn.Module):
+    def forward(self, x: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
+        del generator
+        return x.double()
 
 
 def _batch() -> dict[str, Any]:
@@ -162,3 +174,78 @@ def test_masked_reconstruction_builds_the_existing_loss_contract_on_device() -> 
 def test_two_view_rejects_ambiguous_view_identity() -> None:
     with pytest.raises(ValueError, match="distinct non-empty"):
         TwoView(Jitter(), views=("same", "same"))
+
+
+@pytest.mark.parametrize("views", [(1, 2), ([], [])])
+def test_two_view_rejects_non_string_view_identity(views: Any) -> None:
+    with pytest.raises(AugmentationError, match="distinct non-empty strings"):
+        TwoView(Jitter(), views=views)
+
+
+def test_two_view_isolates_each_view_from_in_place_augmentors() -> None:
+    batch = _batch()
+    original = batch["x"].clone()
+    result = TwoView(InPlaceAddOne())(
+        batch,
+        seed=1,
+        epoch=0,
+        step=0,
+        identity={"component": "in-place"},
+    )
+
+    assert torch.equal(batch["x"], original)
+    assert torch.equal(result["x"][:2], original + 1)
+    assert torch.equal(result["x"][2:], original + 1)
+
+
+def test_two_view_supports_the_existing_no_augmentation_component() -> None:
+    batch = _batch()
+    result = TwoView(no_augmentation())(
+        batch,
+        seed=1,
+        epoch=0,
+        step=0,
+        identity={"component": "no_augmentation"},
+    )
+    assert torch.equal(result["x"][:2], batch["x"])
+    assert torch.equal(result["x"][2:], batch["x"])
+
+
+def test_two_view_rejects_dtype_changes_and_misaligned_rows() -> None:
+    kwargs = dict(seed=1, epoch=0, step=0, identity={"component": "test"})
+    with pytest.raises(AugmentationError, match="dtype"):
+        TwoView(ToDouble())(_batch(), **kwargs)
+    with pytest.raises(AugmentationError, match="row.*one-dimensional"):
+        TwoView(Jitter())({**_batch(), "row": [3, 7]}, **kwargs)
+    with pytest.raises(AugmentationError, match="row.*2 source samples"):
+        TwoView(Jitter())({**_batch(), "row": torch.tensor([3])}, **kwargs)
+
+
+def test_length_one_masked_target_remains_finite() -> None:
+    batch = {
+        "sample_id": ["single"],
+        "x": torch.tensor([[[3.0]]]),
+        "row": torch.tensor([0]),
+    }
+    result = MaskedReconstruction(CausalMask(ratio=0.5))(
+        batch,
+        seed=1,
+        epoch=0,
+        step=0,
+        identity={"component": "causal"},
+    )
+    valid = ~torch.isnan(result["y"])
+    assert valid.any()
+    assert torch.isfinite(result["y"][valid]).all()
+
+
+def test_cyclic_augmentation_identity_is_a_module_error() -> None:
+    identity: dict[str, Any] = {}
+    identity["cycle"] = identity
+    with pytest.raises(ModuleError, match="augmentation_identity must be canonical"):
+        DsioModule(
+            model=nn.Identity(),
+            objective=CaptureObjective(),
+            training_augmentation=AddOne(),
+            augmentation_identity=identity,
+        )

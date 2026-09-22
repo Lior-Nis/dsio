@@ -171,6 +171,23 @@ def test_both_mask_and_augmentor_is_rejected(corpus: Path) -> None:
         )
 
 
+def test_ssl_rejects_validation_dependent_training_controls(corpus: Path) -> None:
+    with pytest.raises(ValueError, match="early stopping requires a validation objective"):
+        pretrain_task(
+            corpus,
+            trainer=TrainerConfig(max_epochs=2, early_stopping_patience=1),
+        )
+
+    task = pretrain_task(
+        corpus,
+        scheduler={"reference": "torch.optim.lr_scheduler:ReduceLROnPlateau"},
+    )
+    from dsio.train.ssl_task import build_module
+
+    with pytest.raises(ValueError, match="ReduceLROnPlateau requires a validation objective"):
+        build_module(task, channels=2, length=WINDOW.length)
+
+
 def test_component_configuration_rejects_unknown_fields_without_altering_them(
     corpus: Path,
 ) -> None:

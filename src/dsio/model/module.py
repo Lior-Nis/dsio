@@ -124,7 +124,7 @@ class DsioModule(LightningModule):
                 augmentation_config = json.loads(canonical_json(dict(augmentation_identity)))
         except ConfiguredComponentError as error:
             raise ModuleError(str(error)) from None
-        except (TypeError, ValueError) as error:
+        except (RecursionError, TypeError, ValueError) as error:
             raise ModuleError(f"augmentation_identity must be canonical: {error}") from None
         self.model = model
         self.objective = objective

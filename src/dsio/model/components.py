@@ -524,5 +524,13 @@ class RandomScale(nn.Module):
         return x * gain
 
 
+class IdentityAugmentation(nn.Module):
+    """Generator-aware identity for an explicitly configured two-view baseline."""
+
+    def forward(self, x: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
+        del generator
+        return x
+
+
 def no_augmentation() -> nn.Module:
-    return nn.Identity()
+    return IdentityAugmentation()

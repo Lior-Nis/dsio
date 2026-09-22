@@ -129,6 +129,11 @@ class SslPretrainTask(TaskConfig):
                 f"e.g. SimCLR/VICReg) to know which training augmentation to build; "
                 f"got mask={self.mask!r}, augmentor={self.augmentor!r}"
             )
+        if self.trainer.early_stopping_patience is not None:
+            raise ValueError(
+                "ssl_pretrain early stopping requires a validation objective; stochastic "
+                "training augmentation is intentionally unavailable in validation"
+            )
         return self
 
 
@@ -148,7 +153,7 @@ def check_ssl(config: RunConfig) -> None:
     component_factory(task.loss)
     component_factory(task.optimizer)
     if task.scheduler is not None:
-        component_factory(task.scheduler)
+        _ssl_scheduler(task.scheduler)
     if task.mask is not None:
         component_factory(task.mask)
     if task.augmentor is not None:
@@ -184,7 +189,7 @@ def build_module(
     scheduler_factory = None
     scheduler_parameters: dict[str, Any] = {}
     if task.scheduler is not None:
-        scheduler_factory, scheduler_parameters = component_factory(task.scheduler)
+        scheduler_factory, scheduler_parameters = _ssl_scheduler(task.scheduler)
 
     training_augmentation: torch.nn.Module
     if task.mask is not None:
@@ -302,7 +307,7 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
             callbacks.append(
                 RankMeMonitor(
                     make_loader(
-                        val_dataset(store, index, fold.test),
+                        val_dataset(store, index, fold.train),
                         batch_size=task.batch_size,
                         num_workers=task.num_workers,
                         seed=config.seed,
@@ -388,3 +393,15 @@ def _infer_dim(backbone: Any, channels: int, length: int) -> int:
 
     with torch.no_grad():
         return int(backbone(torch.zeros(2, channels, length)).shape[-1])
+
+
+def _ssl_scheduler(config: ConfiguredComponent) -> tuple[Any, dict[str, Any]]:
+    factory, parameters = component_factory(config)
+    if isinstance(factory, type) and issubclass(
+        factory, torch.optim.lr_scheduler.ReduceLROnPlateau
+    ):
+        raise ValueError(
+            "ssl_pretrain ReduceLROnPlateau requires a validation objective; stochastic "
+            "training augmentation is intentionally unavailable in validation"
+        )
+    return factory, parameters
