@@ -174,6 +174,20 @@ def test_both_mask_and_augmentor_is_rejected(corpus: Path) -> None:
         )
 
 
+def test_component_configuration_rejects_unknown_fields_without_altering_them(
+    corpus: Path,
+) -> None:
+    with pytest.raises(ValueError, match="accepts only reference and parameters"):
+        pretrain_task(
+            corpus,
+            backbone={
+                "reference": "dsio.model.components:Conv1dEncoder",
+                "parameters": {"hidden": 8, "out_dim": 16, "depth": 1},
+                "paramters": {"hidden": 16},
+            },
+        )
+
+
 def test_preflight_resolves_probe_only_names(corpus: Path) -> None:
     config = RunConfig(
         name="p",

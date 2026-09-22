@@ -33,7 +33,7 @@ import torch
 from pydantic import Field, model_validator
 
 from dsio.batches import BatchLoader, TrainingBatch
-from dsio.config.components import ComponentConfig, resolve_component
+from dsio.config.components import ComponentConfig, ConfiguredComponent, resolve_component
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.splits.folds import load_folds, require_fold, split_path
@@ -90,12 +90,12 @@ class SslPretrainTask(TaskConfig):
     splits_root: Path = Path("splits")
     fold: int = Field(default=0, description="Which fold's train part to pretrain on.")
 
-    backbone: ComponentConfig
-    head: ComponentConfig
-    loss: ComponentConfig
-    mask: ComponentConfig | None = None
-    augmentor: ComponentConfig | None = None
-    transform: ComponentConfig | None = None
+    backbone: ConfiguredComponent
+    head: ConfiguredComponent
+    loss: ConfiguredComponent
+    mask: ConfiguredComponent | None = None
+    augmentor: ConfiguredComponent | None = None
+    transform: ConfiguredComponent | None = None
     normalize_target: bool = Field(
         default=True,
         description=(
@@ -106,20 +106,20 @@ class SslPretrainTask(TaskConfig):
 
     register_as: str = Field(description="Name the encoder artifact is saved under.")
 
-    labels: ComponentConfig | None = Field(
+    labels: ConfiguredComponent | None = Field(
         default=None,
         description="Optional label provider, used only by the online probe.",
     )
     probe_every_n_epochs: int = Field(default=1, ge=1)
     probe_metrics: tuple[str, ...] = ("accuracy", "roc_auc")
 
-    optimizer: ComponentConfig = Field(
+    optimizer: ConfiguredComponent = Field(
         default_factory=lambda: ComponentConfig(
             reference="torch.optim:AdamW",
             parameters={"lr": 1e-3, "weight_decay": 0.0},
         )
     )
-    scheduler: ComponentConfig | None = None
+    scheduler: ConfiguredComponent | None = None
     batch_size: int = Field(default=64, ge=2)
     num_workers: int = Field(default=0, ge=0)
     trainer: TrainerConfig = TrainerConfig(monitor="val/loss")

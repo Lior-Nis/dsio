@@ -169,6 +169,20 @@ def test_preflight_catches_a_typo_before_any_data_is_read(corpus: Path) -> None:
         check(config)
 
 
+def test_component_configuration_rejects_unknown_fields_without_altering_them(
+    corpus: Path,
+) -> None:
+    with pytest.raises(ValueError, match="accepts only reference and parameters"):
+        make_task(
+            corpus,
+            backbone={
+                "reference": "dsio.model.components:Conv1dEncoder",
+                "parameters": {"hidden": 8, "out_dim": 8, "depth": 1},
+                "paramters": {"hidden": 16},
+            },
+        )
+
+
 def test_preflight_requires_the_split_files_to_exist(corpus: Path) -> None:
     """Splits are provenance; their absence is an error, not licence to invent some."""
     config = RunConfig(name="nosplit", task=make_task(corpus, split="never_made"))

@@ -115,7 +115,11 @@ def _identity_document(
         "schema_version": _SCHEMA_VERSION,
         "dsio_version": version("dsio"),
         "configuration": normalize(config, secrets=secrets, ephemeral=ephemeral),
-        "components": normalize(normalized_components),
+        "components": normalize(
+            normalized_components,
+            secrets=secrets,
+            ephemeral=ephemeral,
+        ),
     }
 
 

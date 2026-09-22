@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 from collections.abc import Mapping
 from functools import partial
-from typing import Any, NotRequired, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
+
+from pydantic import BeforeValidator
 
 from dsio.contracts import NonCanonicalValueError, canonical_json
 
@@ -49,9 +52,23 @@ def validate_component_config(config: object) -> ComponentConfig:
     parameters = dict(raw_parameters)
     try:
         canonical_json(parameters)
-    except NonCanonicalValueError as error:
+        serialized = json.dumps(
+            parameters,
+            sort_keys=True,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+        normalized = json.loads(serialized)
+    except (NonCanonicalValueError, RecursionError, TypeError, ValueError) as error:
         raise ComponentError(f"component parameters must be canonical: {error}") from None
-    return {"reference": reference, "parameters": parameters}
+    return {"reference": reference, "parameters": normalized}
+
+
+type ConfiguredComponent = Annotated[
+    ComponentConfig,
+    BeforeValidator(validate_component_config),
+]
 
 
 def resolve_component[T](
@@ -145,9 +162,17 @@ def _split_reference(reference: str) -> tuple[str, str]:
             f"component reference {reference!r} must use module:qualname form"
         )
     module, qualname = reference.split(":", 1)
-    if not module or not qualname or "<" in qualname or ">" in qualname:
+    if (
+        not module
+        or module == "__main__"
+        or module.startswith(".")
+        or not qualname
+        or "<" in qualname
+        or ">" in qualname
+    ):
         raise ComponentError(
-            f"component reference {reference!r} must use named module:qualname form"
+            f"component reference {reference!r} must use an absolutely importable "
+            "module:qualname form"
         )
     return module, qualname
 

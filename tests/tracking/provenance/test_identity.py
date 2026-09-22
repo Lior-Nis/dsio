@@ -89,6 +89,31 @@ def test_component_parameters_change_identity() -> None:
     )
 
 
+def test_component_secrets_and_ephemeral_values_do_not_change_identity() -> None:
+    from dsio.tracking import execution_identity
+
+    first = {
+        "reference": "project.models:Model",
+        "parameters": {"width": 32, "password": "SENTINEL-ONE", "task_run_id": "one"},
+    }
+    second = {
+        "reference": "project.models:Model",
+        "parameters": {"width": 32, "password": "SENTINEL-TWO", "task_run_id": "two"},
+    }
+
+    assert execution_identity(
+        {},
+        components={"model": first},
+        secrets="password",
+        ephemeral="task_run_id",
+    ) == execution_identity(
+        {},
+        components={"model": second},
+        secrets="password",
+        ephemeral="task_run_id",
+    )
+
+
 def test_component_references_must_be_explicit_strings() -> None:
     from dsio.contracts import NonCanonicalValueError
     from dsio.tracking import execution_identity

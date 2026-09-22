@@ -112,6 +112,7 @@ class DsioModule(LightningModule):
         self.scheduler_parameters = (
             {} if scheduler_config is None else scheduler_config["parameters"]
         )
+        self._metric_log_names: dict[int, str] = {}
         self.save_hyperparameters(
             {
                 "optimizer": optimizer_config,
@@ -140,8 +141,11 @@ class DsioModule(LightningModule):
         values = _objective_values(result)
         prefix = "val" if stage == "validate" else stage
         for name, value in values.items():
+            log_name = f"{prefix}/{name}"
+            if isinstance(value, Metric):
+                self._validate_metric(value, log_name)
             self.log(
-                f"{prefix}/{name}",
+                log_name,
                 value,
                 batch_size=len(sample_ids),
                 on_step=stage == "train" and name == "loss",
@@ -151,6 +155,18 @@ class DsioModule(LightningModule):
         loss = values["loss"]
         assert isinstance(loss, Tensor)
         return loss
+
+    def _validate_metric(self, metric: Metric, log_name: str) -> None:
+        if not any(module is metric for module in self.modules()):
+            raise ModuleError(
+                f"TorchMetric for {log_name!r} must be registered on the objective or model"
+            )
+        previous = self._metric_log_names.setdefault(id(metric), log_name)
+        if previous != log_name:
+            raise ModuleError(
+                "each TorchMetric instance may have one Lightning log name; "
+                f"{previous!r} and {log_name!r} need distinct metric instances"
+            )
 
     def training_step(self, batch: Batch, batch_idx: int) -> Tensor:
         del batch_idx
@@ -215,12 +231,54 @@ class DsioModule(LightningModule):
         if self.scheduler_factory is None:
             return optimizer
         scheduler = self.scheduler_factory(optimizer, **self.scheduler_parameters)
-        if not isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler | Mapping):
+        if isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
+            configured_scheduler: torch.optim.lr_scheduler.LRScheduler | dict[str, Any] = (
+                scheduler
+            )
+        elif isinstance(scheduler, Mapping):
+            configured_scheduler = _scheduler_configuration(scheduler)
+        else:
             raise ModuleError(
                 "scheduler_factory must return a native torch scheduler or "
                 f"Lightning scheduler mapping, got {type(scheduler).__name__}"
             )
-        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+        return {"optimizer": optimizer, "lr_scheduler": configured_scheduler}
+
+
+def _scheduler_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "scheduler",
+        "name",
+        "interval",
+        "frequency",
+        "reduce_on_plateau",
+        "monitor",
+        "strict",
+    }
+    unknown = set(value) - allowed
+    if unknown:
+        fields = ", ".join(sorted(str(field) for field in unknown))
+        raise ModuleError(f"Lightning scheduler mapping has unknown fields: {fields}")
+    scheduler = value.get("scheduler")
+    if not isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
+        raise ModuleError(
+            "Lightning scheduler mapping requires 'scheduler' as a native torch scheduler"
+        )
+    interval = value.get("interval", "epoch")
+    if interval not in {"step", "epoch"}:
+        raise ModuleError("Lightning scheduler mapping interval must be 'step' or 'epoch'")
+    frequency = value.get("frequency", 1)
+    if isinstance(frequency, bool) or not isinstance(frequency, int) or frequency < 1:
+        raise ModuleError("Lightning scheduler mapping frequency must be a positive integer")
+    for name in ("name", "monitor"):
+        configured = value.get(name)
+        if configured is not None and not isinstance(configured, str):
+            raise ModuleError(f"Lightning scheduler mapping {name} must be a string")
+    for name in ("reduce_on_plateau", "strict"):
+        configured = value.get(name)
+        if configured is not None and not isinstance(configured, bool):
+            raise ModuleError(f"Lightning scheduler mapping {name} must be a boolean")
+    return dict(value)
 
 
 def _batch_ids(batch: object) -> list[str]:

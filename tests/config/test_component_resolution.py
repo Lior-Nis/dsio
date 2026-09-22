@@ -46,9 +46,12 @@ def test_runtime_arguments_and_declared_parameters_share_one_constructor_call() 
     ("configured", "message"),
     [
         ({"reference": "torch.nn.Linear"}, "module:qualname"),
+        ({"reference": "__main__:Linear"}, "absolutely importable"),
+        ({"reference": ".relative:Linear"}, "absolutely importable"),
         ({"reference": "missing_package:Thing"}, "could not import"),
         ({"reference": "torch.nn:Missing"}, "does not resolve"),
         ({"reference": "torch.nn:Linear", "parameters": {"bad": object()}}, "canonical"),
+        ({"reference": "torch.nn:Linear", "parameters": {"bad": {1, 2}}}, "canonical"),
         ({"reference": "torch.nn:Linear", "parameters": {}, "extra": True}, "only"),
     ],
 )
@@ -60,6 +63,18 @@ def test_invalid_component_configuration_fails_before_construction(
 
     with pytest.raises(ComponentError, match=message):
         resolve_component(configured)
+
+
+def test_cyclic_component_parameters_fail_at_the_configuration_boundary() -> None:
+    from dsio.config.components import ComponentError, validate_component_config
+
+    parameters: dict[str, Any] = {}
+    parameters["cycle"] = parameters
+
+    with pytest.raises(ComponentError, match="canonical"):
+        validate_component_config(
+            {"reference": "torch.nn:Linear", "parameters": parameters}
+        )
 
 
 def test_resolved_component_must_match_the_requested_native_contract() -> None:

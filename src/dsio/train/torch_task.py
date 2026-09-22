@@ -35,7 +35,7 @@ import torch
 from pydantic import Field, model_validator
 
 from dsio.batches import PredictionBatch
-from dsio.config.components import ComponentConfig, resolve_component
+from dsio.config.components import ComponentConfig, ConfiguredComponent, resolve_component
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.contracts import DsioModel, sha256_of
 from dsio.data.adapters import SignalExamples
@@ -132,7 +132,7 @@ class TorchTask(TaskConfig):
 
     store: str = Field(description="Store name under the data root.")
     window: WindowSpec
-    labels: ComponentConfig = Field(description="Named importable per-row label provider.")
+    labels: ConfiguredComponent = Field(description="Named importable per-row label provider.")
     split: str = Field(description="Committed split family under splits_root.")
     splits_root: Path = SPLITS_ROOT
     fold: int = Field(
@@ -146,32 +146,32 @@ class TorchTask(TaskConfig):
         ),
     )
 
-    backbone: ComponentConfig
-    head: ComponentConfig = Field(
+    backbone: ConfiguredComponent
+    head: ConfiguredComponent = Field(
         default_factory=lambda: ComponentConfig(
             reference="dsio.model.components:linear_head"
         )
     )
-    loss: ComponentConfig = Field(
+    loss: ConfiguredComponent = Field(
         default_factory=lambda: ComponentConfig(
             reference="dsio.model.components:CrossEntropy"
         )
     )
-    transform: ComponentConfig | None = None
-    preprocessor: ComponentConfig | None = None
+    transform: ConfiguredComponent | None = None
+    preprocessor: ConfiguredComponent | None = None
 
     encoder: EncoderRef | None = Field(
         default=None,
         description="A pretrained encoder pinned by MLflow run, artifact path and digest.",
     )
 
-    optimizer: ComponentConfig = Field(
+    optimizer: ConfiguredComponent = Field(
         default_factory=lambda: ComponentConfig(
             reference="torch.optim:AdamW",
             parameters={"lr": 1e-3, "weight_decay": 0.0},
         )
     )
-    scheduler: ComponentConfig | None = None
+    scheduler: ConfiguredComponent | None = None
     batch_size: int = Field(default=32, ge=1)
     num_workers: int = Field(default=0, ge=0)
     trainer: TrainerConfig = TrainerConfig()

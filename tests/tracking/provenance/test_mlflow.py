@@ -37,7 +37,12 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
         components={
             "model": {
                 "reference": "torch.nn:Linear",
-                "parameters": {"in_features": 3, "out_features": 2},
+                "parameters": {
+                    "in_features": 3,
+                    "out_features": 2,
+                    "password": "SENTINEL-COMPONENT-PASSWORD",
+                    "task_run_id": "component-ephemeral-id",
+                },
             }
         },
         secrets="password",
