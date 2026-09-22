@@ -89,6 +89,7 @@ Codex (GPT-5)
 - 2026-09-22: Clarified the only unprovable boundary: a governed custom collator is trusted executable code for the semantics of same-shaped transformed values, while DSIO proves identity order, cardinality, container safety, and CPU placement.
 - 2026-09-22: Re-review tightened the batch-tree grammar: sample-major ragged and zero-width native sequences remain valid, while unbatched scalars, opaque leaves, object arrays, and accelerator tensors fail closed.
 - 2026-09-22: Acceptance re-review closed the final cardinality edge by rejecting zero-dimensional batch tensors and arrays while retaining valid `(batch_size, 0)` fields.
+- 2026-09-22: Edge re-review extended the object-dtype rejection to structured NumPy scalars, preventing device tensors from being hidden inside `np.void` sample leaves.
 
 ### Completion Notes List
 

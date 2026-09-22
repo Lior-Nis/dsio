@@ -309,6 +309,25 @@ def test_collation_rejects_object_arrays_and_accepts_zero_width_sequences() -> N
     assert collate_items(items)["tokens"] == []
 
 
+def test_collation_rejects_object_bearing_numpy_scalars() -> None:
+    items = [
+        {"sample_id": "left", "x": np.array([1.0])},
+        {"sample_id": "right", "x": np.array([2.0])},
+    ]
+    hidden = np.empty(2, dtype=[("value", object)])
+    hidden[0]["value"] = torch.ones(1, device="meta")
+    hidden[1]["value"] = torch.ones(1, device="meta")
+
+    with pytest.raises(LoadingError, match="unsupported object scalar"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["left", "right"],
+                "hidden": [hidden[0], hidden[1]],
+            },
+        )
+
+
 def test_collation_rejects_unordered_and_recursive_batch_containers() -> None:
     items = [{"sample_id": "one", "x": np.ones(2)}]
 

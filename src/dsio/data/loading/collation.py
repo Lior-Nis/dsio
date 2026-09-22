@@ -115,6 +115,8 @@ def _validate_batch(
                 batch_size,
             )
         return
+    if isinstance(value, np.generic) and value.dtype.hasobject:
+        raise LoadingError(f"{path} uses an unsupported object scalar")
     if isinstance(value, set | frozenset):
         raise LoadingError(f"{path} uses an unordered batch container")
     if isinstance(value, Mapping):
