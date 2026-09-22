@@ -30,7 +30,7 @@ def build_data(workspace: str, parent_run_id: str, seed: int) -> dict[str, Any]:
                 "builder": "reference_projects.supervised.components:build_synthetic_store"
             },
         )
-        path = Path(workspace) / "synthetic-supervised"
+        path = Path(workspace) / child.info.run_id / "synthetic-supervised"
         path.parent.mkdir(parents=True, exist_ok=True)
         store = build_synthetic_store(path, seed)
         store.verify()

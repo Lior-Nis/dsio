@@ -36,6 +36,15 @@ _COMPONENTS = {
     "data_module": "dsio.data.loading.module:DsioDataModule",
     "model": "reference_projects.supervised.components:TinyRegressor",
     "objective": "reference_projects.supervised.components:RegressionObjective",
+    "optimizer": "torch.optim:SGD",
+}
+
+_TRAINING = {
+    "batch_size": 4,
+    "fold": 0,
+    "max_epochs": 3,
+    "optimizer_parameters": {"lr": 0.05},
+    "roles": {"train": "train", "validate": "test"},
 }
 
 
@@ -55,7 +64,7 @@ def train_model(
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
                 "seed": seed,
-                "max_epochs": 3,
+                **_TRAINING,
             },
             components=_COMPONENTS,
         )
@@ -69,10 +78,10 @@ def train_model(
             store,
             examples,
             manifest,
-            fold=0,
-            roles={"train": "train", "validate": "test"},
+            fold=_TRAINING["fold"],
+            roles=_TRAINING["roles"],
             dataset_factory=regression_samples,
-            batch_size=4,
+            batch_size=_TRAINING["batch_size"],
             num_workers=0,
             seed=seed,
         )
@@ -80,7 +89,7 @@ def train_model(
             model=TinyRegressor(),
             objective=RegressionObjective(),
             optimizer_factory=torch.optim.SGD,
-            optimizer_parameters={"lr": 0.05},
+            optimizer_parameters=_TRAINING["optimizer_parameters"],
         )
         logger = MLFlowLogger(
             experiment_name="dsio-supervised-reference",
@@ -89,7 +98,7 @@ def train_model(
             log_model=False,
         )
         trainer = Trainer(
-            max_epochs=3,
+            max_epochs=_TRAINING["max_epochs"],
             accelerator="cpu",
             devices=1,
             deterministic=True,

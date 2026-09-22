@@ -61,12 +61,15 @@ Codex (GPT-5)
 - 2026-09-22: Created from merged Story 5.1 at `ebf9ea6`; chose an executable consumer-owned example over any new orchestration abstraction.
 - 2026-09-22: Focused replay proof passed with stable split assignments, execution identities, predictions, and downstream-only evaluation.
 - 2026-09-22: Full gate passed: 1046 tests, Ruff, mypy, import contracts, and wheel/sdist build.
+- 2026-09-22: Review found replay-path and downstream-lineage gaps; added run-scoped stores, evidence/content validation, complete identities, and installed-wheel execution coverage.
 
 ### Completion Notes List
 
 - Added an ordinary Prefect reference project outside the DSio distribution; it composes public DSio APIs and native Lightning/MLflow objects without a wrapper, runner, or result model.
 - The full supervised flow records parent/child run lineage, split reuse, checkpoint-backed export, native evaluation/inference inputs, and output artifacts.
 - The deterministic test executes two complete flows and a changed-metric evaluation-only flow while forbidding retraining.
+- Exact-argument replay now uses isolated physical stores while preserving stable logical identities; downstream work fails closed for swapped stores, deleted Runs, or mismatched model/checkpoint evidence.
+- The built-distribution test copies the consumer project into an isolated environment and runs it against the installed wheel.
 - Split the example tasks by data, training, and downstream responsibility once the initial module exceeded the agreed size boundary.
 
 ### File List

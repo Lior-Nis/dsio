@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from mlflow import MlflowClient
 
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
+from dsio.tracking import TrackingError, experiment
 
 
 def _isolate_services(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,7 +39,9 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
     _isolate_services(tmp_path, monkeypatch)
     monkeypatch.syspath_prepend(str(Path(__file__).parents[2]))
     from prefect.testing.utilities import prefect_test_harness
+    from reference_projects.supervised.components import build_synthetic_store
     from reference_projects.supervised.flow import reevaluate, supervised_flow
+    from reference_projects.supervised.tasks import infer
 
     observed_types: list[tuple[type[object], type[object]]] = []
     original_fit = Trainer.fit
@@ -54,8 +58,9 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
 
     monkeypatch.setattr(Trainer, "fit", recording_fit)
     with prefect_test_harness():
-        first = supervised_flow(str(tmp_path / "first"), seed=19)
-        second = supervised_flow(str(tmp_path / "second"), seed=19)
+        workspace = str(tmp_path / "workspace")
+        first = supervised_flow(workspace, seed=19)
+        second = supervised_flow(workspace, seed=19)
 
         def forbidden_fit(*args: object, **kwargs: object) -> None:
             del args, kwargs
@@ -63,6 +68,10 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
 
         monkeypatch.setattr(Trainer, "fit", forbidden_fit)
         downstream = reevaluate(first, metrics=("rmse",))
+
+        other_store = build_synthetic_store(tmp_path / "other-store", seed=999)
+        with pytest.raises(ValueError, match="store identity"):
+            reevaluate({**first, "store_path": str(other_store.path)}, metrics=("rmse",))
 
     assert observed_types == [
         (DsioModule, DsioDataModule),
@@ -90,6 +99,20 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         training = client.get_run(result["train_run_id"])
         assert len(training.inputs.dataset_inputs) == 1
         assert training.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
+        provenance_path = client.download_artifacts(
+            result["train_run_id"], "provenance.json", str(tmp_path / result["train_run_id"])
+        )
+        provenance = json.loads(Path(provenance_path).read_text())
+        expected_training_configuration = {
+            "batch_size": 4,
+            "fold": 0,
+            "max_epochs": 3,
+            "optimizer_parameters": {"lr": 0.05},
+            "roles": {"train": "train", "validate": "test"},
+        }
+        for key, value in expected_training_configuration.items():
+            assert provenance["configuration"][key] == value
+        assert provenance["components"]["optimizer"] == "torch.optim:SGD"
 
         inference = client.get_run(result["inference_run_id"])
         assert inference.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
@@ -103,3 +126,16 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         first["model_uri"].removeprefix("models:/")
     ]
     assert evaluation.data.params["evaluation.metrics"] == '["rmse"]'
+
+    client.delete_run(first["split_run_id"])
+    with prefect_test_harness(), experiment("dsio-supervised-reference") as parent:
+        with pytest.raises(TrackingError, match="not reusable"):
+            infer(
+                store_path=first["store_path"],
+                sample_ids=first["test_sample_id"],
+                model_uri=first["model_uri"],
+                dataset_run_id=first["split_run_id"],
+                dataset_digest=first["dataset_digest"],
+                checkpoint_digest=first["checkpoint_digest"],
+                parent_run_id=parent.info.run_id,
+            )
