@@ -53,9 +53,9 @@ def build_data(workspace: str, parent_run_id: str, seed: int) -> dict[str, Any]:
 
 @task(persist_result=False)
 def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str, Any]:
-    store = SignalStore(data["store_path"])
-    examples = entity_examples(store)
     with attempt(parent_run_id) as child:
+        store = SignalStore(data["store_path"])
+        examples = entity_examples(store)
         identity = record_provenance(
             child.info.run_id,
             {

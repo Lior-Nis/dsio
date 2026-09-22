@@ -41,7 +41,7 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
     from prefect.testing.utilities import prefect_test_harness
     from reference_projects.supervised.components import build_synthetic_store
     from reference_projects.supervised.flow import reevaluate, supervised_flow
-    from reference_projects.supervised.tasks import infer
+    from reference_projects.supervised.tasks import infer, split_data
 
     observed_types: list[tuple[type[object], type[object]]] = []
     original_fit = Trainer.fit
@@ -113,6 +113,9 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         for key, value in expected_training_configuration.items():
             assert provenance["configuration"][key] == value
         assert provenance["components"]["optimizer"] == "torch.optim:SGD"
+        assert provenance["components"]["dataset_factory"] == (
+            "reference_projects.supervised.components:regression_samples"
+        )
 
         inference = client.get_run(result["inference_run_id"])
         assert inference.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
@@ -139,3 +142,20 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
                 checkpoint_digest=first["checkpoint_digest"],
                 parent_run_id=parent.info.run_id,
             )
+
+    with prefect_test_harness(), experiment("dsio-supervised-reference") as parent:
+        invalid_parent_run_id = parent.info.run_id
+        experiment_id = parent.info.experiment_id
+        with pytest.raises(Exception, match="no store"):
+            split_data(
+                {"store_path": str(tmp_path / "missing-store")},
+                invalid_parent_run_id,
+                19,
+            )
+    failed_children = [
+        run
+        for run in client.search_runs([experiment_id])
+        if run.data.tags.get("mlflow.parentRunId") == invalid_parent_run_id
+    ]
+    assert len(failed_children) == 1
+    assert failed_children[0].info.status == "FAILED"

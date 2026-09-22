@@ -34,6 +34,7 @@ from reference_projects.supervised.components import (
 _COMPONENTS = {
     "module": "dsio.model.module:DsioModule",
     "data_module": "dsio.data.loading.module:DsioDataModule",
+    "dataset_factory": "reference_projects.supervised.components:regression_samples",
     "model": "reference_projects.supervised.components:TinyRegressor",
     "objective": "reference_projects.supervised.components:RegressionObjective",
     "optimizer": "torch.optim:SGD",
@@ -55,9 +56,9 @@ def train_model(
     parent_run_id: str,
     seed: int,
 ) -> dict[str, Any]:
-    store = SignalStore(data["store_path"])
-    examples = entity_examples(store)
     with attempt(parent_run_id) as child:
+        store = SignalStore(data["store_path"])
+        examples = entity_examples(store)
         identity = record_provenance(
             child.info.run_id,
             {
@@ -136,9 +137,9 @@ def export_model(
     training: dict[str, Any],
     parent_run_id: str,
 ) -> dict[str, Any]:
-    inputs, _ = evaluation_arrays(data["store_path"], split["assignments"]["test"])
-    reference = ArtifactRef.model_validate(training["checkpoint"])
     with attempt(parent_run_id) as child:
+        inputs, _ = evaluation_arrays(data["store_path"], split["assignments"]["test"])
+        reference = ArtifactRef.model_validate(training["checkpoint"])
         identity = record_provenance(
             child.info.run_id,
             {

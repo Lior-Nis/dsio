@@ -69,6 +69,7 @@ Codex (GPT-5)
 - The full supervised flow records parent/child run lineage, split reuse, checkpoint-backed export, native evaluation/inference inputs, and output artifacts.
 - The deterministic test executes two complete flows and a changed-metric evaluation-only flow while forbidding retraining.
 - Exact-argument replay now uses isolated physical stores while preserving stable logical identities; downstream work fails closed for swapped stores, deleted Runs, or mismatched model/checkpoint evidence.
+- Every Prefect task opens its MLflow attempt before fallible input loading, and training identity includes the dataset factory plus all declared trainer inputs.
 - The built-distribution test copies the consumer project into an isolated environment and runs it against the installed wheel.
 - Split the example tasks by data, training, and downstream responsibility once the initial module exceeded the agreed size boundary.
 
