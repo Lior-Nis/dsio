@@ -353,14 +353,19 @@ print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.j
     reference_probe = """
 from prefect.testing.utilities import prefect_test_harness
 from mlflow import MlflowClient
+from reference_projects.self_supervised.flow import self_supervised_flow
 from reference_projects.supervised.flow import supervised_flow
 
 with prefect_test_harness():
-    result = supervised_flow('reference-workspace', seed=19)
+    supervised = supervised_flow('reference-workspace', seed=19)
+    ssl = self_supervised_flow('reference-workspace', seed=23)
 client = MlflowClient()
-print('REFERENCE_PARENT_STATUS=' + client.get_run(result['parent_run_id']).info.status)
-print('REFERENCE_TRAIN_STATUS=' + client.get_run(result['train_run_id']).info.status)
-print('REFERENCE_PREDICTIONS=' + str(len(result['prediction'])))
+print('REFERENCE_PARENT_STATUS=' + client.get_run(supervised['parent_run_id']).info.status)
+print('REFERENCE_TRAIN_STATUS=' + client.get_run(supervised['train_run_id']).info.status)
+print('REFERENCE_PREDICTIONS=' + str(len(supervised['prediction'])))
+print('SSL_PARENT_STATUS=' + client.get_run(ssl['parent_run_id']).info.status)
+print('SSL_TRAIN_STATUS=' + client.get_run(ssl['train_run_id']).info.status)
+print('SSL_PREDICTIONS=' + str(len(ssl['prediction'])))
 """
     reference_result = subprocess.run(
         [str(python), "-B", "-c", reference_probe],
@@ -373,3 +378,6 @@ print('REFERENCE_PREDICTIONS=' + str(len(result['prediction'])))
     assert "REFERENCE_PARENT_STATUS=FINISHED" in reference_result.stdout
     assert "REFERENCE_TRAIN_STATUS=FINISHED" in reference_result.stdout
     assert "REFERENCE_PREDICTIONS=2" in reference_result.stdout
+    assert "SSL_PARENT_STATUS=FINISHED" in reference_result.stdout
+    assert "SSL_TRAIN_STATUS=FINISHED" in reference_result.stdout
+    assert "SSL_PREDICTIONS=2" in reference_result.stdout

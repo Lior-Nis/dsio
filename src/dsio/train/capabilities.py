@@ -154,6 +154,20 @@ def check_training_capabilities(
 
     if errors:
         raise CapabilityError(_message(errors))
+    return resolve_training_capabilities(trainer, requested=requested)
+
+
+def resolve_training_capabilities(
+    trainer: Trainer,
+    *,
+    requested: TrainerConfig,
+) -> dict[str, str]:
+    """Describe Lightning's resolved execution path within the stable matrix."""
+    device = trainer.strategy.root_device
+    precision = str(trainer.precision)
+    errors = _matrix_errors(device, trainer.num_devices, precision)
+    if errors:
+        raise CapabilityError(_message(errors))
     return _evidence(trainer, requested, device, precision)
 
 
@@ -236,4 +250,5 @@ __all__ = [
     "check_training_capabilities",
     "log_capabilities",
     "representative_batch",
+    "resolve_training_capabilities",
 ]

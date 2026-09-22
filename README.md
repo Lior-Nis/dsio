@@ -110,6 +110,15 @@ dataset evidence without retraining. Run its deterministic local proof with:
 uv run pytest -q tests/reference_flows/test_supervised_flow.py
 ```
 
+The [self-supervised reference project](reference_projects/self_supervised/flow.py) reuses
+those same data, split, evaluation, and inference tasks. Its only variation is a named
+embedding model, contrastive objective, two-view training augmentation, and export
+normalizer—all injected into the same exact `DsioModule` and `DsioDataModule` classes:
+
+```bash
+uv run pytest -q tests/reference_flows/test_self_supervised_flow.py
+```
+
 ## Shape
 
 A single versioned Python distribution rooted at one package:
