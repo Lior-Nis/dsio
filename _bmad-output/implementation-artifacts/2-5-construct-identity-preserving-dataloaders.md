@@ -88,6 +88,7 @@ Codex (GPT-5)
 - 2026-09-22: Independent review exposed a topology-blind corpus digest, cross-epoch worker-count shuffle drift, unchecked batch cardinality/containers, `IterableDataset` admission, and lax runtime option validation; each was reproduced and fixed.
 - 2026-09-22: Clarified the only unprovable boundary: a governed custom collator is trusted executable code for the semantics of same-shaped transformed values, while DSIO proves identity order, cardinality, container safety, and CPU placement.
 - 2026-09-22: Re-review tightened the batch-tree grammar: sample-major ragged and zero-width native sequences remain valid, while unbatched scalars, opaque leaves, object arrays, and accelerator tensors fail closed.
+- 2026-09-22: Acceptance re-review closed the final cardinality edge by rejecting zero-dimensional batch tensors and arrays while retaining valid `(batch_size, 0)` fields.
 
 ### Completion Notes List
 

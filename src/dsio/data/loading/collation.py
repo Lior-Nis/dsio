@@ -163,7 +163,9 @@ def _require_cardinality(
     path: str,
     batch_size: int,
 ) -> None:
-    if dimensions and size != batch_size:
+    if not dimensions:
+        raise LoadingError(f"collated field {path} is an unbatched scalar")
+    if size != batch_size:
         raise LoadingError(
             f"collated field {path} has {size} rows for {batch_size} sample_id values"
         )

@@ -206,6 +206,32 @@ def test_collation_requires_batch_field_cardinality_to_match_identity() -> None:
         )
 
 
+@pytest.mark.parametrize("scalar", [torch.tensor(1.0), np.asarray(1.0)])
+def test_collation_rejects_tensor_fields_without_a_batch_axis(scalar: object) -> None:
+    items = [
+        {"sample_id": "left", "x": np.array([1.0])},
+        {"sample_id": "right", "x": np.array([2.0])},
+    ]
+
+    with pytest.raises(LoadingError, match="unbatched scalar"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["left", "right"],
+                "x": scalar,
+            },
+        )
+
+
+def test_collation_accepts_a_zero_width_batched_tensor() -> None:
+    items = [
+        {"sample_id": "left", "x": np.empty(0)},
+        {"sample_id": "right", "x": np.empty(0)},
+    ]
+
+    assert collate_items(items)["x"].shape == (2, 0)
+
+
 def test_collation_accepts_a_sample_major_ragged_tensor_batch() -> None:
     items = [
         {"sample_id": "left", "x": np.array([1.0])},
