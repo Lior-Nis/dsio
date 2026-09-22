@@ -4,7 +4,7 @@ baseline_commit: 52e9ad1
 
 # Story 4.3: Predict from an Immutable Model URI
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -21,19 +21,19 @@ so that I can obtain validated predictions without knowing the model's training 
 
 ## Tasks / Subtasks
 
-- [ ] Add one loading-and-prediction seam under `dsio.inference` (AC: 1-4)
-  - [ ] Accept only an immutable MLflow Logged Model URI, native signature-compatible inputs, and an explicit supported device.
-  - [ ] Load through MLflow PyFunc so callers do not know the training implementation.
-  - [ ] Return the model's native prediction mapping without a DSIO result class.
-- [ ] Enforce the logged contract without coercion (AC: 2-3)
-  - [ ] Validate exact declared input names, tensor dtypes, ranks, and fixed dimensions before inference.
-  - [ ] Validate exact declared output fields and tensor contracts after inference.
-  - [ ] Require output sample identities to match input order exactly.
-- [ ] Fail at explicit evidence and execution boundaries (AC: 3)
-  - [ ] Reject mutable Registry aliases/versions, Run artifact URIs, local paths, and malformed or missing Logged Model references.
-  - [ ] Reject unsupported device requests rather than remapping silently.
-  - [ ] Translate MLflow load, schema, and inference failures into one actionable inference boundary error while preserving the cause.
-- [ ] Prove immutable loading, packaged preprocessing/validation, exact schema and identity, failure boundaries, and absence of lifecycle policy through focused and release tests (AC: 1-4)
+- [x] Add one loading-and-prediction seam under `dsio.inference` (AC: 1-4)
+  - [x] Accept only an immutable MLflow Logged Model URI, native signature-compatible inputs, and an explicit supported device.
+  - [x] Load through MLflow PyFunc so callers do not know the training implementation.
+  - [x] Return the model's native prediction mapping without a DSIO result class.
+- [x] Enforce the logged contract without coercion (AC: 2-3)
+  - [x] Validate exact declared input names, tensor dtypes, ranks, and fixed dimensions before inference.
+  - [x] Validate exact declared output fields and tensor contracts after inference.
+  - [x] Require output sample identities to match input order exactly.
+- [x] Fail at explicit evidence and execution boundaries (AC: 3)
+  - [x] Reject mutable Registry aliases/versions, Run artifact URIs, local paths, and malformed or missing Logged Model references.
+  - [x] Reject unsupported device requests rather than remapping silently.
+  - [x] Translate MLflow load, schema, and inference failures into one actionable inference boundary error while preserving the cause.
+- [x] Prove immutable loading, packaged preprocessing/validation, exact schema and identity, failure boundaries, and absence of lifecycle policy through focused and release tests (AC: 1-4)
 
 ## Dev Notes
 
@@ -65,14 +65,25 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 4.2 at `52e9ad1`; selected one native PyFunc loading seam with exact signature checks over any DSIO loading hierarchy.
+- 2026-09-22: Implemented immutable Logged Model resolution, native PyFunc loading, exact input/output tensor-signature validation, packaged semantic validation, and identity-order checks.
+- 2026-09-22: Adversarial review closed broad deserialization translation, non-mapping inputs, evidence mutation during load/inference, duplicate/malformed tensor names, and invalid identity schemas.
+- 2026-09-22: Exact candidate `09f1836` passed 24 focused tests, 934 core tests, 8 built-distribution/consumer tests, package build, Ruff, mypy, import contracts, and three independent final reviews.
 
 ### Completion Notes List
+
+- `predict` accepts only immutable MLflow 3 Logged Model URIs for DSIO PyFunc exports and returns the native array mapping.
+- The boundary rejects implicit dtype, shape, field, device, and identity coercion while delegating preprocessing and semantic validation to the packaged Predictor.
+- Model readiness and export identity are refreshed after loading and again before results are returned; no scheduler, cache, server, or deployment policy was introduced.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/4-3-predict-from-an-immutable-model-uri.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/dsio/inference/__init__.py`
+- `src/dsio/inference/loading.py`
+- `tests/inference/test_loading.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 4.3 and started implementation.
+- 2026-09-22: Completed immutable MLflow inference and closed the independent acceptance, blind, and edge-case review gates.
