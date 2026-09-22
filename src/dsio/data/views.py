@@ -155,8 +155,9 @@ class WindowIndex:
         self.metrics = dict(metrics or {})
         if raw_starts.ndim != 1 or raw_starts.dtype.kind not in "iu":
             raise ViewError("starts must be a one-dimensional integer array")
-        if np.any(raw_starts < 0) or np.any(raw_starts > np.iinfo(np.int64).max):
-            raise ViewError("starts must be non-negative int64 values")
+        max_start = np.iinfo(np.int64).max - (spec.length - 1)
+        if max_start < 0 or np.any(raw_starts < 0) or np.any(raw_starts > max_start):
+            raise ViewError("window coordinates must fit in non-negative int64 values")
         if raw_entity_codes.ndim != 1 or raw_entity_codes.dtype.kind not in "iu":
             raise ViewError("entity_codes must be a one-dimensional integer array")
         if raw_starts.size != raw_entity_codes.size:

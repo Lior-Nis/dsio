@@ -244,7 +244,32 @@ def test_prediction_rows_must_match_sample_identity(row: object) -> None:
 def test_prediction_rows_must_be_integral(row: torch.Tensor) -> None:
     module = DsioModule(model=nn.Identity(), objective=ClassificationObjective())
 
-    with pytest.raises(ModuleError, match="row must contain integers"):
+    with pytest.raises(ModuleError, match="row must be a dense integer tensor"):
+        module.predict_step(
+            {
+                "sample_id": ["left", "right"],
+                "x": torch.ones(2, 1),
+                "row": row,
+            },
+            0,
+        )
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        torch.quantize_per_tensor(torch.tensor([0.0, 1.0]), 1.0, 0, torch.qint8),
+        torch.sparse_coo_tensor(
+            torch.tensor([[0, 1]]),
+            torch.tensor([0, 1]),
+            size=(2,),
+        ),
+    ],
+)
+def test_prediction_rows_must_be_dense_ordinary_integers(row: torch.Tensor) -> None:
+    module = DsioModule(model=nn.Identity(), objective=ClassificationObjective())
+
+    with pytest.raises(ModuleError, match="row must be a dense integer tensor"):
         module.predict_step(
             {
                 "sample_id": ["left", "right"],

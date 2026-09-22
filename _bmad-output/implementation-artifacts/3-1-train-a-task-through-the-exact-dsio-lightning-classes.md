@@ -75,6 +75,7 @@ Codex (GPT-5)
 - 2026-09-22: Edge re-review added fail-closed validation for optional prediction rows, malformed window entity codes, and oversized numeric hyperparameters.
 - 2026-09-22: Final edge pass moved entity-code validation before narrowing conversion and required legacy prediction rows to be a flat vector.
 - 2026-09-22: Exact-SHA edge review closed the same narrowing gap for window starts and rejected non-integral prediction row coordinates.
+- 2026-09-22: Final coordinate audit bounded complete windows to int64 and restricted legacy rows to dense ordinary integer tensors.
 
 ### Completion Notes List
 

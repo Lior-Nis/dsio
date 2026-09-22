@@ -132,13 +132,39 @@ def test_window_index_rejects_invalid_entity_codes(entity_codes: np.ndarray) -> 
     ],
 )
 def test_window_index_rejects_invalid_starts(starts: np.ndarray) -> None:
-    with pytest.raises(ViewError, match="starts must be"):
+    with pytest.raises(ViewError, match="window coordinates must fit|starts must be"):
         WindowIndex(
             starts=starts,
             entity_codes=np.array([0]),
             entity_names=["first"],
             entity_groups=["one"],
             spec=WindowSpec(length=4, stride=4),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
+def test_window_index_rejects_a_window_end_that_overflows_int64() -> None:
+    with pytest.raises(ViewError, match="window coordinates must fit"):
+        WindowIndex(
+            starts=np.array([np.iinfo(np.int64).max]),
+            entity_codes=np.array([0]),
+            entity_names=["first"],
+            entity_groups=["one"],
+            spec=WindowSpec(length=2, stride=1),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
+def test_window_index_rejects_an_unrepresentable_window_length() -> None:
+    with pytest.raises(ViewError, match="window coordinates must fit"):
+        WindowIndex(
+            starts=np.array([], dtype=np.int64),
+            entity_codes=np.array([], dtype=np.int32),
+            entity_names=[],
+            entity_groups=[],
+            spec=WindowSpec(length=np.iinfo(np.int64).max + 2, stride=1),
             store_name="store",
             store_digest="digest",
         )

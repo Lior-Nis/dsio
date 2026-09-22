@@ -17,6 +17,17 @@ Stage = Literal["train", "validate", "test"]
 type Batch = Mapping[str, Any]
 type ObjectiveResult = Mapping[str, Tensor]
 
+_INTEGER_ROW_DTYPES = {
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+}
+
 
 class Objective(Protocol):
     """One task step: execute a model on a batch and return loss plus metrics."""
@@ -144,8 +155,10 @@ class DsioModule(LightningModule):
                     f"prediction row must be one-dimensional with {len(sample_ids)} values; "
                     f"got shape {tuple(row.shape)} with leading size {size}"
                 )
-            if row.dtype == torch.bool or row.is_floating_point() or row.is_complex():
-                raise ModuleError(f"prediction row must contain integers, got {row.dtype}")
+            if row.layout != torch.strided or row.dtype not in _INTEGER_ROW_DTYPES:
+                raise ModuleError(
+                    f"prediction row must be a dense integer tensor, got {row.layout} {row.dtype}"
+                )
             result["row"] = row
         return result
 
