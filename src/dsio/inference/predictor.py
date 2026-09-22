@@ -99,7 +99,7 @@ class Predictor(nn.Module):
     def forward(self, batch: Mapping[str, Any]) -> Prediction:
         sample_ids, x = _inputs(batch)
         try:
-            prepared = self.preprocessor(x)
+            prepared = self.preprocessor(x.clone())
         except Exception as error:
             raise PredictorError(
                 f"preprocessor {_name(self.preprocessor)} failed: {error}"
@@ -114,7 +114,7 @@ class Predictor(nn.Module):
             raise PredictorError(f"normalizer {_name(self.normalizer)} failed: {error}") from error
         result = _prediction(sample_ids, normalized)
         try:
-            returned = self.validator(result)
+            returned = self.validator(copy.deepcopy(result))
         except Exception as error:
             raise PredictorError(f"validator {_name(self.validator)} failed: {error}") from error
         if returned is not None:
@@ -129,6 +129,7 @@ def build_predictor(
     preprocessor: nn.Module | None,
     normalizer: nn.Module,
     validator: Validator,
+    input_example: Mapping[str, Any],
     tracking_uri: str | None = None,
 ) -> Predictor:
     """Build a serializable inference module from a successful Lightning checkpoint."""
@@ -148,14 +149,10 @@ def build_predictor(
     except ArtifactIntegrityError as error:
         raise PredictorError(f"checkpoint evidence is invalid: {error}") from error
     state = _model_state(payload)
-    try:
-        cloned_model, cloned_preprocessor, cloned_normalizer = copy.deepcopy(
-            (model, prepared, normalizer)
-        )
-    except Exception as error:
-        raise PredictorError(
-            f"predictor components cannot be isolated or serialized: {error}"
-        ) from error
+    cloned_model = _clone_component(model, "model")
+    cloned_preprocessor = _clone_component(prepared, "preprocessor")
+    cloned_normalizer = _clone_component(normalizer, "normalizer")
+    cloned_validator = _clone_component(validator, "validator")
     try:
         cloned_model.load_state_dict(state, strict=True)
     except (RuntimeError, TypeError, ValueError) as error:
@@ -164,18 +161,22 @@ def build_predictor(
         model=cloned_model,
         preprocessor=cloned_preprocessor,
         normalizer=cloned_normalizer,
-        validator=validator,
+        validator=cloned_validator,
         checkpoint_uri=checkpoint.uri,
         checkpoint_digest=checkpoint.digest,
     )
     try:
+        predictor(input_example)
         torch.save(predictor, io.BytesIO())
+    except PredictorError as error:
+        raise PredictorError(f"predictor components are incompatible: {error}") from error
     except Exception as error:
         raise PredictorError(f"predictor is not serializable: {error}") from error
+    _require_successful_run(checkpoint, uri)
     return predictor
 
 
-def _model_state(payload: bytes) -> dict[str, Tensor]:
+def _model_state(payload: bytes) -> dict[str, Any]:
     try:
         checkpoint = torch.load(io.BytesIO(payload), map_location="cpu", weights_only=True)
     except Exception as error:
@@ -188,7 +189,7 @@ def _model_state(payload: bytes) -> dict[str, Tensor]:
     model_state = {
         key.removeprefix("model."): value
         for key, value in state.items()
-        if isinstance(key, str) and key.startswith("model.") and isinstance(value, Tensor)
+        if isinstance(key, str) and key.startswith("model.")
     }
     if not model_state:
         raise PredictorError("Lightning checkpoint contains no model state")
@@ -202,6 +203,11 @@ def _require_successful_run(checkpoint: ArtifactRef, tracking_uri: str) -> None:
         raise PredictorError(
             f"checkpoint source Run {checkpoint.run_id!r} cannot be loaded: {error}"
         ) from error
+    if run.info.lifecycle_stage != "active":
+        raise PredictorError(
+            f"checkpoint source Run is {run.info.lifecycle_stage}; predictor evidence "
+            "requires an active Run"
+        )
     if run.info.status != "FINISHED":
         raise PredictorError(
             f"checkpoint source Run is {run.info.status}; predictor evidence requires FINISHED"
@@ -270,6 +276,15 @@ def _require_importable(value: object, role: str) -> None:
         require_importable_component(value, role)
     except ComponentError as error:
         raise PredictorError(f"{role} must be importable: {error}") from None
+
+
+def _clone_component[T](value: T, role: str) -> T:
+    try:
+        cloned = copy.deepcopy(value)
+        torch.save(cloned, io.BytesIO())
+    except Exception as error:
+        raise PredictorError(f"{role} cannot be isolated or serialized: {error}") from error
+    return cloned
 
 
 def _name(value: object) -> str:

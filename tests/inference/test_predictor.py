@@ -44,6 +44,32 @@ class IdentityStealingNormalizer(nn.Module):
         return {"sample_id": ["fake"], "prediction": value}
 
 
+class StatefulLinear(nn.Linear):
+    def __init__(self) -> None:
+        super().__init__(2, 1)
+        self.label = "original"
+
+    def get_extra_state(self) -> dict[str, str]:
+        return {"label": self.label}
+
+    def set_extra_state(self, state: dict[str, str]) -> None:
+        self.label = state["label"]
+
+
+class ThresholdValidator:
+    def __init__(self, maximum: float) -> None:
+        self.maximum = maximum
+
+    def __call__(self, output: Mapping[str, Any]) -> None:
+        prediction = output["prediction"]
+        if not isinstance(prediction, Tensor) or prediction.max().item() > self.maximum:
+            raise ValueError("prediction exceeds maximum")
+
+
+def corrupting_validator(output: Mapping[str, Any]) -> None:
+    output["sample_id"].clear()
+
+
 class EmptyObjective(nn.Module):
     def forward(
         self, model: nn.Module, batch: Mapping[str, Any], stage: str
@@ -91,6 +117,7 @@ def _build(ref: ArtifactRef, **overrides: Any) -> Predictor:
         "preprocessor": AddOne(),
         "normalizer": TensorOutput(),
         "validator": validate_tensor_prediction,
+        "input_example": {"sample_id": ["example"], "x": torch.ones(1, 2)},
     }
     values.update(overrides)
     return build_predictor(ref, **values)
@@ -121,18 +148,22 @@ def test_predictor_applies_the_declared_order_and_preserves_identity(tmp_path: P
 def test_semantically_invalid_output_fails_inside_the_predictor(tmp_path: Path) -> None:
     ref = _checkpoint(tmp_path)
     predictor = _build(ref)
+    assert isinstance(predictor.model, nn.Linear)
     with torch.no_grad():
-        predictor.model.weight.fill_(float("nan"))  # type: ignore[union-attr]
+        predictor.model.weight.fill_(float("nan"))
 
     with pytest.raises(PredictorError, match="prediction.*finite"):
         predictor({"sample_id": ["a"], "x": torch.ones(1, 2)})
 
 
 def test_normalizer_cannot_replace_source_identity(tmp_path: Path) -> None:
-    predictor = _build(_checkpoint(tmp_path), normalizer=IdentityStealingNormalizer())
-
     with pytest.raises(PredictorError, match="normalizer cannot replace.*sample_id"):
-        predictor({"sample_id": ["real"], "x": torch.ones(1, 2)})
+        _build(_checkpoint(tmp_path), normalizer=IdentityStealingNormalizer())
+
+
+def test_incompatible_components_fail_during_construction(tmp_path: Path) -> None:
+    with pytest.raises(PredictorError, match="normalizer must return a mapping"):
+        _build(_checkpoint(tmp_path), normalizer=nn.Identity())
 
 
 def test_non_importable_validator_fails_during_construction(tmp_path: Path) -> None:
@@ -141,7 +172,7 @@ def test_non_importable_validator_fails_during_construction(tmp_path: Path) -> N
 
 
 def test_non_serializable_component_fails_during_construction(tmp_path: Path) -> None:
-    with pytest.raises(PredictorError, match="serializ"):
+    with pytest.raises(PredictorError, match="preprocessor.*serializ"):
         _build(_checkpoint(tmp_path), preprocessor=NonSerializablePreprocessor())
 
 
@@ -150,9 +181,62 @@ def test_checkpoint_must_belong_to_a_successful_run(tmp_path: Path) -> None:
         _build(_checkpoint(tmp_path, status="RUNNING"))
 
 
+def test_checkpoint_must_belong_to_an_active_run(tmp_path: Path) -> None:
+    ref = _checkpoint(tmp_path)
+    MlflowClient(resolve_tracking_uri()).delete_run(ref.run_id)
+
+    with pytest.raises(PredictorError, match="deleted.*active"):
+        _build(ref)
+
+
+def test_checkpoint_run_is_rechecked_after_artifact_loading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ref = _checkpoint(tmp_path)
+
+    def load_then_delete(
+        checkpoint: ArtifactRef, *, tracking_uri: str | None = None
+    ) -> bytes:
+        payload = load_artifact(checkpoint, tracking_uri=tracking_uri)
+        MlflowClient(resolve_tracking_uri(tracking_uri)).delete_run(checkpoint.run_id)
+        return payload
+
+    monkeypatch.setattr("dsio.inference.predictor.load_artifact", load_then_delete)
+
+    with pytest.raises(PredictorError, match="deleted.*active"):
+        _build(ref)
+
+
 def test_checkpoint_state_must_match_the_inference_model_strictly(tmp_path: Path) -> None:
     with pytest.raises(PredictorError, match="checkpoint model state"):
         _build(_checkpoint(tmp_path), model=nn.Linear(3, 1))
+
+
+def test_checkpoint_preserves_native_pytorch_extra_state(tmp_path: Path) -> None:
+    source = StatefulLinear()
+    source.label = "from-checkpoint"
+
+    predictor = _build(_checkpoint(tmp_path, model=source), model=StatefulLinear())
+
+    assert isinstance(predictor.model, StatefulLinear)
+    assert predictor.model.label == "from-checkpoint"
+
+
+def test_malformed_model_state_is_not_silently_discarded(tmp_path: Path) -> None:
+    payload = io.BytesIO()
+    source = _linear()
+    state: dict[str, Any] = {
+        f"model.{name}": value for name, value in source.state_dict().items()
+    }
+    state["model.corrupt"] = 1
+    torch.save({"state_dict": state}, payload)
+    client = MlflowClient(resolve_tracking_uri())
+    run_id = client.create_run(client.create_experiment("malformed-state")).info.run_id
+    malformed_ref = save_artifact(payload.getvalue(), run_id=run_id, name="checkpoint")
+    client.set_terminated(run_id, "FINISHED")
+
+    with pytest.raises(PredictorError, match="Unexpected key.*corrupt"):
+        _build(malformed_ref)
 
 
 def test_a_training_module_cannot_be_packaged_as_a_predictor(tmp_path: Path) -> None:
@@ -160,6 +244,35 @@ def test_a_training_module_cannot_be_packaged_as_a_predictor(tmp_path: Path) -> 
 
     with pytest.raises(PredictorError, match="DsioModule.*model only"):
         _build(_checkpoint(tmp_path), model=training)
+
+
+def test_predictor_does_not_share_a_mutable_validator_with_its_caller(tmp_path: Path) -> None:
+    validator = ThresholdValidator(100.0)
+    predictor = _build(_checkpoint(tmp_path), validator=validator)
+    validator.maximum = 0.0
+
+    result = predictor({"sample_id": ["a"], "x": torch.ones(1, 2)})
+
+    assert result["sample_id"] == ["a"]
+
+
+def test_validator_cannot_mutate_the_returned_prediction(tmp_path: Path) -> None:
+    predictor = _build(_checkpoint(tmp_path), validator=corrupting_validator)
+
+    result = predictor({"sample_id": ["real"], "x": torch.ones(1, 2)})
+
+    assert result["sample_id"] == ["real"]
+
+
+def test_in_place_preprocessing_does_not_mutate_caller_input(tmp_path: Path) -> None:
+    x = torch.tensor([[-1.0, 2.0]])
+    batch = {"sample_id": ["a"], "x": x}
+    original = x.clone()
+    predictor = _build(_checkpoint(tmp_path), preprocessor=nn.ReLU(inplace=True))
+
+    predictor(batch)
+
+    torch.testing.assert_close(batch["x"], original)
 
 
 def test_checkpoint_and_predictor_remain_distinct_artifacts(tmp_path: Path) -> None:
