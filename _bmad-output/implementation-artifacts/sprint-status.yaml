@@ -35,7 +35,7 @@
 # - Re-run sprint planning to refresh statuses without downgrading existing progress.
 
 generated: "2026-09-21T18:15:08+03:00"
-last_updated: "2026-09-22T08:19:12+03:00"
+last_updated: "2026-09-22T08:28:13+03:00"
 project: DSio
 project_key: NOKEY
 tracking_system: file-system
@@ -66,8 +66,8 @@ development_status:
   3-4-reject-unsupported-training-configurations-before-execution: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-build-a-self-contained-predictor-from-training-evidence: backlog
+  epic-4: in-progress
+  4-1-build-a-self-contained-predictor-from-training-evidence: in-progress
   4-2-log-a-signed-mlflow-model-with-explicit-export-forms: backlog
   4-3-predict-from-an-immutable-model-uri: backlog
   4-4-evaluate-immutable-evidence-in-a-prefect-task: backlog
