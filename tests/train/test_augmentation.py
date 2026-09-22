@@ -176,6 +176,13 @@ def test_two_view_rejects_ambiguous_view_identity() -> None:
         TwoView(Jitter(), views=("same", "same"))
 
 
+def test_two_view_normalizes_config_sequences_to_its_tuple_contract() -> None:
+    augmentation = TwoView(Jitter(), views=["online", "target"])
+
+    assert augmentation.views == ("online", "target")
+    assert isinstance(augmentation.views, tuple)
+
+
 @pytest.mark.parametrize("views", [(1, 2), ([], [])])
 def test_two_view_rejects_non_string_view_identity(views: Any) -> None:
     with pytest.raises(AugmentationError, match="distinct non-empty strings"):

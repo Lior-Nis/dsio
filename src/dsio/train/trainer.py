@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from dsio.contracts import DsioModel
 
@@ -29,6 +29,22 @@ class TrainerConfig(DsioModel):
     log_every_n_steps: int = Field(default=10, ge=1)
     enable_progress_bar: bool = False
     deterministic: bool = True
+    limit_val_batches: int | float | None = None
+
+    @field_validator("limit_val_batches", mode="before")
+    @classmethod
+    def validate_limit_val_batches(cls, value: object) -> object:
+        if value is None:
+            return value
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError("limit_val_batches must be a non-negative int or float in [0, 1]")
+        if isinstance(value, int):
+            if value < 0:
+                raise ValueError("integer limit_val_batches must be non-negative")
+            return value
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("float limit_val_batches must be in [0, 1]")
+        return value
 
 
 def sanitise_metric(name: str) -> str:
@@ -121,6 +137,7 @@ def build_trainer(
         # and a hard failure would make whole model families unrunnable. The warning is
         # the signal that this run's numbers will not reproduce bit-for-bit.
         deterministic="warn" if config.deterministic else False,
+        limit_val_batches=config.limit_val_batches,
         default_root_dir=directory,
         logger=logger,
         # Without this, Lightning installs its own default ModelCheckpoint regardless of

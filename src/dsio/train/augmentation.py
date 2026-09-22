@@ -77,7 +77,7 @@ class TwoView(nn.Module):
         self,
         augmentor: nn.Module,
         *,
-        views: tuple[str, str] = ("view-0", "view-1"),
+        views: Sequence[str] = ("view-0", "view-1"),
     ) -> None:
         super().__init__()
         if not isinstance(augmentor, nn.Module):
@@ -89,7 +89,7 @@ class TwoView(nn.Module):
         ):
             raise AugmentationError("two-view identities must be distinct non-empty strings")
         self.augmentor = augmentor
-        self.views = views
+        self.views = (views[0], views[1])
 
     def forward(
         self,

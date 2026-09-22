@@ -18,6 +18,111 @@ from dsio.model.module import DsioModule
 from dsio.train.augmentation import TwoView
 
 
+def test_time_major_preprocessor_preserves_values_and_input(reference_services: None) -> None:
+    del reference_services
+    from reference_projects.self_supervised.components import TimeMajorToChannelFirst
+
+    source = torch.tensor(
+        [
+            [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]],
+            [[4.0, 40.0], [5.0, 50.0], [6.0, 60.0]],
+        ]
+    )
+    original = source.clone()
+
+    prepared = TimeMajorToChannelFirst(channels=2, time=3)(source)
+
+    assert prepared.shape == (2, 2, 3)
+    assert prepared.is_contiguous()
+    torch.testing.assert_close(
+        prepared,
+        torch.tensor(
+            [
+                [[1.0, 2.0, 3.0], [10.0, 20.0, 30.0]],
+                [[4.0, 5.0, 6.0], [40.0, 50.0, 60.0]],
+            ]
+        ),
+    )
+    torch.testing.assert_close(source, original)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (torch.ones(3, 2), r"\[batch, time, channels\]"),
+        (torch.ones(1, 4, 2), "time extent 3"),
+        (torch.ones(1, 3, 1), "channel extent 2"),
+    ],
+)
+def test_time_major_preprocessor_rejects_wrong_external_shape(
+    value: torch.Tensor,
+    message: str,
+    reference_services: None,
+) -> None:
+    del reference_services
+    from reference_projects.self_supervised.components import TimeMajorToChannelFirst
+
+    with pytest.raises(ValueError, match=message):
+        TimeMajorToChannelFirst(channels=2, time=3)(value)
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"channels": True, "time": 3},
+        {"channels": 1.5, "time": 3},
+        {"channels": 0, "time": 3},
+        {"channels": 2, "time": False},
+        {"channels": 2, "time": -1},
+    ],
+)
+def test_time_major_preprocessor_requires_positive_integer_extents(
+    parameters: dict[str, Any],
+    reference_services: None,
+) -> None:
+    del reference_services
+    from reference_projects.self_supervised.components import TimeMajorToChannelFirst
+
+    with pytest.raises(ValueError, match="positive integer"):
+        TimeMajorToChannelFirst(**parameters)
+
+
+def test_predictor_preprocessing_matches_the_training_dataset_tensor(
+    tmp_path: Path,
+    reference_services: None,
+) -> None:
+    del reference_services
+    from reference_projects.self_supervised.components import (
+        TimeMajorToChannelFirst,
+        UnlabelledSamples,
+    )
+    from reference_projects.supervised.components import evaluation_arrays
+
+    from dsio.data.store import SignalStore
+
+    values = np.asarray(
+        [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]],
+        dtype=np.float32,
+    )
+    path = tmp_path / "layout-store"
+    with SignalStore.builder(path, channels=2, dtype="float32") as builder:
+        builder.add("sample", values, group="group", attrs={"target": 0.0})
+    store = SignalStore(path)
+    raw, _ = evaluation_arrays(str(path), ["sample"])
+
+    prepared = TimeMajorToChannelFirst(channels=2, time=3)(torch.from_numpy(raw["x"]))
+
+    torch.testing.assert_close(prepared[0], UnlabelledSamples(store, ["sample"])[0]["x"])
+
+
+def test_embedding_rejects_time_major_input(reference_services: None) -> None:
+    del reference_services
+    from reference_projects.self_supervised.components import TinyEmbedding
+
+    with pytest.raises(ValueError, match=r"\[batch, channels, time\].*\(batch, 1, 4\)"):
+        TinyEmbedding()(torch.ones(2, 4, 1))
+
+
 def test_self_supervised_reference_replays_accelerator_views_and_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -32,6 +137,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
     from reference_projects.self_supervised.flow import self_supervised_flow
 
     fits: list[tuple[type[object], type[object], object, object]] = []
+    runtime_configuration: list[dict[str, Any]] = []
     views: list[list[dict[str, Any]]] = []
     in_training_step = False
     original_fit = Trainer.fit
@@ -44,7 +150,17 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         *args: object,
         **kwargs: object,
     ) -> Any:
-        fits.append((type(module), type(kwargs.get("datamodule")), module.model, module.objective))
+        data_module = kwargs.get("datamodule")
+        fits.append((type(module), type(data_module), module.model, module.objective))
+        assert isinstance(data_module, DsioDataModule)
+        runtime_configuration.append(
+            {
+                "augmentation": module.augmentation_identity,
+                "drop_last": data_module.drop_last,
+                "limit_val_batches": trainer.limit_val_batches,
+                "shuffle": data_module.shuffle,
+            }
+        )
         views.append([])
         return original_fit(trainer, module, *args, **kwargs)
 
@@ -93,6 +209,33 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
     ]
     assert all(isinstance(model, TinyEmbedding) for _, _, model, _ in fits)
     assert all(isinstance(objective, ContrastiveObjective) for _, _, _, objective in fits)
+    assert runtime_configuration == [
+            {
+                "augmentation": {
+                    "augmentor": {
+                        "reference": "dsio.model.components:Jitter",
+                        "parameters": {"sigma": 0.1},
+                    },
+                    "wrapper": {
+                        "reference": "dsio.train.augmentation:TwoView",
+                        "parameters": {"views": ["online", "target"]},
+                    },
+                },
+            "drop_last": {
+                "train": True,
+                "validate": False,
+                "test": False,
+                "predict": False,
+            },
+            "limit_val_batches": 0,
+            "shuffle": {
+                "train": True,
+                "validate": False,
+                "test": False,
+                "predict": False,
+            },
+        }
+    ] * 2
     assert len(views[0]) == len(views[1]) > 0
     for left, right in zip(views[0], views[1], strict=True):
         assert left["device"] == right["device"]
@@ -106,6 +249,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         assert not torch.equal(left["x"][:midpoint], left["x"][midpoint:])
         assert torch.equal(left["x"], right["x"])
         assert torch.equal(left["y"], right["y"])
+        assert left["source_x"].shape[0] == 4
 
     assert first["identities"] == second["identities"]
     assert first["assignments"] == second["assignments"]
@@ -139,20 +283,64 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         assert provenance["components"]["objective"] == (
             "reference_projects.self_supervised.components:ContrastiveObjective"
         )
-        assert provenance["configuration"]["augmentation"]["views"] == [
-            "online",
-            "target",
+        assert provenance["configuration"]["augmentation"] == runtime_configuration[0][
+            "augmentation"
         ]
         assert provenance["configuration"]["augmentation_seed"] == 23
+        assert provenance["configuration"]["drop_last"] == runtime_configuration[0][
+            "drop_last"
+        ]
+        assert provenance["configuration"]["shuffle"] == runtime_configuration[0]["shuffle"]
+        assert provenance["configuration"]["trainer"] == {
+            "accelerator": "auto",
+            "accumulate_grad_batches": 1,
+            "checkpoint": False,
+            "deterministic": True,
+            "devices": 1,
+            "early_stopping_patience": None,
+            "enable_progress_bar": False,
+            "gradient_clip_val": None,
+            "limit_val_batches": 0,
+            "log_every_n_steps": 1,
+            "max_epochs": 3,
+            "monitor": "val/loss",
+            "monitor_mode": "min",
+            "precision": "32-true",
+        }
+        for removed in (
+            "accelerator",
+            "deterministic",
+            "devices",
+            "limit_val_batches",
+            "max_epochs",
+        ):
+            assert removed not in provenance["configuration"]
         execution = provenance["configuration"]["execution"]
         assert execution["requested_accelerator"] == "auto"
         assert execution["resolved_device"].split(":", maxsplit=1)[0] == views[0][0]["device"]
         assert execution["resolved_precision"] == "32-true"
+        assert execution["resolved_deterministic"] == "warn"
         assert execution["strategy"]
         assert execution["torch_version"] == torch.__version__
         assert training.data.params["execution.resolved_device"] == execution["resolved_device"]
         assert training.data.params["execution.torch_version"] == torch.__version__
         assert provenance["configuration"]["objective_parameters"] == {"temperature": 0.2}
+        export_provenance_path = client.download_artifacts(
+            result["export_run_id"],
+            "provenance.json",
+            str(tmp_path / result["export_run_id"]),
+        )
+        export_provenance = json.loads(Path(export_provenance_path).read_text())
+        assert export_provenance["configuration"]["split_digest"] == result["split_digest"]
+        assert export_provenance["components"]["preprocessor"] == (
+            "reference_projects.self_supervised.components:TimeMajorToChannelFirst"
+        )
+        assert export_provenance["configuration"]["preprocessor"] == {
+            "reference": (
+                "reference_projects.self_supervised.components:TimeMajorToChannelFirst"
+            ),
+            "parameters": {"channels": 1, "time": 4},
+        }
         evaluation = client.get_run(result["evaluation_run_id"])
         inference = client.get_run(result["inference_run_id"])
         model_id = result["model_uri"].removeprefix("models:/")

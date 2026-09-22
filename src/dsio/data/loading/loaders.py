@@ -22,6 +22,7 @@ def build_loader(
     *,
     batch_size: int = 32,
     shuffle: bool = False,
+    drop_last: bool = False,
     num_workers: int = 0,
     seed: int = 42,
     collate_fn: Collate | None = None,
@@ -30,6 +31,8 @@ def build_loader(
     validate_loader_options(batch_size=batch_size, num_workers=num_workers, seed=seed)
     if not isinstance(shuffle, bool):
         raise LoadingError(f"shuffle must be bool, got {type(shuffle).__name__}")
+    if not isinstance(drop_last, bool):
+        raise LoadingError(f"drop_last must be bool, got {type(drop_last).__name__}")
     if collate_fn is not None and not callable(collate_fn):
         raise LoadingError("collate_fn must be callable")
     collator = IdentityCollator(collate_fn)
@@ -50,7 +53,7 @@ def build_loader(
         shuffle=False,
         sampler=sampler,
         num_workers=num_workers,
-        drop_last=False,
+        drop_last=drop_last,
         collate_fn=collator,
         **kwargs,
     )

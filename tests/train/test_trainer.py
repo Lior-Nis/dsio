@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 lightning = pytest.importorskip("lightning")
 
@@ -81,6 +82,7 @@ def test_build_trainer_maps_every_runtime_setting(
         log_every_n_steps=13,
         enable_progress_bar=True,
         deterministic=deterministic,
+        limit_val_batches=0.25,
     )
     logger = object()
     callbacks = [object(), object()]
@@ -99,8 +101,29 @@ def test_build_trainer_maps_every_runtime_setting(
         "enable_progress_bar": True,
         "enable_model_summary": False,
         "deterministic": expected_deterministic,
+        "limit_val_batches": 0.25,
         "default_root_dir": tmp_path,
         "logger": logger,
         "enable_checkpointing": checkpoint,
         "callbacks": callbacks,
     }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_type"),
+    [(None, type(None)), (0, int), (3, int), (0.0, float), (0.25, float), (1.0, float)],
+)
+def test_limit_val_batches_preserves_native_value_type(
+    value: int | float | None,
+    expected_type: type[object],
+) -> None:
+    configured = TrainerConfig(limit_val_batches=value).limit_val_batches
+
+    assert configured == value
+    assert type(configured) is expected_type
+
+
+@pytest.mark.parametrize("value", [True, False, -1, -0.1, 1.1])
+def test_limit_val_batches_rejects_non_native_ranges(value: object) -> None:
+    with pytest.raises(ValidationError, match="limit_val_batches"):
+        TrainerConfig(limit_val_batches=value)  # type: ignore[arg-type]

@@ -229,6 +229,11 @@ def _evidence(
 ) -> dict[str, str]:
     cudnn = torch.backends.cudnn.version()
     device_name = torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu"
+    deterministic = "false"
+    if torch.are_deterministic_algorithms_enabled():
+        deterministic = (
+            "warn" if torch.is_deterministic_algorithms_warn_only_enabled() else "true"
+        )
     return {
         "requested_accelerator": requested.accelerator,
         "requested_devices": str(requested.devices),
@@ -236,6 +241,7 @@ def _evidence(
         "resolved_device": str(device),
         "resolved_devices": str(trainer.num_devices),
         "resolved_precision": precision,
+        "resolved_deterministic": deterministic,
         "strategy": type(trainer.strategy).__qualname__,
         "torch_version": torch.__version__,
         "cuda_version": str(torch.version.cuda),
