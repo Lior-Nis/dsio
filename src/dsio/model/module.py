@@ -165,7 +165,7 @@ class DsioModule(LightningModule):
         """Execute and log the one objective contract shared by every training stage."""
         sample_ids = _batch_ids(batch)
         result = self.objective(self.model, batch, stage)
-        values = _objective_values(result)
+        values = self.validate_objective_result(result)
         prefix = "val" if stage == "validate" else stage
         for name, value in values.items():
             log_name = f"{prefix}/{name}"
@@ -184,6 +184,10 @@ class DsioModule(LightningModule):
         loss = values["loss"]
         assert isinstance(loss, Tensor)
         return loss
+
+    def validate_objective_result(self, result: object) -> dict[str, ObjectiveValue]:
+        """Apply the same result contract used by every Lightning step."""
+        return _objective_values(result)
 
     def _metric_attribute(self, metric: Metric, log_name: str) -> str:
         attribute = next(
