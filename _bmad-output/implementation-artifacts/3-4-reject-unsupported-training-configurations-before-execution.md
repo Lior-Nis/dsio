@@ -4,7 +4,7 @@ baseline_commit: 9f5bd48
 
 # Story 3.4: Reject Unsupported Training Configurations Before Execution
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -21,18 +21,18 @@ so that an unsupported device, dtype, or operation cannot silently alter experim
 
 ## Tasks / Subtasks
 
-- [ ] Add one pre-fit capability probe shared by supervised and SSL training (AC: 1-2, 4)
-  - [ ] Use the already assembled `DsioModule` and a representative real batch rather than a component registry or declared capability model.
-  - [ ] Exercise model, objective, and training augmentation on Lightning's resolved root device and precision context.
-  - [ ] Preserve module state and report all independently detectable failures with component names.
-- [ ] Make the execution path explicit and fail closed (AC: 1-4)
-  - [ ] Let native Lightning resolve accelerator, devices, and precision once.
-  - [ ] Reject unsupported multi-device or device/precision paths without fallback.
-  - [ ] Keep the stable matrix deliberately small and point unverified combinations to experimental admission.
-- [ ] Record capability evidence through native MLflow (AC: 3)
-  - [ ] Log requested and resolved execution settings plus relevant runtime versions to the active MLflow Run.
-  - [ ] Do not introduce an execution-result or environment model parallel to MLflow and existing provenance.
-- [ ] Prove fail-fast behavior, no fallback, provenance, and existing training compatibility through tests and release gates (AC: 1-4)
+- [x] Add one pre-fit capability probe shared by supervised and SSL training (AC: 1-2, 4)
+  - [x] Use the already assembled `DsioModule` and a representative real batch rather than a component registry or declared capability model.
+  - [x] Exercise model, objective, and training augmentation on Lightning's resolved root device and precision context.
+  - [x] Preserve module state and report all independently detectable failures with component names.
+- [x] Make the execution path explicit and fail closed (AC: 1-4)
+  - [x] Let native Lightning resolve accelerator, devices, and precision once.
+  - [x] Reject unsupported multi-device or device/precision paths without fallback.
+  - [x] Keep the stable matrix deliberately small and point unverified combinations to experimental admission.
+- [x] Record capability evidence through native MLflow (AC: 3)
+  - [x] Log requested and resolved execution settings plus relevant runtime versions to the active MLflow Run.
+  - [x] Do not introduce an execution-result or environment model parallel to MLflow and existing provenance.
+- [x] Prove fail-fast behavior, no fallback, provenance, and existing training compatibility through tests and release gates (AC: 1-4)
 
 ## Dev Notes
 
@@ -71,14 +71,28 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 3.3 at `9f5bd48`; compared declarative per-component capability metadata with a probe of the real assembled chain and chose the latter to avoid an unverifiable parallel registry.
+- 2026-09-22: Exact candidate passed distribution/consumer contracts (8 tests), the remaining repository suite (861 tests; 3 live tests deselected), Ruff, mypy across 78 source files, and all three import contracts.
 
 ### Completion Notes List
+
+- Supervised and SSL runners now call one capability seam after native Trainer construction and before `fit()`.
+- Requested CUDA unavailability, multi-device execution, unsupported devices, and non-float32 precision fail closed without fallback and point to experimental admission.
+- The real assembled augmentation and model/objective boundary executes forward and backward on a representative batch using Lightning's resolved device and precision context.
+- Probe sampling and execution restore DataLoader order, RNG state, module modes, buffers, and gradients so validation does not alter training semantics.
+- Requested and resolved execution settings plus PyTorch, CUDA, cuDNN, strategy, and device identity are native MLflow parameters on the training Run.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/3-4-reject-unsupported-training-configurations-before-execution.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/dsio/train/capabilities.py`
+- `src/dsio/train/ssl_task.py`
+- `src/dsio/train/torch_task.py`
+- `tests/train/test_capabilities.py`
+- `tests/train/test_ssl_runner.py`
+- `tests/train/test_torch_runner.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 3.4 and started implementation.
+- 2026-09-22: Added the shared fail-closed capability proof and MLflow execution evidence; moved the story to review after the full release gate passed.
