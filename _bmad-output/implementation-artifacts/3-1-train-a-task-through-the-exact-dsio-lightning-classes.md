@@ -23,17 +23,17 @@ so that every project exercises one battle-tested training path.
 
 ## Tasks / Subtasks
 
-- [ ] Make `DsioModule` the generic Lightning composition root (AC: 1-3)
-  - [ ] Accept one `nn.Module` model and one objective callable.
-  - [ ] Validate the batch identity and flat objective-result contract at the narrowest boundary.
-  - [ ] Share one step implementation and log loss/metrics through Lightning.
-- [ ] Preserve proven component-chain behavior without embedding it in the training class (AC: 3, 6)
-  - [ ] Move the existing encoder/head chain and loss diagnostics into ordinary reusable components.
-  - [ ] Adapt current DSio consumers to instantiate the generic class.
-- [ ] Enforce and verify the exact-class path (AC: 1, 4-6)
-  - [ ] Reject subclass definitions for both Lightning classes.
-  - [ ] Cover direct native fit/validation and native checkpoint resume with exact class assertions.
-  - [ ] Cover malformed batches/objective results and retained existing behavior.
+- [x] Make `DsioModule` the generic Lightning composition root (AC: 1-3)
+  - [x] Accept one `nn.Module` model and one objective callable.
+  - [x] Validate the batch identity and flat objective-result contract at the narrowest boundary.
+  - [x] Share one step implementation and log loss/metrics through Lightning.
+- [x] Preserve proven component-chain behavior without embedding it in the training class (AC: 3, 6)
+  - [x] Move the existing encoder/head chain and loss diagnostics into ordinary reusable components.
+  - [x] Adapt current DSio consumers to instantiate the generic class.
+- [x] Enforce and verify the exact-class path (AC: 1, 4-6)
+  - [x] Reject subclass definitions for both Lightning classes.
+  - [x] Cover direct native fit/validation and native checkpoint resume with exact class assertions.
+  - [x] Cover malformed batches/objective results and retained existing behavior.
 - [ ] Complete the full quality and independent review gates before merge (AC: 1-6)
 
 ## Dev Notes
@@ -67,14 +67,39 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 2.5 at `e953e82`; reconciled the existing hard-coded chain with the approved generic objective contract and native Lightning resume semantics.
+- 2026-09-22: Replaced the hard-coded training class chain with one model/objective contract; retained the proven chain and loss diagnostics as ordinary `ComponentChain` and `LossObjective` components.
+- 2026-09-22: Added stable sample identity to the predecessor window batches so every current training consumer enters the same identity-bearing module boundary.
+- 2026-09-22: Candidate release gate passed: 823 tests passed (3 deselected), locked sync, source/wheel builds, Ruff, mypy, all import contracts, and diff checks.
 
 ### Completion Notes List
+
+- Native `Trainer.fit(module, datamodule=data)` now trains exact DSio classes directly; no DSio runner, result model, or subclass is needed.
+- One flat objective result carries scalar tensor `loss` and optional scalar tensor metrics, all emitted through `self.log()` by the shared step.
+- Model and stateful objective modules participate in native checkpoint state; a fresh same-config instance resumes optimizer and loop progress through `ckpt_path`.
+- Existing supervised, self-supervised, token, and callback paths use the same generic module through ordinary components rather than a compatibility constructor branch.
+- Both Lightning composition roots reject subclass definitions and direct variation toward injected components.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/3-1-train-a-task-through-the-exact-dsio-lightning-classes.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `README.md`
+- `src/dsio/batches.py`
+- `src/dsio/data/loading/module.py`
+- `src/dsio/dataset/dataset.py`
+- `src/dsio/model/chain.py`
+- `src/dsio/model/module.py`
+- `src/dsio/train/ssl_task.py`
+- `src/dsio/train/torch_task.py`
+- `tests/dataset/test_dataset.py`
+- `tests/model/test_components.py`
+- `tests/model/test_module.py`
+- `tests/model/test_token_corpus.py`
+- `tests/model/test_training_spine.py`
+- `tests/train/test_callbacks.py`
+- `tests/train/test_torch_runner.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 3.1 and started implementation.
+- 2026-09-22: Implemented the exact native-Lightning training path and passed the complete local quality gate.

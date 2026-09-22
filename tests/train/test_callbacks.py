@@ -21,6 +21,7 @@ pytest.importorskip("sklearn")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader, Dataset  # noqa: E402
 
+from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
 from dsio.model.components import Conv1dEncoder, CrossEntropy  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
@@ -40,7 +41,12 @@ class Toy(Dataset):
         return len(self.y)
 
     def __getitem__(self, i: int) -> dict[str, object]:
-        return {"x": torch.from_numpy(self.x[i]), "y": torch.tensor(self.y[i]), "row": i}
+        return {
+            "sample_id": f"sample-{i}",
+            "x": torch.from_numpy(self.x[i]),
+            "y": torch.tensor(self.y[i]),
+            "row": i,
+        }
 
 
 @pytest.fixture
@@ -51,11 +57,13 @@ def module() -> DsioModule:
     # DsioModule no longer has an augmentor slot of its own — see nn/module.py — so any
     # source of train/eval-dependent randomness has to live inside a component instead.
     return DsioModule(
-        backbone=nn.Sequential(
-            Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1), nn.Dropout(0.5)
+        model=ComponentChain(
+            backbone=nn.Sequential(
+                Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1), nn.Dropout(0.5)
+            ),
+            head=nn.Linear(8, 2),
         ),
-        head=nn.Linear(8, 2),
-        loss=CrossEntropy(threshold=0.5),
+        objective=LossObjective(CrossEntropy(threshold=0.5)),
     )
 
 
@@ -193,9 +201,11 @@ def test_a_single_class_probe_reports_instead_of_crashing() -> None:
             self.y[:] = 1.0
 
     module = DsioModule(
-        backbone=Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1),
-        head=nn.Linear(8, 2),
-        loss=CrossEntropy(threshold=0.5),
+        model=ComponentChain(
+            backbone=Conv1dEncoder(channels=2, hidden=8, out_dim=8, depth=1),
+            head=nn.Linear(8, 2),
+        ),
+        objective=LossObjective(CrossEntropy(threshold=0.5)),
     )
     loader = DataLoader(OneClass(), batch_size=16)
     scores = OnlineProbe(loader, loader).run(module)
@@ -208,7 +218,7 @@ def test_the_probe_needs_labelled_loaders(module: DsioModule) -> None:
             return 8
 
         def __getitem__(self, i: int) -> dict[str, object]:
-            return {"x": torch.randn(2, 32), "row": i}
+            return {"sample_id": f"sample-{i}", "x": torch.randn(2, 32), "row": i}
 
     loader = DataLoader(Unlabelled(), batch_size=4)
     with pytest.raises(ValueError, match="labelled loaders"):

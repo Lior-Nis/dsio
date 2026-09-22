@@ -43,6 +43,7 @@ from dsio.data.views import WindowSpec, load_or_build
 from dsio.dataset.dataset import WindowDataset, labelled_dataset, make_loader, make_target_loader
 from dsio.eval.contract import PREDICTIONS_FILE, EvalError, Fold, FoldPrediction
 from dsio.eval.metrics import METRICS, MetricError, compute
+from dsio.model.chain import ComponentChain, LossObjective
 from dsio.model.module import DsioModule
 from dsio.model.registry import (
     BACKBONES,
@@ -251,11 +252,13 @@ def build_module(task: TorchTask, *, channels: int, length: int) -> DsioModule:
         load_encoder(task.encoder, backbone=backbone, transform=transform)
 
     return DsioModule(
-        backbone=backbone,
-        head=HEADS.get(task.head.name)(**head_params),
-        loss=LOSSES.get(task.loss.name)(**task.loss.params),
-        transform=transform,
-        preprocessor=build_optional_component(task.preprocessor, PREPROCESSORS),
+        model=ComponentChain(
+            backbone=backbone,
+            head=HEADS.get(task.head.name)(**head_params),
+            transform=transform,
+            preprocessor=build_optional_component(task.preprocessor, PREPROCESSORS),
+        ),
+        objective=LossObjective(LOSSES.get(task.loss.name)(**task.loss.params)),
         lr=task.lr,
         weight_decay=task.weight_decay,
     )

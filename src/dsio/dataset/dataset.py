@@ -198,7 +198,11 @@ class WindowDataset(Dataset[WindowItem]):
         x = raw.float() if self.payload_dtype is None else raw.to(self.payload_dtype)
         # row is carried regardless of which branch below runs: predictions are aligned to
         # folds by this identity, not by trusting the order a DataLoader hands batches back.
-        item = WindowItem(x=x, row=position)
+        item = WindowItem(
+            sample_id=f"{self.index.store_digest}:{self.index.digest}:{position}",
+            x=x,
+            row=position,
+        )
         if self.mask is not None:
             # One window at a time, so the mask strategy sees a batch of one. The target
             # carries the true value at every hidden position and NaN everywhere else —
@@ -412,11 +416,17 @@ class TwoViewCollate:
         if not items:
             raise ValueError("cannot collate an empty batch")
         x = torch.stack([item["x"] for item in items])
+        sample_ids = [item["sample_id"] for item in items]
         row = torch.as_tensor([item["row"] for item in items])
         batch = x.shape[0]
         views = self._augment_twice(x, row)
         pair = (torch.arange(2 * batch, device=views.device) + batch) % (2 * batch)
-        return {"x": views, "y": pair, "row": row.repeat(2)}
+        return {
+            "sample_id": sample_ids * 2,
+            "x": views,
+            "y": pair,
+            "row": row.repeat(2),
+        }
 
     def _augment_twice(self, x: torch.Tensor, row: torch.Tensor) -> torch.Tensor:
         if self.seed is None:

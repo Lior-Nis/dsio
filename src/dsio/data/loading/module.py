@@ -30,6 +30,12 @@ _STAGES: dict[str | None, tuple[Phase, ...]] = {
 class DsioDataModule(LightningDataModule):
     """Replay one governed fold through deterministic, identity-preserving loaders."""
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        del kwargs
+        raise TypeError(
+            "DsioDataModule cannot be subclassed; vary loading through injected components"
+        )
+
     def __init__(
         self,
         store: SignalStore,

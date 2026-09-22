@@ -537,7 +537,10 @@ class _Tag(nn.Module):
 
 def _items(n: int, channels: int = 2, length: int = 8) -> list[dict[str, object]]:
     torch.manual_seed(0)
-    return [{"x": torch.randn(channels, length), "row": i} for i in range(n)]
+    return [
+        {"sample_id": f"sample-{i}", "x": torch.randn(channels, length), "row": i}
+        for i in range(n)
+    ]
 
 
 def test_two_view_collate_stacks_two_views_into_the_batch_dimension() -> None:

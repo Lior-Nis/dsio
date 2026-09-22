@@ -39,6 +39,7 @@ from dsio.data.splits.resolve import assert_no_row_overlap, resolve  # noqa: E40
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
 from dsio.dataset.dataset import make_loader, train_dataset, val_dataset  # noqa: E402
+from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
 from dsio.model.components import CrossEntropy, EmbeddingEncoder, linear_head  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
 
@@ -128,7 +129,10 @@ def test_the_gradient_reaches_the_embedding_table(corpus: SignalStore, index) ->
     dataset = train_dataset(corpus, index, labels=_labels(index), payload_dtype=torch.long)
     batch = next(iter(make_loader(dataset, batch_size=8)))
     backbone = EmbeddingEncoder(vocab_size=VOCAB, embed_dim=8, out_dim=DIM)
-    module = DsioModule(backbone=backbone, head=linear_head(DIM, 2), loss=CrossEntropy())
+    module = DsioModule(
+        model=ComponentChain(backbone=backbone, head=linear_head(DIM, 2)),
+        objective=LossObjective(CrossEntropy()),
+    )
 
     loss = module._common_step(batch, "train")
     assert torch.isfinite(loss)
@@ -155,7 +159,10 @@ def test_a_token_corpus_trains_through_lightning(
         batch_size=8,
     )
     backbone = EmbeddingEncoder(vocab_size=VOCAB, embed_dim=8, out_dim=DIM)
-    module = DsioModule(backbone=backbone, head=linear_head(DIM, 2), loss=CrossEntropy())
+    module = DsioModule(
+        model=ComponentChain(backbone=backbone, head=linear_head(DIM, 2)),
+        objective=LossObjective(CrossEntropy()),
+    )
     before = backbone.embedding.weight.detach().clone()
 
     lightning.Trainer(

@@ -9,6 +9,7 @@ pytest.importorskip("lightning")
 
 from torch import nn  # noqa: E402
 
+from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
 from dsio.model.components import (  # noqa: E402
     Conv1dEncoder,
     CrossEntropy,
@@ -29,9 +30,14 @@ def tiny_module(**overrides) -> DsioModule:  # type: ignore[no-untyped-def]
     defaults = dict(
         backbone=Conv1dEncoder(channels=2, hidden=4, out_dim=8, depth=1),
         head=nn.Linear(8, 2),
-        loss=CrossEntropy(),
+        transform=None,
+        preprocessor=None,
     )
-    return DsioModule(**{**defaults, **overrides})
+    loss = overrides.pop("loss", CrossEntropy())
+    return DsioModule(
+        model=ComponentChain(**{**defaults, **overrides}),
+        objective=LossObjective(loss),
+    )
 
 
 @pytest.fixture
@@ -45,20 +51,23 @@ def batch() -> torch.Tensor:
 
 def test_required_components_may_not_be_none() -> None:
     with pytest.raises(ComponentError, match="backbone is required"):
-        DsioModule(backbone=None, head=nn.Linear(8, 2), loss=CrossEntropy())  # type: ignore[arg-type]
+        ComponentChain(backbone=None, head=nn.Linear(8, 2))  # type: ignore[arg-type]
 
 
 def test_transform_defaults_to_identity_rather_than_none() -> None:
     """One chain shape means forward needs no branch, and no slot can be forgotten."""
     module = tiny_module()
-    assert isinstance(module.transform, nn.Identity)
-    assert module.preprocessor is None
+    assert isinstance(module.model.transform, nn.Identity)  # type: ignore[attr-defined]
+    assert module.model.preprocessor is None  # type: ignore[attr-defined]
 
 
 def test_forward_is_encode_plus_head(batch: torch.Tensor) -> None:
     module = tiny_module().eval()
     with torch.no_grad():
-        assert torch.allclose(module(batch), module.head(module.encode(batch)))
+        assert torch.allclose(
+            module(batch),
+            module.model.head(module.encode(batch)),  # type: ignore[attr-defined]
+        )
 
 
 def test_encode_survives_without_a_head(batch: torch.Tensor) -> None:
@@ -111,7 +120,11 @@ def test_chain_order_puts_the_transform_after_the_preprocessor(batch: torch.Tens
 def test_every_stage_shares_one_step_implementation(batch: torch.Tensor) -> None:
     """One implementation: three near-identical step methods are three that drift apart."""
     module = tiny_module()
-    payload = {"x": batch, "y": torch.tensor([0, 1, 0, 1])}
+    payload = {
+        "sample_id": [f"sample-{index}" for index in range(4)],
+        "x": batch,
+        "y": torch.tensor([0, 1, 0, 1]),
+    }
     for method in (module.training_step, module.validation_step, module.test_step):
         value = method(payload, 0)
         assert value.ndim == 0 and torch.isfinite(value)
@@ -138,7 +151,15 @@ def test_common_step_logs_a_losss_diagnostics(batch: torch.Tensor) -> None:
     logged: dict[str, torch.Tensor] = {}
     module.log = lambda name, value, **kwargs: logged.__setitem__(name, value)  # type: ignore[method-assign]
 
-    module._common_step({"x": x, "y": target, "row": torch.arange(batch.shape[0])}, "train")
+    module._common_step(
+        {
+            "sample_id": [f"sample-{index}" for index in range(4)],
+            "x": x,
+            "y": target,
+            "row": torch.arange(batch.shape[0]),
+        },
+        "train",
+    )
 
     assert "train/masked_mse" in logged
     assert "train/visible_mse" in logged
@@ -149,8 +170,10 @@ def test_predict_step_reports_the_rows_it_predicted(batch: torch.Tensor) -> None
     module = tiny_module().eval()
     rows = torch.tensor([7, 3, 11, 5])
     targets = torch.zeros(4).long()
-    out = module.predict_step({"x": batch, "y": targets, "row": rows}, 0)
-    assert set(out) == {"row", "prediction"}
+    sample_ids = [f"sample-{index}" for index in range(4)]
+    out = module.predict_step({"sample_id": sample_ids, "x": batch, "y": targets, "row": rows}, 0)
+    assert set(out) == {"sample_id", "row", "prediction"}
+    assert out["sample_id"] == sample_ids
     assert torch.equal(out["row"], rows)
     assert out["prediction"].shape == (4, 2)
 
