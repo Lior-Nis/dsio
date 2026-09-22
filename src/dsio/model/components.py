@@ -489,8 +489,7 @@ class FixedStandardize(nn.Module):
         return (x - self.mean) / (self.std + self.eps)
 
 
-# --- view augmentors, for two-view contrastive collation (DsioModule itself has no ------
-# --- stochastic slot; see TwoViewCollate in dataset/dataset.py) -------------------------
+# --- accelerator-side view augmentors ---------------------------------------------------
 
 
 class Jitter(nn.Module):
@@ -505,10 +504,13 @@ class Jitter(nn.Module):
         super().__init__()
         self.sigma = sigma
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, generator: torch.Generator | None = None
+    ) -> torch.Tensor:
         _check_3d(x, "Jitter")
         scale = x.std(dim=-1, keepdim=True) * self.sigma
-        return x + torch.randn_like(x) * scale
+        noise = torch.randn(x.shape, dtype=x.dtype, device=x.device, generator=generator)
+        return x + noise * scale
 
 
 class RandomScale(nn.Module):
@@ -520,11 +522,13 @@ class RandomScale(nn.Module):
             raise ValueError(f"low {low} must not exceed high {high}")
         self.low, self.high = low, high
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, generator: torch.Generator | None = None
+    ) -> torch.Tensor:
         _check_3d(x, "RandomScale")
-        gain = torch.empty(x.shape[0], x.shape[1], 1, device=x.device).uniform_(
-            self.low, self.high
-        )
+        gain = torch.empty(
+            x.shape[0], x.shape[1], 1, dtype=x.dtype, device=x.device
+        ).uniform_(self.low, self.high, generator=generator)
         return x * gain
 
 
