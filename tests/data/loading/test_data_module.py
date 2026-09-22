@@ -206,6 +206,83 @@ def test_collation_requires_batch_field_cardinality_to_match_identity() -> None:
         )
 
 
+def test_collation_accepts_a_sample_major_ragged_tensor_batch() -> None:
+    items = [
+        {"sample_id": "left", "x": np.array([1.0])},
+        {"sample_id": "right", "x": np.array([2.0, 3.0, 4.0])},
+    ]
+
+    batch = collate_items(
+        items,
+        collate_fn=lambda values: {
+            "sample_id": [item["sample_id"] for item in values],
+            "x": [torch.as_tensor(item["x"]) for item in values],
+        },
+    )
+
+    assert [tensor.shape for tensor in batch["x"]] == [(1,), (3,)]
+
+
+def test_collation_rejects_unbatched_opaque_and_device_hiding_fields() -> None:
+    items = [
+        {"sample_id": "left", "x": np.array([1.0])},
+        {"sample_id": "right", "x": np.array([2.0])},
+    ]
+
+    with pytest.raises(LoadingError, match="unbatched scalar"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["left", "right"],
+                "x": torch.ones(2, 1),
+                "y": 1,
+            },
+        )
+    with pytest.raises(LoadingError, match="1 rows for 2 sample_id|unbatched scalar"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["left", "right"],
+                "x": [{"value": 1}],
+            },
+        )
+
+    class HiddenTensor:
+        def __init__(self) -> None:
+            self.value = torch.ones(1, device="meta")
+
+    with pytest.raises(LoadingError, match="unsupported type HiddenTensor"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["left", "right"],
+                "x": torch.ones(2, 1),
+                "hidden": HiddenTensor(),
+            },
+        )
+
+
+def test_collation_rejects_object_arrays_and_accepts_zero_width_sequences() -> None:
+    items = [
+        {"sample_id": "left", "tokens": []},
+        {"sample_id": "right", "tokens": []},
+    ]
+    hidden = np.empty(2, dtype=object)
+    hidden[0] = torch.ones(1, device="meta")
+    hidden[1] = torch.ones(1, device="meta")
+
+    with pytest.raises(LoadingError, match="unsupported object array"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["left", "right"],
+                "hidden": hidden,
+            },
+        )
+
+    assert collate_items(items)["tokens"] == []
+
+
 def test_collation_rejects_unordered_and_recursive_batch_containers() -> None:
     items = [{"sample_id": "one", "x": np.ones(2)}]
 

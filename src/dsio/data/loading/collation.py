@@ -35,7 +35,7 @@ def collate_items(
         raise LoadingError(
             f"collation must return a mapping containing sample_id, got {type(batch).__name__}"
         )
-    _validate_batch(batch, "batch", len(expected), set(), 0)
+    _validate_batch(batch, "batch", len(expected), set(), 0, enforce_cardinality=True)
     actual = _batch_ids(batch.get("sample_id"))
     if actual != expected:
         raise LoadingError(
@@ -86,6 +86,8 @@ def _validate_batch(
     batch_size: int,
     active: set[int],
     depth: int,
+    *,
+    enforce_cardinality: bool,
 ) -> None:
     if depth > _MAX_BATCH_DEPTH:
         raise LoadingError(f"{path} exceeds the maximum batch nesting depth")
@@ -94,10 +96,24 @@ def _validate_batch(
             raise LoadingError(
                 f"collation must keep tensors on CPU; {path} is on {value.device.type!r}"
             )
-        _require_cardinality(value.ndim, value.shape[0] if value.ndim else None, path, batch_size)
+        if enforce_cardinality:
+            _require_cardinality(
+                value.ndim,
+                value.shape[0] if value.ndim else None,
+                path,
+                batch_size,
+            )
         return
     if isinstance(value, np.ndarray):
-        _require_cardinality(value.ndim, value.shape[0] if value.ndim else None, path, batch_size)
+        if value.dtype.hasobject:
+            raise LoadingError(f"{path} uses an unsupported object array")
+        if enforce_cardinality:
+            _require_cardinality(
+                value.ndim,
+                value.shape[0] if value.ndim else None,
+                path,
+                batch_size,
+            )
         return
     if isinstance(value, set | frozenset):
         raise LoadingError(f"{path} uses an unordered batch container")
@@ -105,20 +121,40 @@ def _validate_batch(
         _enter_container(value, path, active)
         try:
             for key, item in value.items():
-                _validate_batch(item, f"{path}.{key}", batch_size, active, depth + 1)
+                _validate_batch(
+                    item,
+                    f"{path}.{key}",
+                    batch_size,
+                    active,
+                    depth + 1,
+                    enforce_cardinality=enforce_cardinality,
+                )
         finally:
             active.remove(id(value))
     elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
         _enter_container(value, path, active)
         try:
-            if all(
-                item is None or isinstance(item, str | bytes | bool | int | float) for item in value
-            ):
+            scalar_values = bool(value) and all(_is_scalar(item) for item in value)
+            if scalar_values and enforce_cardinality:
                 _require_cardinality(1, len(value), path, batch_size)
+            sample_major = enforce_cardinality and len(value) == batch_size
             for index, item in enumerate(value):
-                _validate_batch(item, f"{path}[{index}]", batch_size, active, depth + 1)
+                _validate_batch(
+                    item,
+                    f"{path}[{index}]",
+                    batch_size,
+                    active,
+                    depth + 1,
+                    enforce_cardinality=enforce_cardinality and not sample_major,
+                )
         finally:
             active.remove(id(value))
+    elif enforce_cardinality:
+        if _is_scalar(value):
+            raise LoadingError(f"collated field {path} is an unbatched scalar")
+        raise LoadingError(f"collated field {path} has unsupported type {type(value).__name__}")
+    elif not _is_scalar(value):
+        raise LoadingError(f"collated field {path} has unsupported type {type(value).__name__}")
 
 
 def _require_cardinality(
@@ -138,3 +174,9 @@ def _enter_container(value: object, path: str, active: set[int]) -> None:
     if marker in active:
         raise LoadingError(f"{path} contains a recursive batch container")
     active.add(marker)
+
+
+def _is_scalar(value: object) -> bool:
+    return value is None or isinstance(
+        value, str | bytes | bool | int | float | complex | np.generic
+    )
