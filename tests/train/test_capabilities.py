@@ -309,35 +309,21 @@ def test_representative_batch_does_not_advance_the_training_order() -> None:
 
 
 def test_representative_batch_never_initializes_persistent_training_workers() -> None:
-    left_generator = torch.Generator().manual_seed(41)
-    right_generator = torch.Generator().manual_seed(41)
+    generator = torch.Generator().manual_seed(41)
     loader = DataLoader(
         _BatchDataset(),
         batch_size=3,
         shuffle=True,
         num_workers=2,
         persistent_workers=True,
-        generator=left_generator,
+        generator=generator,
     )
-    control = DataLoader(
-        _BatchDataset(),
-        batch_size=3,
-        shuffle=True,
-        num_workers=2,
-        persistent_workers=True,
-        generator=right_generator,
-    )
+    state = generator.get_state().clone()
 
     representative_batch(loader)
-    left = iter(loader)
-    right = iter(control)
-    try:
-        assert next(left)["sample_id"] == next(right)["sample_id"]
-    finally:
-        left._shutdown_workers()  # type: ignore[attr-defined]
-        right._shutdown_workers()  # type: ignore[attr-defined]
-        loader._iterator = None  # type: ignore[attr-defined]
-        control._iterator = None  # type: ignore[attr-defined]
+
+    assert loader._iterator is None  # type: ignore[attr-defined]
+    torch.testing.assert_close(generator.get_state(), state)
 
 
 def test_cuda_zero_rng_is_never_replaced_by_the_current_device(
