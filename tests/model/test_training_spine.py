@@ -178,6 +178,8 @@ def test_training_batches_require_ordered_sample_identity() -> None:
         {"lr": float("inf")},
         {"weight_decay": float("nan")},
         {"weight_decay": float("inf")},
+        {"lr": 10**10000},
+        {"weight_decay": 10**10000},
     ],
 )
 def test_optimizer_hyperparameters_must_be_finite(kwargs: dict[str, float]) -> None:
@@ -215,6 +217,21 @@ def test_prediction_output_must_match_sample_identity(
 
     with pytest.raises(ModuleError, match=message):
         module.predict_step({"sample_id": sample_ids, "x": x}, 0)
+
+
+@pytest.mark.parametrize("row", [torch.tensor([7]), torch.tensor(7), [7]])
+def test_prediction_rows_must_match_sample_identity(row: object) -> None:
+    module = DsioModule(model=nn.Identity(), objective=ClassificationObjective())
+
+    with pytest.raises(ModuleError, match="prediction row|rows for 2 sample_id"):
+        module.predict_step(
+            {
+                "sample_id": ["left", "right"],
+                "x": torch.ones(2, 1),
+                "row": row,
+            },
+            0,
+        )
 
 
 class CallableModel(nn.Module):

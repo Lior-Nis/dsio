@@ -157,6 +157,13 @@ class WindowIndex:
             raise ViewError("starts and entity_codes must be the same length")
         if len(self.entity_names) != len(self.entity_groups):
             raise ViewError("entity_names and entity_groups must be the same length")
+        if np.any(self.entity_codes < 0) or np.any(
+            self.entity_codes >= len(self.entity_names)
+        ):
+            raise ViewError(
+                f"entity_codes must be within [0, {len(self.entity_names)}); "
+                "the index contains an invalid entity code"
+            )
 
     def __len__(self) -> int:
         return int(self.starts.size)

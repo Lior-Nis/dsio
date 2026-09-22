@@ -97,6 +97,20 @@ def test_magic_is_stable() -> None:
     assert MAGIC == b"DSIOIDX\x00"
 
 
+@pytest.mark.parametrize("entity_code", [-1, 2])
+def test_window_index_rejects_out_of_range_entity_codes(entity_code: int) -> None:
+    with pytest.raises(ViewError, match="invalid entity code"):
+        WindowIndex(
+            starts=np.array([10]),
+            entity_codes=np.array([entity_code]),
+            entity_names=["first", "last"],
+            entity_groups=["one", "two"],
+            spec=WindowSpec(length=4, stride=4),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
 # --- store --------------------------------------------------------------------------
 
 

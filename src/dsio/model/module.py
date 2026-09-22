@@ -55,24 +55,16 @@ class DsioModule(LightningModule):
             raise ModuleError(f"model must be a torch nn.Module, got {type(model).__name__}")
         if not callable(objective):
             raise ModuleError("objective must be callable")
-        if (
-            not isinstance(lr, int | float)
-            or isinstance(lr, bool)
-            or not math.isfinite(lr)
-            or lr <= 0
-        ):
-            raise ModuleError("lr must be a positive finite number")
-        if (
-            not isinstance(weight_decay, int | float)
-            or isinstance(weight_decay, bool)
-            or not math.isfinite(weight_decay)
-            or weight_decay < 0
-        ):
-            raise ModuleError("weight_decay must be a non-negative finite number")
+        lr = _finite_hyperparameter(lr, "lr", positive=True)
+        weight_decay = _finite_hyperparameter(
+            weight_decay,
+            "weight_decay",
+            positive=False,
+        )
         self.model = model
         self.objective = objective
-        self.lr = float(lr)
-        self.weight_decay = float(weight_decay)
+        self.lr = lr
+        self.weight_decay = weight_decay
         self.save_hyperparameters("lr", "weight_decay")
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
@@ -143,7 +135,15 @@ class DsioModule(LightningModule):
             prediction=prediction.detach(),
         )
         if "row" in batch:
-            result["row"] = batch["row"]
+            row = batch["row"]
+            if not isinstance(row, Tensor):
+                raise ModuleError(f"prediction row must be a tensor, got {type(row).__name__}")
+            if row.ndim == 0 or row.shape[0] != len(sample_ids):
+                size = None if row.ndim == 0 else row.shape[0]
+                raise ModuleError(
+                    f"prediction batch has {size} rows for {len(sample_ids)} sample_id values"
+                )
+            result["row"] = row
         return result
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
@@ -164,6 +164,20 @@ def _batch_ids(batch: object) -> list[str]:
     if not result or any(not isinstance(sample_id, str) for sample_id in result):
         raise ModuleError("training batch sample_id must be a non-empty sequence of strings")
     return cast("list[str]", result)
+
+
+def _finite_hyperparameter(value: object, name: str, *, positive: bool) -> float:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise ModuleError(f"{name} must be a finite number")
+    try:
+        normalized = float(value)
+    except OverflowError:
+        raise ModuleError(f"{name} must be a finite number") from None
+    valid_range = normalized > 0 if positive else normalized >= 0
+    if not math.isfinite(normalized) or not valid_range:
+        qualifier = "positive" if positive else "non-negative"
+        raise ModuleError(f"{name} must be a {qualifier} finite number")
+    return normalized
 
 
 def _objective_values(result: object) -> dict[str, Tensor]:

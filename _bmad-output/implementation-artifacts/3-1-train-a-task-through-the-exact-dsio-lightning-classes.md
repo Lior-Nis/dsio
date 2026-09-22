@@ -72,6 +72,7 @@ Codex (GPT-5)
 - 2026-09-22: Candidate release gate passed: 823 tests passed (3 deselected), locked sync, source/wheel builds, Ruff, mypy, all import contracts, and diff checks.
 - 2026-09-22: Blind review found two window-ID encodings; identity now has one implementation on `WindowIndex`, shared by governed examples and full or reordered datasets.
 - 2026-09-22: Edge review closed non-finite optimizer values, Lightning loss-name collisions, diagnostic loss replacement, and prediction type/cardinality mismatches at their narrow boundaries.
+- 2026-09-22: Edge re-review added fail-closed validation for optional prediction rows, malformed window entity codes, and oversized numeric hyperparameters.
 
 ### Completion Notes List
 
