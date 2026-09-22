@@ -190,6 +190,37 @@ the consumer links that same dataset plus the immutable artifact URI without cop
 Supported names are owned by DSIO; projects cannot register splitters at runtime. Novel
 algorithms enter through DSIO's reviewed experimental-admission path.
 
+Replay those exact assignments through the one Lightning data composition root:
+
+```python
+from dsio.data.loading import DsioDataModule, stored_samples
+
+data = DsioDataModule(
+    store,
+    examples,
+    manifest,
+    fold=0,
+    roles={"train": "train", "validate": "test", "predict": "test"},
+    dataset_factory=stored_samples,
+    batch_size=64,
+    num_workers=4,
+    seed=7,
+)
+data.setup("fit")
+batch = next(iter(data.train_dataloader()))
+assert set(batch) >= {"sample_id", "x"}
+```
+
+`stored_samples` is the canonical whole-sample decoder. Windowed or task-labelled paths
+provide another ordinary dataset factory with the same `(store, examples, sample_ids)`
+signature. DSIO still owns assignment replay, seeded sampling, batching, worker setup, and
+the identity guard: every item and batch must retain the exact ordered `sample_id` values.
+CPU collation never performs accelerator-side stochastic training augmentation.
+DSIO also checks batch-field cardinality and CPU placement. A custom collator remains trusted
+executable code for the meaning of transformed tensor values—no generic runtime check can
+prove that a callable did not swap two same-shaped payload rows while preserving their IDs—so
+custom collators belong in the reviewed named-component path rather than ad hoc project lambdas.
+
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree
 gate belongs at model-registry promotion, and **is not implemented**: there is no

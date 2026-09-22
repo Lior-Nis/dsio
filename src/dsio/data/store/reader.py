@@ -12,7 +12,7 @@ import numpy as np
 import yaml
 from pydantic import ValidationError
 
-from dsio.contracts import sha256_of_bytes, sha256_of_file
+from dsio.contracts import sha256_of, sha256_of_bytes, sha256_of_file
 from dsio.data.format import IndexFormatError, IndexHeader, read_index
 from dsio.data.readers import SignalReader, open_reader
 from dsio.data.store.builder import SignalStoreBuilder
@@ -92,6 +92,18 @@ class SignalStore:
     @property
     def sample_ids(self) -> tuple[str, ...]:
         return tuple(entity.entity_id for entity in self.entities)
+
+    @property
+    def identity(self) -> str:
+        """Full corpus identity over payload bytes, row topology, IDs, groups, and attrs."""
+        manifest = self.manifest()
+        return sha256_of(
+            {
+                "signal": manifest.signal_sha256,
+                "index": manifest.index_sha256,
+                "entities": manifest.entities_sha256,
+            }
+        )
 
     def entity(self, entity_id: str) -> Entity:
         try:
