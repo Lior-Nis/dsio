@@ -216,6 +216,10 @@ provide another ordinary dataset factory with the same `(store, examples, sample
 signature. DSIO still owns assignment replay, seeded sampling, batching, worker setup, and
 the identity guard: every item and batch must retain the exact ordered `sample_id` values.
 CPU collation never performs accelerator-side stochastic training augmentation.
+DSIO also checks batch-field cardinality and CPU placement. A custom collator remains trusted
+executable code for the meaning of transformed tensor values—no generic runtime check can
+prove that a callable did not swap two same-shaped payload rows while preserving their IDs—so
+custom collators belong in the reviewed named-component path rather than ad hoc project lambdas.
 
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree

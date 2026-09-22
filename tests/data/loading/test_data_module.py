@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
-from torch.utils.data import Dataset, default_collate
+from torch.utils.data import Dataset, IterableDataset, default_collate
 
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule, LoadingError, collate_items, stored_samples
@@ -17,12 +17,12 @@ from dsio.data.splits import generate
 from dsio.data.store import SignalStore
 
 
-def _store(path: Path, *, offset: int = 0) -> SignalStore:
+def _store(path: Path) -> SignalStore:
     with SignalStore.builder(path, channels=2, dtype="float32") as builder:
         for index in range(8):
             builder.add(
                 f"sample-{index}",
-                np.full((4, 2), index + offset, dtype=np.float32),
+                np.full((4, 2), index, dtype=np.float32),
                 group=f"group-{index // 2}",
                 attrs={"target": index % 2},
             )
@@ -190,6 +190,41 @@ def test_collation_rejects_accelerator_side_processing() -> None:
         )
 
 
+def test_collation_requires_batch_field_cardinality_to_match_identity() -> None:
+    items = [
+        {"sample_id": "left", "x": np.array([1.0])},
+        {"sample_id": "right", "x": np.array([2.0])},
+    ]
+
+    with pytest.raises(LoadingError, match="1 rows for 2 sample_id"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["left", "right"],
+                "x": torch.ones(1, 1),
+            },
+        )
+
+
+def test_collation_rejects_unordered_and_recursive_batch_containers() -> None:
+    items = [{"sample_id": "one", "x": np.ones(2)}]
+
+    with pytest.raises(LoadingError, match="unordered batch container"):
+        collate_items(
+            items,
+            collate_fn=lambda _: {
+                "sample_id": ["one"],
+                "x": torch.ones(1, 2),
+                "hidden": {torch.ones(1, device="meta")},
+            },
+        )
+
+    cyclic: dict[str, Any] = {"sample_id": ["one"], "x": torch.ones(1, 2)}
+    cyclic["self"] = cyclic
+    with pytest.raises(LoadingError, match="recursive batch container"):
+        collate_items(items, collate_fn=lambda _: cyclic)
+
+
 @pytest.mark.parametrize(
     "item",
     [
@@ -249,10 +284,33 @@ def test_factory_length_must_match_the_role_assignment(tmp_path: Path) -> None:
         module.setup("fit")
 
 
+def test_factory_must_return_a_map_style_dataset(tmp_path: Path) -> None:
+    store, examples, split = _inputs(tmp_path / "samples")
+
+    class Stream(IterableDataset[Mapping[str, Any]]):
+        def __iter__(self):
+            yield from ()
+
+        def __len__(self) -> int:
+            return len(split.fold(0).assignments["train"])
+
+    module = DsioDataModule(
+        store,
+        examples,
+        split,
+        fold=0,
+        roles={"train": "train"},
+        dataset_factory=lambda *_: Stream(),
+    )
+
+    with pytest.raises(LoadingError, match="map-style Dataset.*IterableDataset"):
+        module.setup("fit")
+
+
 def test_seeded_shuffle_order_is_independent_of_worker_count(tmp_path: Path) -> None:
     store, examples, split = _inputs(tmp_path / "samples")
 
-    def order(workers: int) -> list[str]:
+    def orders(workers: int) -> list[list[str]]:
         module = DsioDataModule(
             store,
             examples,
@@ -265,9 +323,10 @@ def test_seeded_shuffle_order_is_independent_of_worker_count(tmp_path: Path) -> 
             seed=31,
         )
         module.setup("fit")
-        return _ids(module.train_dataloader())
+        loader = module.train_dataloader()
+        return [_ids(loader) for _ in range(3)]
 
-    assert order(0) == order(2)
+    assert orders(0) == orders(2)
 
 
 def _worker_unsafe_factory(
@@ -321,10 +380,22 @@ def test_worker_unsafe_collator_fails_during_setup(tmp_path: Path) -> None:
 def test_canonical_factory_rejects_a_different_store_with_the_same_sample_ids(
     tmp_path: Path,
 ) -> None:
-    store = _store(tmp_path / "source" / "samples")
-    other = _store(tmp_path / "other" / "samples", offset=100)
+    def topology(path: Path, samples: list[tuple[str, float]]) -> SignalStore:
+        with SignalStore.builder(path, channels=1, dtype="float32") as builder:
+            for sample_id, value in samples:
+                builder.add(
+                    sample_id,
+                    np.full((2, 1), value, dtype=np.float32),
+                    group="same-group",
+                )
+        return SignalStore(path)
+
+    store = topology(tmp_path / "source" / "samples", [("A", 0), ("B", 1)])
+    other = topology(tmp_path / "other" / "samples", [("B", 0), ("A", 1)])
     examples = entity_examples(store)
 
+    assert store.manifest().signal_sha256 == other.manifest().signal_sha256
+    assert store.identity != other.identity
     with pytest.raises(LoadingError, match="content identity"):
         stored_samples(other, examples, examples.sample_ids.tolist())
 
@@ -356,6 +427,7 @@ def test_missing_role_and_invalid_stage_fail_before_factory_use(tmp_path: Path) 
         ({"seed": -1}, "seed"),
         ({"shuffle": {"train": "yes"}}, "shuffle"),
         ({"shuffle": {"fit": True}}, "unsupported Lightning phase"),
+        ({"shuffle": ["train"]}, "phase-to-bool mapping"),
     ],
 )
 def test_invalid_loader_configuration_fails_at_construction(
@@ -398,6 +470,18 @@ def test_invalid_fold_and_factory_result_fail_during_setup(tmp_path: Path) -> No
     )
     with pytest.raises(LoadingError, match="must return a torch Dataset"):
         wrong_result.setup("fit")
+
+    wrong_collator = DsioDataModule(
+        store,
+        examples,
+        split,
+        fold=0,
+        roles={"train": "train"},
+        dataset_factory=stored_samples,
+        collate_fn="not-callable",  # type: ignore[arg-type]
+    )
+    with pytest.raises(LoadingError, match="collate_fn must be callable"):
+        wrong_collator.setup("fit")
 
 
 def test_split_is_validated_before_the_dataset_factory_runs(tmp_path: Path) -> None:

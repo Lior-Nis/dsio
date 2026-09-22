@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import pickle
-from typing import Any
+from collections.abc import Sized
+from typing import Any, cast
 
+import torch
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.sampler import RandomSampler
 
 from dsio.data.loading.collation import Collate, IdentityCollator
 from dsio.data.loading.datasets import LoadingError
@@ -27,6 +30,8 @@ def build_loader(
     validate_loader_options(batch_size=batch_size, num_workers=num_workers, seed=seed)
     if not isinstance(shuffle, bool):
         raise LoadingError(f"shuffle must be bool, got {type(shuffle).__name__}")
+    if collate_fn is not None and not callable(collate_fn):
+        raise LoadingError("collate_fn must be callable")
     collator = IdentityCollator(collate_fn)
     if num_workers:
         _require_picklable(dataset, "dataset")
@@ -35,10 +40,15 @@ def build_loader(
     kwargs: dict[str, Any] = dict(dataloader_kwargs(seed))
     if num_workers:
         kwargs.update(persistent_workers=True, prefetch_factor=2)
+    sampler = None
+    if shuffle:
+        sampler_generator = torch.Generator().manual_seed(seed)
+        sampler = RandomSampler(cast("Sized", dataset), generator=sampler_generator)
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=False,
+        sampler=sampler,
         num_workers=num_workers,
         drop_last=False,
         collate_fn=collator,

@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 
 from dsio.data.examples import Examples
 from dsio.data.store import SignalStore, StoreError
@@ -30,6 +30,10 @@ class IdentityDataset(Dataset[dict[str, Any]]):
     def __init__(self, dataset: Dataset[DataItem], sample_ids: Sequence[str]) -> None:
         self.dataset = dataset
         self.sample_ids = tuple(sample_ids)
+        if isinstance(dataset, IterableDataset):
+            raise LoadingError(
+                "dataset factory must return a map-style Dataset, not IterableDataset"
+            )
         if not isinstance(dataset, Sized):
             raise LoadingError("dataset factory returned a dataset without a length")
         try:
@@ -104,7 +108,7 @@ def stored_samples(
     this entity-level factory uses it to prove the supplied store is the corpus whose split
     is being replayed.
     """
-    digest = store.manifest().signal_sha256[:16]
+    digest = store.identity
     if examples.name != store.path.name or examples.digest != digest:
         raise LoadingError(
             f"stored-sample factory received store {store.path.name!r} with content identity "

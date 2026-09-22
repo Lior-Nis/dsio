@@ -172,7 +172,7 @@ class SignalExamples:
         backwards — and would silently invalidate a published split whenever anyone tried a
         different stride.
         """
-        return str(self.store.manifest().signal_sha256[:16])
+        return str(self.store.identity)
 
     @property
     def derivation(self) -> str:
@@ -269,7 +269,7 @@ def entity_examples(store: Any) -> TableExamples:
     """
     entities = list(store.entities)
     names = sorted({key for entity in entities for key in entity.attrs})
-    digest = store.manifest().signal_sha256[:16]
+    digest = store.identity
     return TableExamples(
         name=str(store.path.name),
         sample_ids=[entity.entity_id for entity in entities],

@@ -565,7 +565,7 @@ def test_the_runner_produces_the_same_artifact_contract(corpus: Path, tmp_path: 
         assert len(data["row_id"]) == len(data["y_true"]) == len(data["y_pred"])
         assert "y_score" in data.files
         store = SignalStore(Path(corpus) / "stores" / "tone")
-        assert str(data["split_digest"]) == store.manifest().signal_sha256
+        assert str(data["split_digest"]) == store.identity
         # Critical 1: the fifth invariant `cross_validate` used to get for free from holding
         # one closure and one `Examples` -- a pooling reader needs both recorded per fold.
         assert str(data["window_digest"]) == config.task.window.digest  # type: ignore[attr-defined]
@@ -692,7 +692,7 @@ def test_the_run_records_which_corpus_it_read(corpus: Path, tmp_path: Path) -> N
     execute(config, run)
     payload = json.loads((run.artifacts_dir / "windows.json").read_text())
     store = SignalStore(Path(corpus) / "stores" / "tone")
-    assert payload["store_sha256"] == store.manifest().signal_sha256
+    assert payload["store_sha256"] == store.identity
     assert payload["split"] == "k3"
     assert payload["fold"] == 0
 

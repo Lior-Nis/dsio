@@ -458,7 +458,7 @@ def run_torch(config: RunConfig, run: Run) -> dict[str, float]:
                 "before it is a metric problem — check stratification."
             ) from error
 
-        store_digest = store.manifest().signal_sha256
+        store_digest = store.identity
         _write_predictions(
             run.artifacts_dir,
             fold=fold,

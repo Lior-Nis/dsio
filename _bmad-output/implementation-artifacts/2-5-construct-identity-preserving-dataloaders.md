@@ -16,7 +16,7 @@ so that every training paradigm shares one replayable CPU data path.
 
 1. Given a validated store, `Examples`, governed `SplitFile`, fold, and explicit Lightning-phase-to-role mapping, `DsioDataModule.setup()` constructs only the requested train, validation, test, and prediction datasets/loaders, with exactly the stable sample identities assigned to each mapped role.
 2. Dataset construction is injected through one ordinary callable boundary while DSIO owns assignment replay, identity checking, deterministic sampling, batching, worker setup, and collation under `dsio.data.loading`; no runtime registry, loader-result model, or parallel split abstraction is added.
-3. Every dataset item and produced batch is a mapping containing `sample_id`; DSIO verifies identity alignment before collation and after custom collation so data, targets, and identity cannot silently drift.
+3. Every dataset item and produced batch is a mapping containing `sample_id`; DSIO verifies item identity, exact post-collation identity order, batch-field cardinality, and CPU placement. A configured custom collator is governed trusted code for the semantic association of transformed payload/target values, because an arbitrary callable can lie while returning structurally valid output.
 4. The same validated inputs, seed, and deterministic components produce the same sample membership and order for supported worker counts. Worker-unsafe datasets or collators fail during setup with an actionable error when multiprocessing is requested.
 5. Missing phase mappings or roles, invalid folds or manifests, incompatible factory output, malformed/empty batches, invalid loader arguments, and identity-changing collators fail at the narrowest boundary without substituting a default path.
 6. CPU loading performs no accelerator-side or stochastic training augmentation. `DsioDataModule` does not customize `on_after_batch_transfer`; accelerator augmentation remains a later `DsioModule.training_step()` concern.
@@ -56,6 +56,7 @@ so that every training paradigm shares one replayable CPU data path.
 - Manifest assignments are the source of role membership and order.
 - A dataset item must expose the expected string `sample_id` at its position. The wrapper checks this lazily so a bad decoder fails where it produces the contradiction.
 - The collator derives expected identity from the items, delegates to native `default_collate` or the configured collator, then requires the batch identity to match exactly.
+- DSIO can prove identity order, field cardinality, container safety, and CPU placement. It cannot infer whether arbitrary transformed tensor values still mean what their IDs claim; custom collators therefore enter through the same reviewed component-governance boundary as other executable components in Story 3.2.
 
 ### Lightning mapping
 
@@ -84,6 +85,8 @@ Codex (GPT-5)
 - 2026-09-22: Implemented `dsio.data.loading` as four cohesive modules: dataset identity, collation, native loader construction, and the exact Lightning data composition root.
 - 2026-09-22: Self-audit removed `drop_last` because it contradicts exact assignment membership, bound the canonical factory to store content identity, and rejected non-CPU collated tensors.
 - 2026-09-22: Candidate gate passed: 804 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
+- 2026-09-22: Independent review exposed a topology-blind corpus digest, cross-epoch worker-count shuffle drift, unchecked batch cardinality/containers, `IterableDataset` admission, and lax runtime option validation; each was reproduced and fixed.
+- 2026-09-22: Clarified the only unprovable boundary: a governed custom collator is trusted executable code for the semantics of same-shaped transformed values, while DSIO proves identity order, cardinality, container safety, and CPU placement.
 
 ### Completion Notes List
 
@@ -91,6 +94,7 @@ Codex (GPT-5)
 - The injected factory remains modality-specific, while `IdentityDataset` makes its length and per-position identity checkable before any batch reaches a model.
 - Native default or custom collation is wrapped by one identity and CPU-device guard; `sample_id` remains aligned with all payload/target fields.
 - Loader construction is seeded, exact-membership (`drop_last=False`), and preflights dataset/collator picklability when workers are requested.
+- Canonical corpus identity now covers full signal, index, and entity-metadata digests, so changing ID-to-row topology invalidates examples, splits, loaders, and recorded fold evidence even when payload bytes are identical.
 - No registry, loader configuration hierarchy, accelerator augmentation hook, or second split abstraction was added.
 
 ### File List

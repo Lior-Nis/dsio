@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+import numpy as np
 from torch import Tensor
 from torch.utils.data import default_collate
 
@@ -12,6 +13,7 @@ from dsio.data.loading.datasets import DataItem, LoadingError
 
 Batch = dict[str, Any]
 Collate = Callable[[list[DataItem]], Mapping[str, Any]]
+_MAX_BATCH_DEPTH = 64
 
 
 def collate_items(
@@ -33,7 +35,7 @@ def collate_items(
         raise LoadingError(
             f"collation must return a mapping containing sample_id, got {type(batch).__name__}"
         )
-    _require_cpu(batch, "batch")
+    _validate_batch(batch, "batch", len(expected), set(), 0)
     actual = _batch_ids(batch.get("sample_id"))
     if actual != expected:
         raise LoadingError(
@@ -78,16 +80,61 @@ def _batch_ids(value: object) -> list[str]:
     return identities
 
 
-def _require_cpu(value: object, path: str) -> None:
+def _validate_batch(
+    value: object,
+    path: str,
+    batch_size: int,
+    active: set[int],
+    depth: int,
+) -> None:
+    if depth > _MAX_BATCH_DEPTH:
+        raise LoadingError(f"{path} exceeds the maximum batch nesting depth")
     if isinstance(value, Tensor):
         if value.device.type != "cpu":
             raise LoadingError(
                 f"collation must keep tensors on CPU; {path} is on {value.device.type!r}"
             )
+        _require_cardinality(value.ndim, value.shape[0] if value.ndim else None, path, batch_size)
         return
+    if isinstance(value, np.ndarray):
+        _require_cardinality(value.ndim, value.shape[0] if value.ndim else None, path, batch_size)
+        return
+    if isinstance(value, set | frozenset):
+        raise LoadingError(f"{path} uses an unordered batch container")
     if isinstance(value, Mapping):
-        for key, item in value.items():
-            _require_cpu(item, f"{path}.{key}")
+        _enter_container(value, path, active)
+        try:
+            for key, item in value.items():
+                _validate_batch(item, f"{path}.{key}", batch_size, active, depth + 1)
+        finally:
+            active.remove(id(value))
     elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
-        for index, item in enumerate(value):
-            _require_cpu(item, f"{path}[{index}]")
+        _enter_container(value, path, active)
+        try:
+            if all(
+                item is None or isinstance(item, str | bytes | bool | int | float) for item in value
+            ):
+                _require_cardinality(1, len(value), path, batch_size)
+            for index, item in enumerate(value):
+                _validate_batch(item, f"{path}[{index}]", batch_size, active, depth + 1)
+        finally:
+            active.remove(id(value))
+
+
+def _require_cardinality(
+    dimensions: int,
+    size: int | None,
+    path: str,
+    batch_size: int,
+) -> None:
+    if dimensions and size != batch_size:
+        raise LoadingError(
+            f"collated field {path} has {size} rows for {batch_size} sample_id values"
+        )
+
+
+def _enter_container(value: object, path: str, active: set[int]) -> None:
+    marker = id(value)
+    if marker in active:
+        raise LoadingError(f"{path} contains a recursive batch container")
+    active.add(marker)

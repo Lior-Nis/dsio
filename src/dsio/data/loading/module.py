@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from lightning import LightningDataModule
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from dsio.data.examples import Examples
 from dsio.data.loading.collation import Collate
@@ -119,6 +119,11 @@ class DsioDataModule(LightningDataModule):
                 f"dataset factory for phase {phase!r} must return a torch Dataset, got "
                 f"{type(dataset).__name__}"
             )
+        if isinstance(dataset, IterableDataset):
+            raise LoadingError(
+                f"dataset factory for phase {phase!r} must return a map-style Dataset, "
+                "not IterableDataset"
+            )
         return IdentityDataset(dataset, sample_ids)
 
     def _loader(self, phase: Phase) -> DataLoader[dict[str, Any]]:
@@ -148,6 +153,8 @@ def _phase_mapping(roles: Mapping[str, str]) -> dict[Phase, str]:
 def _shuffle_flags(configured: Mapping[str, bool] | None) -> dict[Phase, bool]:
     result: dict[Phase, bool] = {phase: False for phase in _PHASES}
     result["train"] = True
+    if configured is not None and not isinstance(configured, Mapping):
+        raise LoadingError("shuffle must be a phase-to-bool mapping")
     for phase, enabled in (configured or {}).items():
         if phase not in _PHASES:
             raise LoadingError(f"shuffle names unsupported Lightning phase {phase!r}")
