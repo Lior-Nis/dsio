@@ -12,7 +12,13 @@ import torch
 from torch.utils.data import Dataset, IterableDataset, default_collate
 
 from dsio.data.adapters import entity_examples
-from dsio.data.loading import DsioDataModule, LoadingError, collate_items, stored_samples
+from dsio.data.loading import (
+    DsioDataModule,
+    LoadingError,
+    build_loader,
+    collate_items,
+    stored_samples,
+)
 from dsio.data.splits import generate
 from dsio.data.store import SignalStore
 
@@ -46,6 +52,35 @@ def _ids(loader: Any) -> list[str]:
     return [sample_id for batch in loader for sample_id in batch["sample_id"]]
 
 
+def test_build_loader_drops_only_the_incomplete_final_batch() -> None:
+    class Samples(Dataset[dict[str, Any]]):
+        def __len__(self) -> int:
+            return 5
+
+        def __getitem__(self, position: int) -> dict[str, Any]:
+            return {"sample_id": f"sample-{position}", "x": torch.tensor(position)}
+
+    retained = build_loader(Samples(), batch_size=2)
+    dropped = build_loader(Samples(), batch_size=2, drop_last=True)
+
+    assert _ids(retained) == [f"sample-{index}" for index in range(5)]
+    assert _ids(dropped) == [f"sample-{index}" for index in range(4)]
+    assert retained.drop_last is False
+    assert dropped.drop_last is True
+
+
+def test_build_loader_requires_boolean_drop_last() -> None:
+    class Samples(Dataset[dict[str, Any]]):
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, position: int) -> dict[str, Any]:
+            return {"sample_id": str(position), "x": torch.tensor(position)}
+
+    with pytest.raises(LoadingError, match="drop_last must be bool"):
+        build_loader(Samples(), drop_last=1)  # type: ignore[arg-type]
+
+
 def test_setup_maps_exact_split_roles_to_lightning_phases(tmp_path: Path) -> None:
     store, examples, split = _inputs(tmp_path / "samples")
     module = DsioDataModule(
@@ -68,6 +103,26 @@ def test_setup_maps_exact_split_roles_to_lightning_phases(tmp_path: Path) -> Non
     batch = next(iter(module.train_dataloader()))
     assert batch["sample_id"] == [str(value) for value in batch["sample_id"]]
     assert batch["x"].shape == (2, 4, 2)
+
+
+def test_data_module_defaults_to_retaining_every_phase_remainder(tmp_path: Path) -> None:
+    store, examples, split = _inputs(tmp_path / "samples")
+
+    module = DsioDataModule(
+        store,
+        examples,
+        split,
+        fold=0,
+        roles={"train": "train"},
+        dataset_factory=stored_samples,
+    )
+
+    assert module.drop_last == {
+        "train": False,
+        "validate": False,
+        "test": False,
+        "predict": False,
+    }
 
 
 def test_setup_constructs_only_the_requested_stage(tmp_path: Path) -> None:
@@ -451,6 +506,89 @@ def test_seeded_shuffle_order_is_independent_of_worker_count(tmp_path: Path) -> 
     assert orders(0) == orders(2)
 
 
+def test_train_drop_last_is_deterministic_and_preserves_complete_batch_identities(
+    tmp_path: Path,
+) -> None:
+    store, examples, split = _inputs(tmp_path / "samples")
+
+    def retained_ids() -> list[str]:
+        module = DsioDataModule(
+            store,
+            examples,
+            split,
+            fold=0,
+            roles={"train": "train"},
+            dataset_factory=stored_samples,
+            batch_size=4,
+            seed=31,
+            drop_last={"train": True},
+        )
+        module.setup("fit")
+        loader = module.train_dataloader()
+        assert loader.drop_last is True
+        return _ids(loader)
+
+    first = retained_ids()
+
+    assert first == retained_ids()
+    assert len(first) == 4
+    assert len(set(first)) == 4
+    assert set(first) < set(split.fold(0).assignments["train"])
+
+
+@pytest.mark.parametrize("phase", ["validate", "test", "predict"])
+def test_observation_phases_cannot_drop_assigned_samples(
+    tmp_path: Path,
+    phase: str,
+) -> None:
+    store, examples, split = _inputs(tmp_path / "samples")
+
+    with pytest.raises(LoadingError, match=f"drop_last for phase {phase!r} must be false"):
+        DsioDataModule(
+            store,
+            examples,
+            split,
+            fold=0,
+            roles={"train": "train"},
+            dataset_factory=stored_samples,
+            drop_last={phase: True},
+        )
+
+
+def test_observation_phase_drop_last_is_revalidated_during_setup(tmp_path: Path) -> None:
+    store, examples, split = _inputs(tmp_path / "samples")
+    module = DsioDataModule(
+        store,
+        examples,
+        split,
+        fold=0,
+        roles={"test": "train"},
+        dataset_factory=stored_samples,
+        batch_size=4,
+    )
+    module.drop_last["test"] = True
+
+    with pytest.raises(LoadingError, match="drop_last for phase 'test' must be false"):
+        module.setup("test")
+
+
+def test_drop_last_rejects_a_train_phase_without_one_full_batch(tmp_path: Path) -> None:
+    store, examples, split = _inputs(tmp_path / "samples")
+    module = DsioDataModule(
+        store,
+        examples,
+        split,
+        fold=0,
+        roles={"train": "train"},
+        dataset_factory=stored_samples,
+        batch_size=7,
+        drop_last={"train": True},
+    )
+
+    with pytest.raises(LoadingError, match="drop_last.*no full train batch.*6.*7"):
+        module.setup("fit")
+
+
 def _worker_unsafe_factory(
     store: SignalStore,
     examples: Any,
@@ -550,6 +688,9 @@ def test_missing_role_and_invalid_stage_fail_before_factory_use(tmp_path: Path) 
         ({"shuffle": {"train": "yes"}}, "shuffle"),
         ({"shuffle": {"fit": True}}, "unsupported Lightning phase"),
         ({"shuffle": ["train"]}, "phase-to-bool mapping"),
+        ({"drop_last": {"train": "yes"}}, "drop_last"),
+        ({"drop_last": {"fit": True}}, "unsupported Lightning phase"),
+        ({"drop_last": ["train"]}, "phase-to-bool mapping"),
     ],
 )
 def test_invalid_loader_configuration_fails_at_construction(

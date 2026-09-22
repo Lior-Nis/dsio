@@ -156,6 +156,32 @@ def test_resolved_capabilities_can_be_recorded_without_exercising_the_module() -
     assert evidence["strategy"] == "SingleDeviceStrategy"
 
 
+@pytest.mark.parametrize(
+    ("enabled", "warn_only", "expected"),
+    [(False, False, "false"), (True, False, "true"), (True, True, "warn")],
+)
+def test_resolved_capabilities_report_pytorchs_active_deterministic_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    warn_only: bool,
+    expected: str,
+) -> None:
+    trainer = _trainer()
+    monkeypatch.setattr(torch, "are_deterministic_algorithms_enabled", lambda: enabled)
+    monkeypatch.setattr(
+        torch,
+        "is_deterministic_algorithms_warn_only_enabled",
+        lambda: warn_only,
+    )
+
+    evidence = resolve_training_capabilities(
+        trainer,
+        requested=TrainerConfig(accelerator="cpu", devices=1, deterministic=not enabled),
+    )
+
+    assert evidence["resolved_deterministic"] == expected
+
+
 def test_unverified_precision_fails_closed_before_the_objective_runs() -> None:
     objective = UnavailableObjective()
     with pytest.raises(CapabilityError) as caught:

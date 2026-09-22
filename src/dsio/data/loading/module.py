@@ -49,6 +49,7 @@ class DsioDataModule(LightningDataModule):
         num_workers: int = 0,
         seed: int = 42,
         shuffle: Mapping[str, bool] | None = None,
+        drop_last: Mapping[str, bool] | None = None,
         collate_fn: Collate | None = None,
     ) -> None:
         super().__init__()
@@ -63,7 +64,8 @@ class DsioDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.seed = seed
-        self.shuffle = _shuffle_flags(shuffle)
+        self.shuffle = _phase_flags("shuffle", shuffle, train_default=True)
+        self.drop_last = _drop_last_flags(drop_last)
         self.collate_fn = collate_fn
         self._loaders: dict[Phase, DataLoader[dict[str, Any]]] = {}
         validate_loader_options(batch_size=batch_size, num_workers=num_workers, seed=seed)
@@ -78,6 +80,7 @@ class DsioDataModule(LightningDataModule):
             ) from None
         validate(self.examples, self.split)
         fold = self.split.fold(self.fold_index)
+        self.drop_last = _drop_last_flags(self.drop_last)
         for phase in phases:
             if phase not in self.roles or phase in self._loaders:
                 continue
@@ -90,10 +93,16 @@ class DsioDataModule(LightningDataModule):
                     f"fold {fold.index}; available roles: {sorted(fold.assignments)}"
                 ) from None
             dataset = self._dataset(phase, sample_ids)
+            if self.drop_last[phase] and len(dataset) < self.batch_size:
+                raise LoadingError(
+                    "drop_last would leave no full train batch: "
+                    f"dataset has {len(dataset)} samples, batch_size is {self.batch_size}"
+                )
             self._loaders[phase] = build_loader(
                 dataset,
                 batch_size=self.batch_size,
                 shuffle=self.shuffle[phase],
+                drop_last=self.drop_last[phase],
                 num_workers=self.num_workers,
                 seed=self.seed,
                 collate_fn=self.collate_fn,
@@ -156,15 +165,28 @@ def _phase_mapping(roles: Mapping[str, str]) -> dict[Phase, str]:
     return result
 
 
-def _shuffle_flags(configured: Mapping[str, bool] | None) -> dict[Phase, bool]:
-    result: dict[Phase, bool] = {phase: False for phase in _PHASES}
-    result["train"] = True
+def _phase_flags(
+    name: str,
+    configured: Mapping[str, bool] | None,
+    *,
+    train_default: bool = False,
+) -> dict[str, bool]:
+    result: dict[str, bool] = {phase: False for phase in _PHASES}
+    result["train"] = train_default
     if configured is not None and not isinstance(configured, Mapping):
-        raise LoadingError("shuffle must be a phase-to-bool mapping")
+        raise LoadingError(f"{name} must be a phase-to-bool mapping")
     for phase, enabled in (configured or {}).items():
         if phase not in _PHASES:
-            raise LoadingError(f"shuffle names unsupported Lightning phase {phase!r}")
+            raise LoadingError(f"{name} names unsupported Lightning phase {phase!r}")
         if not isinstance(enabled, bool):
-            raise LoadingError(f"shuffle for phase {phase!r} must be bool")
+            raise LoadingError(f"{name} for phase {phase!r} must be bool")
         result[phase] = enabled
+    return result
+
+
+def _drop_last_flags(configured: Mapping[str, bool] | None) -> dict[str, bool]:
+    result = _phase_flags("drop_last", configured)
+    for phase in ("validate", "test", "predict"):
+        if result[phase]:
+            raise LoadingError(f"drop_last for phase {phase!r} must be false")
     return result
