@@ -24,22 +24,22 @@ so that every training paradigm shares one replayable CPU data path.
 
 ## Tasks / Subtasks
 
-- [ ] Add the cohesive `dsio.data.loading` package (AC: 2-7)
-  - [ ] Add one identity-checking dataset wrapper and one canonical stored-sample factory.
-  - [ ] Add one identity-preserving collator and one deterministic DataLoader builder.
-  - [ ] Add the exact `DsioDataModule` composition root and public exports.
-- [ ] Replay governed assignments into Lightning phases (AC: 1, 3, 5)
-  - [ ] Validate the manifest against concrete examples and resolve the declared fold by index.
-  - [ ] Map only explicit `train`, `validate`, `test`, and `predict` phases to named roles.
-  - [ ] Build only the datasets requested by Lightning's setup stage and refuse missing loaders.
-- [ ] Preserve identity and deterministic CPU behavior (AC: 2-6)
-  - [ ] Require factory length/order to match the exact role assignment and check each item at access time.
-  - [ ] Preserve ordered `sample_id` values through default and custom collation.
-  - [ ] Seed shuffle/workers explicitly and preflight multiprocessing picklability.
+- [x] Add the cohesive `dsio.data.loading` package (AC: 2-7)
+  - [x] Add one identity-checking dataset wrapper and one canonical stored-sample factory.
+  - [x] Add one identity-preserving collator and one deterministic DataLoader builder.
+  - [x] Add the exact `DsioDataModule` composition root and public exports.
+- [x] Replay governed assignments into Lightning phases (AC: 1, 3, 5)
+  - [x] Validate the manifest against concrete examples and resolve the declared fold by index.
+  - [x] Map only explicit `train`, `validate`, `test`, and `predict` phases to named roles.
+  - [x] Build only the datasets requested by Lightning's setup stage and refuse missing loaders.
+- [x] Preserve identity and deterministic CPU behavior (AC: 2-6)
+  - [x] Require factory length/order to match the exact role assignment and check each item at access time.
+  - [x] Preserve ordered `sample_id` values through default and custom collation.
+  - [x] Seed shuffle/workers explicitly and preflight multiprocessing picklability.
 - [ ] Verify and review (AC: 1-7)
-  - [ ] Cover phase/role replay, identity alignment, custom collation, deterministic worker counts, and exact class behavior.
-  - [ ] Cover invalid roles/stages/folds, malformed items/batches, worker-unsafe components, and loader arguments.
-  - [ ] Run full pytest, Ruff, mypy, import contracts, lock validation, build, and diff checks.
+  - [x] Cover phase/role replay, identity alignment, custom collation, deterministic worker counts, and exact class behavior.
+  - [x] Cover invalid roles/stages/folds, malformed items/batches, worker-unsafe components, and loader arguments.
+  - [x] Run full pytest, Ruff, mypy, import contracts, lock validation, build, and diff checks.
   - [ ] Complete independent blind, edge-case, and acceptance reviews before merge.
 
 ## Dev Notes
@@ -81,14 +81,31 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 2.4 at `a62680d`; reconciled the generic spine with the canonical store, exact split assignments, existing window loader, and Lightning module contracts.
+- 2026-09-22: Implemented `dsio.data.loading` as four cohesive modules: dataset identity, collation, native loader construction, and the exact Lightning data composition root.
+- 2026-09-22: Self-audit removed `drop_last` because it contradicts exact assignment membership, bound the canonical factory to store content identity, and rejected non-CPU collated tensors.
+- 2026-09-22: Candidate gate passed: 804 tests passed (3 deselected), Ruff, mypy, all three import contracts, lock validation, build, and diff checks.
 
 ### Completion Notes List
+
+- `DsioDataModule` validates the concrete governed split and maps explicit Lightning phases to exact named role assignments without a phase/result model.
+- The injected factory remains modality-specific, while `IdentityDataset` makes its length and per-position identity checkable before any batch reaches a model.
+- Native default or custom collation is wrapped by one identity and CPU-device guard; `sample_id` remains aligned with all payload/target fields.
+- Loader construction is seeded, exact-membership (`drop_last=False`), and preflights dataset/collator picklability when workers are requested.
+- No registry, loader configuration hierarchy, accelerator augmentation hook, or second split abstraction was added.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/2-5-construct-identity-preserving-dataloaders.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `README.md`
+- `src/dsio/data/loading/__init__.py`
+- `src/dsio/data/loading/collation.py`
+- `src/dsio/data/loading/datasets.py`
+- `src/dsio/data/loading/loaders.py`
+- `src/dsio/data/loading/module.py`
+- `tests/data/loading/test_data_module.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 2.5 and started implementation.
+- 2026-09-22: Added the identity-preserving `DsioDataModule` loading path and passed the complete local quality gate.
