@@ -126,6 +126,8 @@ def test_domain_value_named_like_project_is_not_project_branching(tmp_path: Path
     assert _audit(tmp_path, "if signal_kind == 'pulse':\n    value = 1\n") == ()
     assert _audit(tmp_path, "if projection == 'pulse':\n    value = 1\n") == ()
     assert _audit(tmp_path, '"""Pulse transform."""\nvalue = project_axis + 1\n') == ()
+    assert _audit(tmp_path, "result = project_features(value)\n") == ()
+    assert _audit(tmp_path, "def identity(project):\n    return project\n") == ()
 
 
 def test_explicit_consumer_name_needs_no_project_identifier(tmp_path: Path) -> None:
@@ -143,6 +145,15 @@ if belongs(client):
     value = 1
 """
     assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
+def test_explicit_consumer_name_in_identifiers_is_rejected(tmp_path: Path) -> None:
+    for source in (
+        "class ConsumerXModel: pass\n",
+        "if consumer_x_enabled:\n    value = 1\n",
+        "if config.consumer_x:\n    value = 1\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
 
 def test_camel_case_project_identifier_is_project_context(tmp_path: Path) -> None:
@@ -255,6 +266,13 @@ def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path
         "REGISTRY = {}\nREGISTRY['x'] = component\n",
         "COMPONENTS = {}\ndef register(name):\n    COMPONENTS[name] = component\n",
         "HANDLERS = {}\ndef enroll(name):\n    HANDLERS[name] = component\n",
+        "FACTORIES = {}\ndef add(name, factory):\n    FACTORIES[name] = factory\n",
+        "TRANSFORMS = {}\ndef add_transform(name, transform):\n"
+        "    TRANSFORMS[name] = transform\n",
+        "HANDLERS = {}\ndef enroll(table, name, component):\n"
+        "    table[name] = component\nenroll(HANDLERS, name, component)\n",
+        "DISPATCH = {}\nDISPATCH['x'] = component\n",
+        "HANDLERS = []\nHANDLERS.append(component)\n",
         "HANDLERS = {}\nHANDLERS |= {'x': component}\n",
         "HANDLERS = {}\nHANDLERS.__setitem__('x', component)\n",
         "import collections\nHANDLERS = collections.defaultdict(dict)\n"
@@ -302,6 +320,7 @@ def test_reflective_dsio_registry_access_is_rejected(tmp_path: Path) -> None:
         "metrics.__dict__.get('METRICS').clear()",
         "mutate(vars(metrics)['METRICS'])",
         "object.__getattribute__(metrics, 'METRICS').clear()",
+        "operator.attrgetter('METRICS')(metrics).clear()",
     ):
         source = f"import dsio.eval.metrics as metrics\n{reference}\n"
         assert any(
@@ -335,6 +354,7 @@ def apply_plugins(value, plugins):
         "import builtins\nvars(builtins)['eval'](source)\n",
         "import runpy\nrunpy.run_module('consumer_x.private')\n",
         "import importlib.util\nimportlib.util.spec_from_file_location(name, path)\n",
+        "import sys\nsys.modules['builtins'].eval(source)\n",
         "eval(source)\n",
     ],
 )
@@ -448,6 +468,26 @@ def test_malformed_audit_inputs_return_an_input_rule(
     failures = audit_source(path, module=module, project_names=project_names)
 
     assert failures[0].startswith(("input:", "source:"))
+
+
+def test_safe_importlib_metadata_and_resources_are_admissible(tmp_path: Path) -> None:
+    source = (
+        "import builtins\n"
+        "from importlib.metadata import version\n"
+        "from importlib.resources import files\n"
+        "value_type = builtins.type(value)\n"
+    )
+    assert _audit(tmp_path, source) == ()
+
+
+def test_policy_namespace_does_not_exempt_candidate_modules(tmp_path: Path) -> None:
+    source = (
+        "if project == 'pulse':\n    value = 1\n"
+        "HANDLERS = {}\nHANDLERS['x'] = component\n"
+    )
+    failures = _audit(tmp_path, source, module="dsio.experimental.admission.candidate")
+    assert any(message.startswith("genericity:") for message in failures)
+    assert any(message.startswith("runtime-registration:") for message in failures)
 
 
 def test_named_audit_validates_before_importing(

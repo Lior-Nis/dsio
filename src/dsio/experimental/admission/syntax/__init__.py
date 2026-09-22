@@ -10,6 +10,7 @@ from dsio.experimental.admission.syntax.imports import (
 )
 from dsio.experimental.admission.syntax.projects import (
     project_contexts,
+    references_consumer_names,
     string_values,
 )
 from dsio.experimental.admission.syntax.registries import (
@@ -30,6 +31,7 @@ __all__ = [
     "is_dynamic_import_api",
     "is_registry_api",
     "project_contexts",
+    "references_consumer_names",
     "registry_assignment",
     "registry_mutation",
     "registry_reference",

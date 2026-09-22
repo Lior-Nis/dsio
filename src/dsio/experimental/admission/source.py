@@ -24,6 +24,16 @@ _PUBLIC_DEPENDENCIES = frozenset(
     }
 )
 _EXPERIMENTAL_ROOT = Path(__file__).parents[1]
+_POLICY_MODULES = frozenset(
+    {
+        "dsio.experimental.admission",
+        "dsio.experimental.admission.source",
+        "dsio.experimental.admission.syntax",
+        "dsio.experimental.admission.syntax.imports",
+        "dsio.experimental.admission.syntax.projects",
+        "dsio.experimental.admission.syntax.registries",
+    }
+)
 
 
 def audit_source(
@@ -111,11 +121,10 @@ def _audit_source(
         if isinstance(name, str) and name
     }
     explicit_match = _matched_project(tree, explicit_projects)
-    if explicit_match is not None:
+    if explicit_match is not None or syntax.references_consumer_names(tree, explicit_projects):
+        explicit_match = explicit_match or sorted(explicit_projects)[0]
         failures.append(f"genericity: source references consumer project {explicit_match!r}")
-    policy_module = module == "dsio.experimental.admission" or module.startswith(
-        "dsio.experimental.admission."
-    )
+    policy_module = module in _POLICY_MODULES
     if not policy_module:
         if syntax.project_contexts(tree):
             failures.append("genericity: component source branches on consumer project identity")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 
 from dsio.experimental.admission.syntax.imports import expression_name, fold_string
 
@@ -55,12 +56,29 @@ def project_contexts(tree: ast.AST) -> tuple[ast.AST, ...]:
             | ast.If
             | ast.IfExp
             | ast.Match
-            | ast.Call
-            | ast.Subscript
             | ast.While,
         )
     )
     return tuple(node for node in candidates if references_project_identity(node, aliases))
+
+
+def references_consumer_names(tree: ast.AST, names: set[str]) -> bool:
+    if not names:
+        return False
+    identifiers = (
+        candidate.id
+        if isinstance(candidate, ast.Name)
+        else candidate.attr
+        if isinstance(candidate, ast.Attribute)
+        else candidate.name
+        for candidate in ast.walk(tree)
+        if isinstance(candidate, ast.Name | ast.Attribute | ast.FunctionDef | ast.ClassDef)
+    )
+    return any(
+        f"_{name}_" in f"_{_snake_case(identifier)}_"
+        for identifier in identifiers
+        for name in names
+    )
 
 
 def string_values(tree: ast.AST, constants: dict[str, set[str]]) -> tuple[str, ...]:
@@ -75,15 +93,17 @@ def string_values(tree: ast.AST, constants: dict[str, set[str]]) -> tuple[str, .
 
 
 def _project_identifier(name: str) -> bool:
-    lowered = name.casefold()
-    return (
-        lowered == "project"
-        or lowered.startswith("project_")
-        or lowered.endswith("_project")
-        or "_project_" in lowered
-        or (name.startswith("project") and len(name) > 7 and name[7].isupper())
-        or "Project" in name
-    )
+    return _snake_case(name) in {
+        "consumer_project",
+        "current_project",
+        "project",
+        "project_enabled",
+        "project_id",
+        "project_key",
+        "project_name",
+        "project_package",
+        "project_slug",
+    }
 
 
 def _assigned_names(target: ast.expr) -> tuple[str, ...]:
@@ -92,3 +112,8 @@ def _assigned_names(target: ast.expr) -> tuple[str, ...]:
     if isinstance(target, ast.Tuple | ast.List):
         return tuple(name for item in target.elts for name in _assigned_names(item))
     return ()
+
+
+def _snake_case(name: str) -> str:
+    separated = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", separated).casefold()

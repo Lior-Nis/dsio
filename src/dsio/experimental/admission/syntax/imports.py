@@ -88,13 +88,33 @@ def expression_name(expression: ast.expr, known_aliases: dict[str, str]) -> str:
 
 
 def is_dynamic_import_api(name: str) -> bool:
-    return name == "builtins" or name.startswith(("builtins.", "importlib", "runpy"))
+    return name in {
+        "builtins.__import__",
+        "builtins.compile",
+        "builtins.eval",
+        "builtins.exec",
+        "importlib.import_module",
+        "runpy",
+        "runpy.run_module",
+        "runpy.run_path",
+    } or name.startswith(("importlib.machinery", "importlib.util"))
 
 
 def dynamic_import_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
     if not isinstance(node, ast.Name | ast.Attribute | ast.Subscript | ast.Call):
         return False
     name = expression_name(node, known_aliases)
+    if "sys.modules[" in name and any(
+        module in name for module in ("'builtins'", "'importlib'", "'runpy'")
+    ):
+        return True
+    if isinstance(node, ast.Call) and expression_name(node.func, known_aliases) in {
+        "getattr",
+        "vars",
+    }:
+        root = expression_name(node.args[0], known_aliases) if node.args else ""
+        if root in {"builtins", "importlib", "runpy"}:
+            return True
     return name == "__builtins__" or name in {
         "__import__",
         "builtins.__import__",
@@ -105,7 +125,10 @@ def dynamic_import_reference(node: ast.AST, known_aliases: dict[str, str]) -> bo
         "eval",
         "exec",
         "importlib.import_module",
-    } or name.startswith(("builtins.", "importlib.", "runpy."))
+        "runpy",
+        "runpy.run_module",
+        "runpy.run_path",
+    } or name.startswith(("importlib.machinery", "importlib.util"))
 
 
 def import_from_base(
