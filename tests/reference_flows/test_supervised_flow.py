@@ -1,0 +1,105 @@
+"""The supervised example proves the whole public spine as consumer-owned code."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+import mlflow
+import numpy as np
+import pytest
+from lightning import Trainer
+from mlflow import MlflowClient
+
+from dsio.data.loading import DsioDataModule
+from dsio.model.module import DsioModule
+
+
+def _isolate_services(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in tuple(os.environ):
+        if name.startswith(("PREFECT_", "MLFLOW_")):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("PREFECT_HOME", str(tmp_path / "prefect"))
+    monkeypatch.setenv("PREFECT_SERVER_ANALYTICS_ENABLED", "false")
+    monkeypatch.setenv("PREFECT_LOGGING_LEVEL", "ERROR")
+    monkeypatch.setenv("DO_NOT_TRACK", "1")
+    tracking_uri = (tmp_path / "mlruns").resolve().as_uri()
+    monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
+    mlflow.set_tracking_uri(tracking_uri)
+
+
+def test_supervised_reference_flow_replays_and_reevaluates_without_training(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_services(tmp_path, monkeypatch)
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[2]))
+    from prefect.testing.utilities import prefect_test_harness
+    from reference_projects.supervised.flow import reevaluate, supervised_flow
+
+    observed_types: list[tuple[type[object], type[object]]] = []
+    original_fit = Trainer.fit
+
+    def recording_fit(
+        trainer: Trainer,
+        model: object,
+        *args: object,
+        **kwargs: object,
+    ) -> Any:
+        datamodule = kwargs.get("datamodule")
+        observed_types.append((type(model), type(datamodule)))
+        return original_fit(trainer, model, *args, **kwargs)
+
+    monkeypatch.setattr(Trainer, "fit", recording_fit)
+    with prefect_test_harness():
+        first = supervised_flow(str(tmp_path / "first"), seed=19)
+        second = supervised_flow(str(tmp_path / "second"), seed=19)
+
+        def forbidden_fit(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise AssertionError("downstream-only reevaluation invoked training")
+
+        monkeypatch.setattr(Trainer, "fit", forbidden_fit)
+        downstream = reevaluate(first, metrics=("rmse",))
+
+    assert observed_types == [
+        (DsioModule, DsioDataModule),
+        (DsioModule, DsioDataModule),
+    ]
+    assert first["split_digest"] == second["split_digest"]
+    assert first["assignments"] == second["assignments"]
+    assert first["identities"] == second["identities"]
+    np.testing.assert_array_equal(first["prediction"], second["prediction"])
+    assert first["inference_sample_id"] == first["test_sample_id"]
+
+    assert downstream["metrics"] == {"rmse": first["metrics"]["rmse"]}
+    assert downstream["evaluation_run_id"] != first["evaluation_run_id"]
+    assert downstream["identity"] != first["identities"]["evaluation"]
+
+    client = MlflowClient()
+    for result in (first, second):
+        assert client.get_run(result["parent_run_id"]).info.status == "FINISHED"
+        for role in ("data", "split", "train", "export", "evaluation", "inference"):
+            run = client.get_run(result[f"{role}_run_id"])
+            assert run.info.status == "FINISHED"
+            assert run.data.tags["mlflow.parentRunId"] == result["parent_run_id"]
+            assert run.data.tags["dsio.execution_identity"] == result["identities"][role]
+
+        training = client.get_run(result["train_run_id"])
+        assert len(training.inputs.dataset_inputs) == 1
+        assert training.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
+
+        inference = client.get_run(result["inference_run_id"])
+        assert inference.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
+        assert [item.model_id for item in inference.inputs.model_inputs] == [
+            result["model_uri"].removeprefix("models:/")
+        ]
+
+    evaluation = client.get_run(downstream["evaluation_run_id"])
+    assert evaluation.data.tags["dsio.evaluation.dataset_source_run_id"] == first["split_run_id"]
+    assert [item.model_id for item in evaluation.inputs.model_inputs] == [
+        first["model_uri"].removeprefix("models:/")
+    ]
+    assert evaluation.data.params["evaluation.metrics"] == '["rmse"]'

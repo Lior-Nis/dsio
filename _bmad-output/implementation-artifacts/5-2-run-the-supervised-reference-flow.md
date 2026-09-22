@@ -4,7 +4,7 @@ baseline_commit: ebf9ea6
 
 # Story 5.2: Run the Supervised Reference Flow
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -21,18 +21,18 @@ so that I can understand and verify the complete supported experiment spine.
 
 ## Tasks / Subtasks
 
-- [ ] Add one repository example that behaves like consumer-owned code (AC: 1, 4)
-  - [ ] Define native Prefect tasks and flows directly; keep orchestration outside `src/dsio`.
-  - [ ] Use only public DSio imports and native MLflow/Lightning objects.
-- [ ] Execute the complete synthetic supervised spine (AC: 1-2)
-  - [ ] Build canonical synthetic storage and immutable dataset evidence.
-  - [ ] Generate, validate, log, and replay one DSio split manifest.
-  - [ ] Train the exact DSio Lightning module/data module and log linked training evidence.
-  - [ ] Evaluate, export an immutable predictor, and perform signature-valid inference.
-- [ ] Demonstrate deterministic replay and selective downstream work (AC: 2-3)
-  - [ ] Repeat the full flow and compare identities, assignments, outputs, and lineage.
-  - [ ] Reevaluate from immutable source evidence with changed evaluation configuration and prove no retraining.
-- [ ] Cover the example through installed-distribution and CI gates (AC: 1-4)
+- [x] Add one repository example that behaves like consumer-owned code (AC: 1, 4)
+  - [x] Define native Prefect tasks and flows directly; keep orchestration outside `src/dsio`.
+  - [x] Use only public DSio imports and native MLflow/Lightning objects.
+- [x] Execute the complete synthetic supervised spine (AC: 1-2)
+  - [x] Build canonical synthetic storage and immutable dataset evidence.
+  - [x] Generate, validate, log, and replay one DSio split manifest.
+  - [x] Train the exact DSio Lightning module/data module and log linked training evidence.
+  - [x] Evaluate, export an immutable predictor, and perform signature-valid inference.
+- [x] Demonstrate deterministic replay and selective downstream work (AC: 2-3)
+  - [x] Repeat the full flow and compare identities, assignments, outputs, and lineage.
+  - [x] Reevaluate from immutable source evidence with changed evaluation configuration and prove no retraining.
+- [x] Cover the example through installed-distribution and CI gates (AC: 1-4)
 
 ## Dev Notes
 
@@ -59,14 +59,32 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 5.1 at `ebf9ea6`; chose an executable consumer-owned example over any new orchestration abstraction.
+- 2026-09-22: Focused replay proof passed with stable split assignments, execution identities, predictions, and downstream-only evaluation.
+- 2026-09-22: Full gate passed: 1046 tests, Ruff, mypy, import contracts, and wheel/sdist build.
 
 ### Completion Notes List
+
+- Added an ordinary Prefect reference project outside the DSio distribution; it composes public DSio APIs and native Lightning/MLflow objects without a wrapper, runner, or result model.
+- The full supervised flow records parent/child run lineage, split reuse, checkpoint-backed export, native evaluation/inference inputs, and output artifacts.
+- The deterministic test executes two complete flows and a changed-metric evaluation-only flow while forbidding retraining.
+- Split the example tasks by data, training, and downstream responsibility once the initial module exceeded the agreed size boundary.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/5-2-run-the-supervised-reference-flow.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `README.md`
+- `reference_projects/__init__.py`
+- `reference_projects/supervised/__init__.py`
+- `reference_projects/supervised/components.py`
+- `reference_projects/supervised/flow.py`
+- `reference_projects/supervised/tasks/__init__.py`
+- `reference_projects/supervised/tasks/data.py`
+- `reference_projects/supervised/tasks/downstream.py`
+- `reference_projects/supervised/tasks/training.py`
+- `tests/reference_flows/test_supervised_flow.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 5.2 and started implementation.
+- 2026-09-22: Implemented and validated the supervised reference flow; moved to review.
