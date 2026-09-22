@@ -66,8 +66,22 @@ def test_component_must_start_in_experimental_namespace(tmp_path: Path) -> None:
     )
 
 
-def test_named_component_audit_and_enforcement_are_plain(tmp_path: Path) -> None:
-    assert audit_component("dsio.experimental.admission:audit_source") == ()
+def test_named_component_audit_and_enforcement_are_plain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from dsio.experimental import admission
+
+    candidate_source = tmp_path / "candidate.py"
+    candidate_source.write_text("def component(): pass\n")
+
+    def component() -> None:
+        pass
+
+    component.__module__ = "dsio.experimental.candidate"
+    with monkeypatch.context() as patch:
+        patch.setattr(admission, "component_source", lambda _module: candidate_source)
+        patch.setattr(admission, "resolve_reference", lambda _reference: component)
+        assert audit_component("dsio.experimental.candidate:component") == ()
     with pytest.raises(AdmissionError, match="importability"):
         require_admissible_component("dsio.experimental.missing:Component")
 
@@ -114,6 +128,31 @@ def test_explicit_consumer_name_needs_no_project_identifier(tmp_path: Path) -> N
         message.startswith("genericity:")
         for message in _audit(tmp_path, "if client == 'consumer_x':\n    value = 1\n")
     )
+
+
+def test_explicit_consumer_name_in_helper_is_rejected(tmp_path: Path) -> None:
+    source = """
+def belongs(client):
+    return client == 'consumer_x'
+if belongs(client):
+    value = 1
+"""
+    assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
+def test_camel_case_project_identifier_is_project_context(tmp_path: Path) -> None:
+    assert any(
+        message.startswith("genericity:")
+        for message in _audit(tmp_path, "if projectName == 'pulse':\n    value = 1\n")
+    )
+
+
+def test_mapping_project_access_is_project_context(tmp_path: Path) -> None:
+    for source in (
+        "if config['project'] == 'pulse':\n    value = 1\n",
+        "if config.get('project') == 'pulse':\n    value = 1\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
 
 def test_project_alias_and_match_guard_are_rejected(tmp_path: Path) -> None:
@@ -196,6 +235,7 @@ def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path
     for source in (
         "from dsio.train.torch_task import TASKS\n",
         "REGISTRY = {}\nREGISTRY['x'] = component\n",
+        "COMPONENTS = {}\ndef register(name):\n    COMPONENTS[name] = component\n",
     ):
         assert any(
             message.startswith("runtime-registration:")
@@ -213,6 +253,37 @@ def test_registry_descendants_and_reflection_are_rejected(tmp_path: Path) -> Non
             message.startswith("runtime-registration:")
             for message in _audit(tmp_path, source)
         )
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "mutate(metrics.METRICS)",
+        "mutate(metrics.metric)",
+        "getattr(metrics, 'METRICS').add('x', score)",
+    ],
+)
+def test_closed_registry_references_cannot_be_passed_indirectly(
+    tmp_path: Path, reference: str
+) -> None:
+    source = f"import dsio.eval.metrics as metrics\n{reference}\n"
+    assert any(
+        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import builtins\nbuiltins.__import__('consumer_x.private')\n",
+        "import importlib\ngetattr(importlib, 'import_module')('consumer_x.private')\n",
+        "eval(source)\n",
+    ],
+)
+def test_dynamic_import_and_code_evaluation_apis_are_rejected(
+    tmp_path: Path, source: str
+) -> None:
+    assert any(message.startswith("dependency:") for message in _audit(tmp_path, source))
 
 
 def test_star_import_is_not_statically_admissible(tmp_path: Path) -> None:
@@ -301,6 +372,23 @@ def test_one_project_name_string_is_normalized(tmp_path: Path) -> None:
     )
 
     assert any(message.startswith("genericity:") for message in failures)
+
+
+@pytest.mark.parametrize(
+    ("path", "module", "project_names"),
+    [
+        (None, "dsio.experimental.candidate", ()),
+        ("candidate.py", None, ()),
+        ("candidate.py", "dsio.experimental.candidate", b"consumer_x"),
+        ("candidate.py", "dsio.experimental.candidate", ("consumer_x", 1)),
+    ],
+)
+def test_malformed_audit_inputs_return_an_input_rule(
+    path: Any, module: Any, project_names: Any
+) -> None:
+    failures = audit_source(path, module=module, project_names=project_names)
+
+    assert failures[0].startswith("input:")
 
 
 def test_named_audit_validates_before_importing(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import re
 
 _REGISTRATION_CALLABLES = frozenset(
     {
@@ -36,46 +35,23 @@ def imports(tree: ast.AST, module: str, *, is_package: bool = False) -> tuple[st
     return tuple(imported)
 
 
-def project_branches(tree: ast.AST) -> tuple[tuple[ast.AST, bool], ...]:
-    project_names = _project_aliases(tree)
-    branches: list[tuple[ast.AST, bool]] = []
+def references_project_identity(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
-        if isinstance(node, ast.If | ast.IfExp | ast.While):
-            branches.append((node.test, mentions_project(node.test, project_names)))
-        elif isinstance(node, ast.Match):
-            subject_is_project = mentions_project(node.subject, project_names)
-            branches.extend((case.pattern, subject_is_project) for case in node.cases)
-            branches.extend(
-                (
-                    case.guard,
-                    subject_is_project or mentions_project(case.guard, project_names),
-                )
-                for case in node.cases
-                if case.guard is not None
-            )
-        elif isinstance(node, ast.comprehension):
-            branches.extend(
-                (condition, mentions_project(condition, project_names))
-                for condition in node.ifs
-            )
-        elif isinstance(node, ast.Assign | ast.AnnAssign):
-            value = node.value
-            if value is not None:
-                branches.append((value, mentions_project(value, project_names)))
-    return tuple(branches)
-
-
-def mentions_project(node: ast.AST, aliases: set[str] | None = None) -> bool:
-    aliases = aliases or set()
-    return any(
-        candidate.id in aliases or _project_identifier(candidate.id)
-        for candidate in ast.walk(node)
-        if isinstance(candidate, ast.Name)
-    ) or any(
-        _project_identifier(candidate.attr)
-        for candidate in ast.walk(node)
-        if isinstance(candidate, ast.Attribute)
-    )
+        if isinstance(node, ast.Name | ast.Attribute):
+            name = node.id if isinstance(node, ast.Name) else node.attr
+            if _project_identifier(name):
+                return True
+        elif (
+            isinstance(node, ast.Subscript) and _literal_name(node.slice) == "project"
+        ) or (
+            isinstance(node, ast.Call)
+            and node.args
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and _literal_name(node.args[0]) == "project"
+        ):
+            return True
+    return False
 
 
 def registry_mutation(call: ast.Call, known_aliases: dict[str, str]) -> bool:
@@ -93,6 +69,30 @@ def registry_mutation(call: ast.Call, known_aliases: dict[str, str]) -> bool:
         "setdefault",
         "update",
     }
+
+
+def registry_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
+    if isinstance(node, ast.Name | ast.Attribute):
+        name = expression_name(node, known_aliases)
+        if name in _REGISTRATION_CALLABLES or _is_registry_receiver(name):
+            return True
+    if not isinstance(node, ast.Call) or expression_name(node.func, known_aliases) != "getattr":
+        return False
+    if len(node.args) < 2:
+        return False
+    attribute = node.args[1]
+    if not isinstance(attribute, ast.Constant) or not isinstance(attribute.value, str):
+        return False
+    name = f"{expression_name(node.args[0], known_aliases)}.{attribute.value}"
+    return name in _REGISTRATION_CALLABLES or _is_registry_receiver(name)
+
+
+def defines_registration_surface(tree: ast.AST) -> bool:
+    return any(
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name.casefold() in {"register", "register_component", "register_plugin"}
+        for node in ast.walk(tree)
+    )
 
 
 def registry_assignment(node: ast.AST, known_aliases: dict[str, str]) -> bool:
@@ -173,27 +173,38 @@ def expression_name(expression: ast.expr, known_aliases: dict[str, str]) -> str:
     if isinstance(expression, ast.Attribute):
         parent = expression_name(expression.value, known_aliases)
         return f"{parent}.{expression.attr}" if parent else expression.attr
+    if isinstance(expression, ast.Call):
+        function = expression_name(expression.func, known_aliases)
+        if function == "getattr" and len(expression.args) >= 2:
+            attribute = _literal_name(expression.args[1])
+            parent = expression_name(expression.args[0], known_aliases)
+            return f"{parent}.{attribute}" if parent and attribute else ""
+        if function == "vars" and expression.args:
+            return f"{expression_name(expression.args[0], known_aliases)}.__dict__"
+    if isinstance(expression, ast.Subscript):
+        key = _literal_name(expression.slice)
+        parent = expression_name(expression.value, known_aliases)
+        if key and parent.endswith(".__dict__"):
+            return f"{parent.removesuffix('.__dict__')}.{key}"
     return ""
 
 
-def dynamic_imports(
-    tree: ast.AST, known_aliases: dict[str, str]
-) -> tuple[str | None, ...]:
-    imported: list[str | None] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        function = expression_name(node.func, known_aliases)
-        if function not in {"__import__", "importlib.import_module"}:
-            continue
-        target = node.args[0] if node.args else next(
-            (keyword.value for keyword in node.keywords if keyword.arg == "name"), None
-        )
-        if isinstance(target, ast.Constant) and isinstance(target.value, str):
-            imported.append(target.value)
-        else:
-            imported.append(None)
-    return tuple(imported)
+def is_dynamic_import_api(name: str) -> bool:
+    return name in {"builtins.__import__", "importlib.import_module"}
+
+
+def dynamic_import_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
+    if not isinstance(node, ast.Name | ast.Attribute | ast.Call):
+        return False
+    name = expression_name(node, known_aliases)
+    return name in {
+        "__import__",
+        "builtins.__import__",
+        "compile",
+        "eval",
+        "exec",
+        "importlib.import_module",
+    }
 
 
 def import_from_base(
@@ -209,48 +220,31 @@ def import_from_base(
     return ".".join([*parts, node.module or ""]).rstrip(".")
 
 
-def string_constants(tree: ast.AST) -> dict[str, str]:
-    constants: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
-            continue
-        if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        constants.update(
-            (target.id, node.value.value) for target in targets if isinstance(target, ast.Name)
-        )
-    return constants
-
-
-def _project_aliases(tree: ast.AST) -> set[str]:
-    aliases: set[str] = set()
-    assignments = [
-        (target.id, node.value)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None
-        for target in (
-            node.targets if isinstance(node, ast.Assign) else [node.target]
-        )
-        if isinstance(target, ast.Name)
-    ]
-    for _ in assignments:
-        changed = False
-        for target, value in assignments:
-            if target not in aliases and mentions_project(value, aliases):
-                aliases.add(target)
-                changed = True
-        if not changed:
-            break
-    return aliases
-
-
 def _project_identifier(name: str) -> bool:
-    return "project" in re.split(r"_+", name.casefold())
+    lowered = name.casefold()
+    return (
+        lowered == "project"
+        or lowered.startswith("project_")
+        or lowered.endswith("_project")
+        or "_project_" in lowered
+        or (name.startswith("project") and len(name) > 7 and name[7].isupper())
+        or "Project" in name
+    )
 
 
 def _is_registry_receiver(name: str) -> bool:
     parts = name.split(".")
+    registry_names = {registry.rpartition(".")[2] for registry in _REGISTRIES}
     return any(
         name == registry or name.startswith(f"{registry}.") for registry in _REGISTRIES
-    ) or any(part.casefold() == "registry" for part in parts)
+    ) or any(
+        part in registry_names
+        or part.casefold() in {"components", "plugins", "registries", "registry"}
+        for part in parts
+    )
+
+
+def _literal_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None

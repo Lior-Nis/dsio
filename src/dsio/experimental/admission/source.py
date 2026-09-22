@@ -34,8 +34,16 @@ def audit_source(
     project_names: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """Return deterministic rule messages for one proposed component module."""
+    if not isinstance(path, str | Path):
+        return ("input: source path must be a string or pathlib.Path",)
+    if not isinstance(module, str) or not module:
+        return ("input: module must be a non-empty string",)
     if isinstance(project_names, str):
         project_names = (project_names,)
+    elif isinstance(project_names, bytes) or not isinstance(project_names, Sequence):
+        return ("input: project_names must be a string or a sequence of non-empty strings",)
+    if any(not isinstance(name, str) or not name for name in project_names):
+        return ("input: project_names must contain only non-empty strings",)
     return _audit_source(
         Path(path), module=module, project_names=project_names, seen_modules=set()
     )
@@ -64,14 +72,14 @@ def _audit_source(
 
     is_package = source_path.name == "__init__.py"
     aliases = syntax.assigned_aliases(tree, syntax.aliases(tree, module, is_package=is_package))
-    dynamic_imports = syntax.dynamic_imports(tree, aliases)
     imported_modules = (
         *syntax.imports(tree, module, is_package=is_package),
-        *(target for target in dynamic_imports if target is not None),
     )
-    if any(target is None for target in dynamic_imports):
+    if any(syntax.is_dynamic_import_api(imported) for imported in imported_modules) or any(
+        syntax.dynamic_import_reference(node, aliases) for node in ast.walk(tree)
+    ):
         failures.append(
-            "dependency: dynamic imports must name one literal public module for static audit"
+            "dependency: dynamic import and code-evaluation APIs are not statically admissible"
         )
     for imported in imported_modules:
         root = imported.partition(".")[0]
@@ -104,19 +112,26 @@ def _audit_source(
         if isinstance(name, str) and name
     }
     known_projects = set(_KNOWN_PROJECTS) - explicit_projects
-    string_constants = syntax.string_constants(tree)
-    for branch, has_project_context in syntax.project_branches(tree):
-        matched = _matched_project(branch, explicit_projects, string_constants)
-        if matched is None and has_project_context:
-            matched = _matched_project(branch, known_projects, string_constants)
-        if matched is not None:
-            failures.append(f"genericity: conditional branches on consumer project {matched!r}")
+    explicit_match = _matched_project(tree, explicit_projects)
+    if explicit_match is not None:
+        failures.append(f"genericity: source references consumer project {explicit_match!r}")
+    if syntax.references_project_identity(tree):
+        known_match = _matched_project(tree, known_projects)
+        if known_match is not None:
+            failures.append(
+                f"genericity: source references consumer project {known_match!r}"
+            )
 
-    if any(
-        syntax.registry_mutation(node, aliases)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-    ) or any(syntax.registry_assignment(node, aliases) for node in ast.walk(tree)):
+    if (
+        any(syntax.registry_reference(node, aliases) for node in ast.walk(tree))
+        or any(
+            syntax.registry_mutation(node, aliases)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+        )
+        or any(syntax.registry_assignment(node, aliases) for node in ast.walk(tree))
+        or syntax.defines_registration_surface(tree)
+    ):
         failures.append(
             "runtime-registration: component source mutates a registry; contribute "
             "through the governed DSIO dispatcher instead"
@@ -164,19 +179,12 @@ def _experimental_source(imported: str) -> tuple[str, Path] | None:
     return None
 
 
-def _matched_project(
-    branch: ast.AST, projects: set[str], string_constants: dict[str, str]
-) -> str | None:
+def _matched_project(branch: ast.AST, projects: set[str]) -> str | None:
     values = [
         node.value.casefold()
         for node in ast.walk(branch)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
-    values.extend(
-        string_constants[node.id].casefold()
-        for node in ast.walk(branch)
-        if isinstance(node, ast.Name) and node.id in string_constants
-    )
     return next(
         (
             project
