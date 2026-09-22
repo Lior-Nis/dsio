@@ -8,6 +8,7 @@ from typing import Any, Literal, Protocol, cast
 import torch
 from lightning import LightningModule
 from torch import Tensor, nn
+from torchmetrics import Metric
 
 from dsio.batches import PredictionBatch
 from dsio.config.components import (
@@ -18,7 +19,8 @@ from dsio.model.chain import ComponentError, export_encoder
 
 Stage = Literal["train", "validate", "test"]
 type Batch = Mapping[str, Any]
-type ObjectiveResult = Mapping[str, Tensor]
+type ObjectiveValue = Tensor | Metric
+type ObjectiveResult = Mapping[str, ObjectiveValue]
 
 _INTEGER_ROW_DTYPES = {
     torch.uint8,
@@ -146,7 +148,9 @@ class DsioModule(LightningModule):
                 on_epoch=True,
                 prog_bar=stage == "validate" and name == "loss",
             )
-        return values["loss"]
+        loss = values["loss"]
+        assert isinstance(loss, Tensor)
+        return loss
 
     def training_step(self, batch: Batch, batch_idx: int) -> Tensor:
         del batch_idx
@@ -231,20 +235,24 @@ def _batch_ids(batch: object) -> list[str]:
     return cast("list[str]", result)
 
 
-def _objective_values(result: object) -> dict[str, Tensor]:
+def _objective_values(result: object) -> dict[str, ObjectiveValue]:
     if not isinstance(result, Mapping):
         raise ModuleError(f"objective must return a mapping, got {type(result).__name__}")
     if "loss" not in result:
         raise ModuleError("objective result requires mandatory scalar tensor 'loss'")
-    values: dict[str, Tensor] = {}
+    values: dict[str, ObjectiveValue] = {}
     for name, value in result.items():
         if not isinstance(name, str) or not name or "/" in name:
             raise ModuleError("objective result names must be non-empty strings without '/'")
         if name in {"loss_step", "loss_epoch"}:
             raise ModuleError(f"objective result name {name!r} is reserved by Lightning")
+        if name != "loss" and isinstance(value, Metric):
+            values[name] = value
+            continue
         if not isinstance(value, Tensor):
             raise ModuleError(
-                f"objective result {name!r} must be a tensor, got {type(value).__name__}"
+                f"objective result {name!r} must be a tensor or TorchMetric, "
+                f"got {type(value).__name__}"
             )
         if value.ndim != 0:
             raise ModuleError(

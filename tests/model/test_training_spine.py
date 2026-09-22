@@ -13,6 +13,7 @@ from lightning import Trainer
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
+from torchmetrics import MeanMetric
 
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
@@ -81,6 +82,24 @@ class InvalidOptimizerFactory:
     def __call__(self, *args: object, **kwargs: object) -> object:
         del args, kwargs
         return object()
+
+
+class TorchMetricsObjective(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mean = MeanMetric()
+
+    def forward(
+        self,
+        model: nn.Module,
+        batch: Mapping[str, Any],
+        stage: str,
+    ) -> Mapping[str, object]:
+        del stage
+        prediction = model(batch["x"])
+        loss = prediction.square().mean()
+        self.mean.update(prediction.detach().mean())
+        return {"loss": loss, "mean": self.mean}
 
 
 def _data_module(path: Path) -> DsioDataModule:
@@ -203,6 +222,21 @@ def test_native_optimizer_and_scheduler_factories_return_lightning_configuration
     assert type(configured["optimizer"]) is torch.optim.SGD
     assert configured["optimizer"].param_groups[0]["lr"] == 0.25
     assert type(configured["lr_scheduler"]) is torch.optim.lr_scheduler.StepLR
+
+
+def test_native_torchmetrics_are_emitted_only_through_lightning_log() -> None:
+    objective = TorchMetricsObjective()
+    module = DsioModule(model=nn.Identity(), objective=objective)  # type: ignore[arg-type]
+    logged: dict[str, object] = {}
+    module.log = lambda name, value, **kwargs: logged.setdefault(name, value)  # type: ignore[method-assign,assignment]
+
+    loss = module.training_step(
+        {"sample_id": ["left", "right"], "x": torch.tensor([[1.0], [3.0]])},
+        0,
+    )
+
+    assert loss == torch.tensor(5.0)
+    assert logged["train/mean"] is objective.mean
 
 
 def test_optimizer_factory_must_return_a_native_optimizer() -> None:

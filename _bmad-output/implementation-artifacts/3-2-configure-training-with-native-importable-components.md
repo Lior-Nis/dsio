@@ -69,6 +69,7 @@ Codex (GPT-5)
 - 2026-09-22: Created from merged Story 3.1 at `fddc018`; constrained the design to one import resolver, plain mappings, native Lightning/PyTorch structures, and existing provenance.
 - 2026-09-22: Removed the model-component and mask registries; current supervised, SSL, token, label, optimizer, and scheduler consumers now use ordinary import references.
 - 2026-09-22: Candidate release gate passed: 859 tests passed (3 deselected), locked sync, builds, Ruff, mypy, root-import inertia, and diff checks.
+- 2026-09-22: Native TorchMetrics values are accepted as optional objective metrics and passed directly to `LightningModule.log`; loss remains a scalar tensor.
 
 ### Completion Notes List
 
