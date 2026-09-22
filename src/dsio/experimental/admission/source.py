@@ -34,17 +34,6 @@ _POLICY_MODULES = frozenset(
         "dsio.experimental.admission.syntax.registries",
     }
 )
-_REGISTRY_OWNER_MODULES = frozenset(
-    {
-        "dsio.config.schema",
-        "dsio.eval.metrics",
-        "dsio.train.runner",
-        "dsio.train.ssl_task",
-        "dsio.train.torch_task",
-    }
-)
-
-
 def audit_source(
     path: str | Path,
     *,
@@ -110,10 +99,6 @@ def _audit_source(
         if syntax.is_registry_api(imported):
             failures.append(
                 f"runtime-registration: import {imported!r} exposes a closed DSIO dispatcher"
-            )
-        elif imported in _REGISTRY_OWNER_MODULES:
-            failures.append(
-                f"runtime-registration: module import {imported!r} exposes closed DSIO dispatchers"
             )
         elif imported == "dsio.config.registry" or imported.startswith(
             "dsio.config.registry."

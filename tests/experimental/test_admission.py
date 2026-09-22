@@ -510,6 +510,98 @@ def test_safe_importlib_metadata_and_resources_are_admissible(tmp_path: Path) ->
     assert _audit(tmp_path, "get_model().eval()\nmodels[0].eval()\n") == ()
 
 
+def test_project_aliases_follow_source_order_and_lexical_scope(tmp_path: Path) -> None:
+    assert any(
+        message.startswith("genericity:")
+        for message in _audit(
+            tmp_path,
+            "p = project\nif p:\n    run()\np = signal_kind\n",
+        )
+    )
+    assert any(
+        message.startswith("genericity:")
+        for message in _audit(
+            tmp_path,
+            "def run(project, signal_kind, override):\n"
+            "    p = project\n"
+            "    if override:\n"
+            "        p = signal_kind\n"
+            "    if p:\n"
+            "        train()\n",
+        )
+    )
+    assert (
+        _audit(
+            tmp_path,
+            "def first(project):\n"
+            "    p = project\n"
+            "    return p\n"
+            "def second(p):\n"
+            "    if p:\n"
+            "        run()\n",
+        )
+        == ()
+    )
+
+
+def test_common_project_identity_fields_are_rejected_in_predicates(tmp_path: Path) -> None:
+    for source in (
+        "if project_type == 'pulse':\n    run()\n",
+        "if config['project_context'] == 'pulse':\n    run()\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
+def test_function_local_working_collections_are_not_registries(tmp_path: Path) -> None:
+    for source in (
+        "def compute(loss):\n"
+        "    metrics = {}\n"
+        "    metrics['loss'] = float(loss)\n"
+        "    return metrics\n",
+        "def collect(work):\n    tasks = []\n    tasks.append(work)\n    return tasks\n",
+        "def split(dataset):\n"
+        "    batches = {}\n"
+        "    batches['train'] = dataset\n"
+        "    return batches\n",
+    ):
+        assert _audit(tmp_path, source) == ()
+
+
+def test_descriptive_candidate_registry_names_are_rejected(tmp_path: Path) -> None:
+    for source in (
+        "def component(): pass\n"
+        "COMPONENT_REGISTRY = {}\n"
+        "COMPONENT_REGISTRY['x'] = component\n",
+        "CATALOG = {}\nCATALOG['x'] = component\n",
+        "CATALOG = {}\nCATALOG |= {'x': component}\n",
+    ):
+        assert any(
+            message.startswith("runtime-registration:")
+            for message in _audit(tmp_path, source)
+        )
+
+
+def test_entry_point_loading_apis_are_not_statically_admissible(tmp_path: Path) -> None:
+    source = (
+        "from importlib.metadata import EntryPoint\n"
+        "component = EntryPoint(name='x', value='math:sqrt', group='dsio').load()\n"
+    )
+    assert any(message.startswith("dependency:") for message in _audit(tmp_path, source))
+
+
+def test_registry_owner_module_imports_are_safe_until_dispatcher_access(
+    tmp_path: Path,
+) -> None:
+    assert (
+        _audit(
+            tmp_path,
+            "import dsio.eval.metrics as metrics\nvalue = metrics.rmse(y_true, y_pred)\n",
+        )
+        == ()
+    )
+    assert _audit(tmp_path, "import dsio.config.schema as schema\nvalue: schema.RunConfig\n") == ()
+
+
 def test_policy_namespace_does_not_exempt_candidate_modules(tmp_path: Path) -> None:
     source = (
         "if project == 'pulse':\n    value = 1\n"

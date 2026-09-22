@@ -49,7 +49,10 @@ def registry_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
             or (name.startswith("dsio.") and ".__dict__" in name)
         ):
             return True
-    if isinstance(node, ast.Call) and expression_name(node.func, known_aliases) == "getattr":
+    if isinstance(node, ast.Call) and expression_name(node.func, known_aliases) in {
+        "getattr",
+        "inspect.getattr_static",
+    }:
         return bool(node.args) and expression_name(node.args[0], known_aliases).startswith("dsio.")
     if isinstance(node, ast.Call) and expression_name(node.func, known_aliases) in {
         "object.__getattribute__",

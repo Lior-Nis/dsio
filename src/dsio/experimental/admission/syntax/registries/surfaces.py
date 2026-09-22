@@ -16,11 +16,11 @@ def defines_registration_surface(tree: ast.AST) -> bool:
         return True
     if not isinstance(tree, ast.Module):
         return False
+    declarations = tuple(_container_assignments(tree))
     all_tables = {
         target.id
-        for statement in ast.walk(tree)
-        if isinstance(statement, ast.Assign | ast.AnnAssign)
-        and statement.value is not None
+        for statement in declarations
+        if statement.value is not None
         and _mutable_mapping(statement.value)
         for target in (
             statement.targets if isinstance(statement, ast.Assign) else [statement.target]
@@ -29,8 +29,7 @@ def defines_registration_surface(tree: ast.AST) -> bool:
     }
     declared_registration_tables = {
         target.id
-        for statement in ast.walk(tree)
-        if isinstance(statement, ast.Assign | ast.AnnAssign)
+        for statement in declarations
         for target in (
             statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         )
@@ -39,9 +38,8 @@ def defines_registration_surface(tree: ast.AST) -> bool:
     aliases = set(all_tables)
     table_assignments = [
         (target.id, expression_name(statement.value, {}))
-        for statement in ast.walk(tree)
-        if isinstance(statement, ast.Assign | ast.AnnAssign)
-        and statement.value is not None
+        for statement in declarations
+        if statement.value is not None
         for target in (
             statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         )
@@ -101,6 +99,18 @@ def _expand_aliases(names: set[str], assignments: list[tuple[str, str]]) -> None
             break
 
 
+def _container_assignments(
+    tree: ast.Module | ast.ClassDef,
+) -> tuple[ast.Assign | ast.AnnAssign, ...]:
+    assignments: list[ast.Assign | ast.AnnAssign] = []
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign | ast.AnnAssign):
+            assignments.append(statement)
+        elif isinstance(statement, ast.ClassDef):
+            assignments.extend(_container_assignments(statement))
+    return tuple(assignments)
+
+
 def _mutable_mapping(value: ast.expr) -> bool:
     return isinstance(value, ast.Dict | ast.List | ast.Set) or (
         isinstance(value, ast.Call)
@@ -114,7 +124,9 @@ def _mutates_table(target: ast.expr, tables: set[str]) -> bool:
 
 
 def _registration_table(name: str) -> bool:
-    return name.casefold() in {
+    normalized = name.casefold()
+    return normalized in {
+        "catalog",
         "components",
         "dispatch",
         "factories",
@@ -126,7 +138,7 @@ def _registration_table(name: str) -> bool:
         "runners",
         "tasks",
         "transforms",
-    }
+    } or normalized.endswith(("_catalog", "_registries", "_registry"))
 
 
 def _parameterized_registration(tree: ast.Module, tables: set[str]) -> bool:
