@@ -34,6 +34,15 @@ _POLICY_MODULES = frozenset(
         "dsio.experimental.admission.syntax.registries",
     }
 )
+_REGISTRY_OWNER_MODULES = frozenset(
+    {
+        "dsio.config.schema",
+        "dsio.eval.metrics",
+        "dsio.train.runner",
+        "dsio.train.ssl_task",
+        "dsio.train.torch_task",
+    }
+)
 
 
 def audit_source(
@@ -102,6 +111,10 @@ def _audit_source(
             failures.append(
                 f"runtime-registration: import {imported!r} exposes a closed DSIO dispatcher"
             )
+        elif imported in _REGISTRY_OWNER_MODULES:
+            failures.append(
+                f"runtime-registration: module import {imported!r} exposes closed DSIO dispatchers"
+            )
         elif imported == "dsio.config.registry" or imported.startswith(
             "dsio.config.registry."
         ):
@@ -121,10 +134,14 @@ def _audit_source(
         if isinstance(name, str) and name
     }
     explicit_match = _matched_project(tree, explicit_projects)
-    if explicit_match is not None or syntax.references_consumer_names(tree, explicit_projects):
-        explicit_match = explicit_match or sorted(explicit_projects)[0]
+    identifier_match = syntax.references_consumer_names(tree, explicit_projects)
+    if explicit_match is not None or identifier_match is not None:
+        explicit_match = explicit_match or identifier_match
         failures.append(f"genericity: source references consumer project {explicit_match!r}")
-    policy_module = module in _POLICY_MODULES
+    canonical_policy_path = component_source(module) if module in _POLICY_MODULES else None
+    policy_module = canonical_policy_path is not None and source_path.resolve() == (
+        canonical_policy_path.resolve()
+    )
     if not policy_module:
         if syntax.project_contexts(tree):
             failures.append("genericity: component source branches on consumer project identity")

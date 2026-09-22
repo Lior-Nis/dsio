@@ -150,6 +150,9 @@ if belongs(client):
 def test_explicit_consumer_name_in_identifiers_is_rejected(tmp_path: Path) -> None:
     for source in (
         "class ConsumerXModel: pass\n",
+        "def build(consumer_x_model): return 1\n",
+        "import numpy as consumer_x_array\n",
+        "build(consumer_x=True)\n",
         "if consumer_x_enabled:\n    value = 1\n",
         "if config.consumer_x:\n    value = 1\n",
     ):
@@ -166,6 +169,7 @@ def test_camel_case_project_identifier_is_project_context(tmp_path: Path) -> Non
 def test_mapping_project_access_is_project_context(tmp_path: Path) -> None:
     for source in (
         "if config['project'] == 'pulse':\n    value = 1\n",
+        "if config['project_name'] == 'pulse':\n    value = 1\n",
         "if config.get('project') == 'pulse':\n    value = 1\n",
     ):
         assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
@@ -193,6 +197,16 @@ def test_bare_project_condition_is_rejected(tmp_path: Path) -> None:
         "project = 'pulse'\nif project:\n    value = 1\n",
         "projectName = 'pulse'\nvalue = one if projectName else two\n",
         "while current_project:\n    run()\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
+def test_project_identity_only_fails_when_it_controls_execution(tmp_path: Path) -> None:
+    assert _audit(tmp_path, "if enabled:\n    print(project)\n") == ()
+    assert _audit(tmp_path, "p = project\np = signal_kind\nif p:\n    run()\n") == ()
+    for source in (
+        "for item in items_by_project[project]:\n    consume(item)\n",
+        "[value for value in values if project]\n",
     ):
         assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
@@ -273,6 +287,14 @@ def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path
         "    table[name] = component\nenroll(HANDLERS, name, component)\n",
         "DISPATCH = {}\nDISPATCH['x'] = component\n",
         "HANDLERS = []\nHANDLERS.append(component)\n",
+        "HANDLERS = set()\nHANDLERS.add(component)\n",
+        "REGISTRY = Registry()\nREGISTRY.register('x', component)\n",
+        "CATALOG = {}\ndef add(name, transform):\n"
+        "    CATALOG.update({name: transform})\n",
+        "class Catalog:\n    FACTORIES = {}\n    @classmethod\n"
+        "    def add(cls, name, factory):\n        cls.FACTORIES[name] = factory\n",
+        "FACTORIES = {name: value for name, value in entries}\n"
+        "FACTORIES[name] = factory\n",
         "HANDLERS = {}\nHANDLERS |= {'x': component}\n",
         "HANDLERS = {}\nHANDLERS.__setitem__('x', component)\n",
         "import collections\nHANDLERS = collections.defaultdict(dict)\n"
@@ -321,6 +343,7 @@ def test_reflective_dsio_registry_access_is_rejected(tmp_path: Path) -> None:
         "mutate(vars(metrics)['METRICS'])",
         "object.__getattribute__(metrics, 'METRICS').clear()",
         "operator.attrgetter('METRICS')(metrics).clear()",
+        "inspect.getattr_static(metrics, 'METRICS').clear()",
     ):
         source = f"import dsio.eval.metrics as metrics\n{reference}\n"
         assert any(
@@ -355,6 +378,12 @@ def apply_plugins(value, plugins):
         "import runpy\nrunpy.run_module('consumer_x.private')\n",
         "import importlib.util\nimportlib.util.spec_from_file_location(name, path)\n",
         "import sys\nsys.modules['builtins'].eval(source)\n",
+        "import pydoc\npydoc.locate('math.sqrt')\n",
+        "import pkgutil\npkgutil.resolve_name('math:sqrt')\n",
+        "import functools, builtins\n"
+        "functools.partial(getattr, builtins, 'eval')()(source)\n",
+        "import importlib, operator\n"
+        "operator.attrgetter('import_module')(importlib)('consumer_x.private')\n",
         "eval(source)\n",
     ],
 )
@@ -478,6 +507,7 @@ def test_safe_importlib_metadata_and_resources_are_admissible(tmp_path: Path) ->
         "value_type = builtins.type(value)\n"
     )
     assert _audit(tmp_path, source) == ()
+    assert _audit(tmp_path, "get_model().eval()\nmodels[0].eval()\n") == ()
 
 
 def test_policy_namespace_does_not_exempt_candidate_modules(tmp_path: Path) -> None:
@@ -488,6 +518,12 @@ def test_policy_namespace_does_not_exempt_candidate_modules(tmp_path: Path) -> N
     failures = _audit(tmp_path, source, module="dsio.experimental.admission.candidate")
     assert any(message.startswith("genericity:") for message in failures)
     assert any(message.startswith("runtime-registration:") for message in failures)
+    spoofed = _audit(
+        tmp_path,
+        source,
+        module="dsio.experimental.admission.source",
+    )
+    assert any(message.startswith("genericity:") for message in spoofed)
 
 
 def test_named_audit_validates_before_importing(

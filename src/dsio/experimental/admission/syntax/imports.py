@@ -68,7 +68,7 @@ def expression_name(expression: ast.expr, known_aliases: dict[str, str]) -> str:
         return known_aliases.get(expression.id, expression.id)
     if isinstance(expression, ast.Attribute):
         parent = expression_name(expression.value, known_aliases)
-        return f"{parent}.{expression.attr}" if parent else expression.attr
+        return f"{parent}.{expression.attr}" if parent else ""
     if isinstance(expression, ast.Call):
         function = expression_name(expression.func, known_aliases)
         if function == "getattr" and len(expression.args) >= 2:
@@ -94,6 +94,8 @@ def is_dynamic_import_api(name: str) -> bool:
         "builtins.eval",
         "builtins.exec",
         "importlib.import_module",
+        "pkgutil.resolve_name",
+        "pydoc.locate",
         "runpy",
         "runpy.run_module",
         "runpy.run_path",
@@ -125,10 +127,40 @@ def dynamic_import_reference(node: ast.AST, known_aliases: dict[str, str]) -> bo
         "eval",
         "exec",
         "importlib.import_module",
+        "pkgutil.resolve_name",
+        "pydoc.locate",
         "runpy",
         "runpy.run_module",
         "runpy.run_path",
-    } or name.startswith(("importlib.machinery", "importlib.util"))
+    } or name.startswith(("importlib.machinery", "importlib.util")) or _composes_dynamic_api(
+        node, known_aliases
+    )
+
+
+def _composes_dynamic_api(node: ast.AST, known_aliases: dict[str, str]) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    function = expression_name(node.func, known_aliases)
+    if function in {"operator.attrgetter", "operator.methodcaller"}:
+        return any(
+            fold_string(argument) in {"__import__", "compile", "eval", "exec", "import_module"}
+            for argument in node.args
+        )
+    if function == "functools.partial":
+        if len(node.args) >= 3 and expression_name(node.args[0], known_aliases) in {
+            "getattr",
+            "object.__getattribute__",
+        }:
+            root = expression_name(node.args[1], known_aliases)
+            attribute = fold_string(node.args[2])
+            if root in {"builtins", "importlib", "runpy"} and attribute is not None:
+                return True
+        return any(dynamic_import_reference(argument, known_aliases) for argument in node.args)
+    if function == "object.__getattribute__" and len(node.args) >= 2:
+        root = expression_name(node.args[0], known_aliases)
+        attribute = fold_string(node.args[1])
+        return root in {"builtins", "importlib", "runpy"} and attribute is not None
+    return False
 
 
 def import_from_base(

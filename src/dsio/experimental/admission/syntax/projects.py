@@ -12,7 +12,10 @@ def references_project_identity(tree: ast.AST, aliases: set[str] | None = None) 
     aliases = aliases or set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Subscript):
-            if expression_name(node, {}) in aliases or fold_string(node.slice) == "project":
+            key = fold_string(node.slice)
+            if expression_name(node, {}) in aliases or (
+                key is not None and _project_identifier(key)
+            ):
                 return True
         elif isinstance(node, ast.Name | ast.Attribute):
             name = node.id if isinstance(node, ast.Name) else node.attr
@@ -23,7 +26,8 @@ def references_project_identity(tree: ast.AST, aliases: set[str] | None = None) 
             and node.args
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "get"
-            and fold_string(node.args[0]) == "project"
+            and (key := fold_string(node.args[0])) is not None
+            and _project_identifier(key)
         ):
             return True
     return False
@@ -31,53 +35,68 @@ def references_project_identity(tree: ast.AST, aliases: set[str] | None = None) 
 
 def project_contexts(tree: ast.AST) -> tuple[ast.AST, ...]:
     aliases: set[str] = set()
-    assignments = [
+    assignments = (
         (target, node.value)
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None
         for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
-    ]
-    for _ in assignments:
-        changed = False
-        for target, value in assignments:
-            if references_project_identity(value, aliases):
-                for name in _assigned_names(target):
-                    if name not in aliases:
-                        aliases.add(name)
-                        changed = True
-        if not changed:
-            break
-    candidates = (
-        node
-        for node in ast.walk(tree)
-        if isinstance(
-            node,
-            ast.Compare
-            | ast.If
-            | ast.IfExp
-            | ast.Match
-            | ast.While,
-        )
     )
+    for target, value in assignments:
+        for name in _assigned_names(target):
+            if references_project_identity(value, aliases):
+                aliases.add(name)
+            else:
+                aliases.discard(name)
+    candidates: list[ast.AST] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            candidates.append(node)
+        elif isinstance(node, ast.If | ast.IfExp | ast.While):
+            candidates.append(node.test)
+        elif isinstance(node, ast.Match):
+            candidates.append(node.subject)
+            candidates.extend(case.guard for case in node.cases if case.guard is not None)
+        elif isinstance(node, ast.For | ast.AsyncFor):
+            candidates.append(node.iter)
+        elif isinstance(node, ast.comprehension):
+            candidates.append(node.iter)
+            candidates.extend(node.ifs)
     return tuple(node for node in candidates if references_project_identity(node, aliases))
 
 
-def references_consumer_names(tree: ast.AST, names: set[str]) -> bool:
+def references_consumer_names(tree: ast.AST, names: set[str]) -> str | None:
     if not names:
-        return False
+        return None
     identifiers = (
         candidate.id
         if isinstance(candidate, ast.Name)
         else candidate.attr
         if isinstance(candidate, ast.Attribute)
+        else candidate.arg or ""
+        if isinstance(candidate, ast.arg | ast.keyword)
+        else candidate.asname or candidate.name
+        if isinstance(candidate, ast.alias)
         else candidate.name
         for candidate in ast.walk(tree)
-        if isinstance(candidate, ast.Name | ast.Attribute | ast.FunctionDef | ast.ClassDef)
+        if isinstance(
+            candidate,
+            ast.Name
+            | ast.Attribute
+            | ast.arg
+            | ast.keyword
+            | ast.alias
+            | ast.FunctionDef
+            | ast.ClassDef,
+        )
     )
-    return any(
-        f"_{name}_" in f"_{_snake_case(identifier)}_"
-        for identifier in identifiers
-        for name in names
+    return next(
+        (
+            name
+            for identifier in identifiers
+            for name in sorted(names)
+            if f"_{name}_" in f"_{_snake_case(identifier)}_"
+        ),
+        None,
     )
 
 
