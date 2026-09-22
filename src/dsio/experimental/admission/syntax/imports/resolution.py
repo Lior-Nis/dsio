@@ -176,16 +176,22 @@ def _apply_alias_event(
 ) -> None:
     if isinstance(event, ast.Import):
         for imported in event.names:
-            resolved[imported.asname or imported.name.partition(".")[0]] = (
-                imported.name if imported.asname else imported.name.partition(".")[0]
+            _bind_alias(
+                resolved,
+                imported.asname or imported.name.partition(".")[0],
+                imported.name if imported.asname else imported.name.partition(".")[0],
+                conditional=conditional,
             )
         return
     if isinstance(event, ast.ImportFrom):
         base = _import_from_base(event, module, is_package=is_package)
         for imported in event.names:
             if imported.name != "*":
-                resolved[imported.asname or imported.name] = (
-                    f"{base}.{imported.name}".strip(".")
+                _bind_alias(
+                    resolved,
+                    imported.asname or imported.name,
+                    f"{base}.{imported.name}".strip("."),
+                    conditional=conditional,
                 )
         return
     value = event.value
@@ -196,13 +202,19 @@ def _apply_alias_event(
     for target in targets:
         if not isinstance(target, ast.Name):
             continue
-        current = resolved.get(target.id, "")
-        if conditional and _sensitive_alias(current) and not _sensitive_alias(name):
-            continue
         if name:
-            resolved[target.id] = name
+            _bind_alias(resolved, target.id, name, conditional=conditional)
         else:
             resolved.pop(target.id, None)
+
+
+def _bind_alias(
+    resolved: dict[str, str], local_name: str, value: str, *, conditional: bool
+) -> None:
+    current = resolved.get(local_name, "")
+    if conditional and _sensitive_alias(current) and not _sensitive_alias(value):
+        return
+    resolved[local_name] = value
 
 
 def _sensitive_alias(name: str) -> bool:

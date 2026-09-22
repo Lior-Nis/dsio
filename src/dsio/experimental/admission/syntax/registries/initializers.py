@@ -19,4 +19,16 @@ def initialized_registration(
     if not elements:
         return False
     targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-    return any(isinstance(target, ast.Name) and target.id in tables for target in targets)
+    names = [target.id for target in targets if isinstance(target, ast.Name)]
+    if not any(name in tables for name in names):
+        return False
+    if any(
+        name.casefold() in {"catalog", "registries", "registry"}
+        or name.casefold().endswith(("_catalog", "_registries", "_registry"))
+        for name in names
+    ):
+        return True
+    return isinstance(value, ast.Dict) and any(
+        isinstance(element, ast.Name | ast.Attribute | ast.Lambda | ast.Call)
+        for element in elements
+    )

@@ -127,8 +127,17 @@ def _component_registration_evidence(
         "splitter",
         "transform",
     }
-    parameters = {
+    parameters = (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
+    component_parameters = {
         argument.arg
-        for argument in (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
+        for argument in parameters
+        if argument.arg in component_roles and not _primitive_annotation(argument.annotation)
     }
-    return explicit_table or bool(parameters & component_roles)
+    return explicit_table or bool(component_parameters)
+
+
+def _primitive_annotation(annotation: ast.expr | None) -> bool:
+    if annotation is None:
+        return False
+    name = expression_name(annotation, {}).rpartition(".")[2]
+    return name in {"bool", "bytes", "complex", "float", "int", "str"}

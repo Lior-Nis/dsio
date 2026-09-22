@@ -631,6 +631,15 @@ def test_descriptive_candidate_registry_names_are_rejected(tmp_path: Path) -> No
         )
 
 
+def test_fixed_component_named_configuration_is_not_a_registry(tmp_path: Path) -> None:
+    for source in (
+        "METRICS = ['loss', 'accuracy']\n",
+        "TASKS = {'train', 'validate'}\n",
+        "TRANSFORMS = [normalize, standardize]\n",
+    ):
+        assert _audit(tmp_path, source) == ()
+
+
 def test_escaping_local_registry_mutator_is_rejected(tmp_path: Path) -> None:
     for mutation, initializer in (
         ("handlers[name] = component", "{}"),
@@ -663,6 +672,14 @@ def test_numeric_metric_accumulator_is_not_a_component_registry(tmp_path: Path) 
         "    return record\n"
     )
     assert _audit(tmp_path, source) == ()
+    metric_named = (
+        "def make_accumulator():\n"
+        "    metrics = {}\n"
+        "    def record(name: str, metric: float):\n"
+        "        metrics[name] = metric\n"
+        "    return record\n"
+    )
+    assert _audit(tmp_path, metric_named) == ()
 
 
 def test_entry_point_loading_apis_are_not_statically_admissible(tmp_path: Path) -> None:
@@ -696,6 +713,18 @@ def test_dynamic_import_aliases_follow_order_and_parameter_shadowing(tmp_path: P
         "loader.import_module(module_name)\n"
     )
     assert any(message.startswith("dependency:") for message in _audit(tmp_path, conditional))
+
+    for conditional_import in (
+        "    import json as loader\n",
+        "    from json import decoder as loader\n",
+    ):
+        source = (
+            "import importlib as loader\n"
+            "if use_json:\n"
+            f"{conditional_import}"
+            "loader.import_module(module_name)\n"
+        )
+        assert any(message.startswith("dependency:") for message in _audit(tmp_path, source))
 
     registry = (
         "import dsio.eval.metrics as metrics\n"
