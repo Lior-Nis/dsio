@@ -4,7 +4,7 @@ baseline_commit: 32c42dea276a53ad0a32b8e6174f87f948e131bf
 
 # Story 3.3: Apply Reproducible Stochastic Augmentation on the Accelerator
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -22,19 +22,19 @@ so that augmentation is fast while remaining exactly replayable.
 
 ## Tasks / Subtasks
 
-- [ ] Add one training-only augmentation seam to `DsioModule` (AC: 1-3)
-  - [ ] Accept one optional native batch augmentation and execution seed.
-  - [ ] Invoke it only from `training_step()`, before the existing objective boundary.
-  - [ ] Record its exact component identity in Lightning hyperparameters without adding a registry or result model.
-- [ ] Implement reproducible accelerator batch augmentations (AC: 2, 4)
-  - [ ] Derive device-local `torch.Generator` instances from canonical execution and batch identity without mutating global RNG state.
-  - [ ] Provide masked-reconstruction and two-view adapters that preserve the current native loss contracts.
-  - [ ] Carry source `sample_id` and stable view identity through multi-view batches.
-- [ ] Move SSL stochastic work out of the data layer (AC: 1, 3-5)
-  - [ ] Make SSL workers and collation return raw windows only.
-  - [ ] Remove dataset masking and two-view collation paths rather than retaining duplicate compatibility lanes.
-  - [ ] Do not manufacture a stochastic pretext validation loss; run representation-quality callbacks from the training lifecycle over their separate deterministic loaders.
-- [ ] Prove replay, lifecycle isolation, migration, and compatibility through tests and full quality gates (AC: 1-5)
+- [x] Add one training-only augmentation seam to `DsioModule` (AC: 1-3)
+  - [x] Accept one optional native batch augmentation and execution seed.
+  - [x] Invoke it only from `training_step()`, before the existing objective boundary.
+  - [x] Record its exact component identity in Lightning hyperparameters without adding a registry or result model.
+- [x] Implement reproducible accelerator batch augmentations (AC: 2, 4)
+  - [x] Derive device-local `torch.Generator` instances from canonical execution and batch identity without mutating global RNG state.
+  - [x] Provide masked-reconstruction and two-view adapters that preserve the current native loss contracts.
+  - [x] Carry source `sample_id` and stable view identity through multi-view batches.
+- [x] Move SSL stochastic work out of the data layer (AC: 1, 3-5)
+  - [x] Make SSL workers and collation return raw windows only.
+  - [x] Remove dataset masking and two-view collation paths rather than retaining duplicate compatibility lanes.
+  - [x] Do not manufacture a stochastic pretext validation loss; run representation-quality callbacks from the training lifecycle over their separate deterministic loaders.
+- [x] Prove replay, lifecycle isolation, migration, and compatibility through tests and full quality gates (AC: 1-5)
 
 ## Dev Notes
 
@@ -77,11 +77,38 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 3.2 at `32c42de`; compared three interface designs and selected one training-step seam with explicit device-local generators and no new objective abstraction.
+- 2026-09-22: The complete repository suite passed with 855 tests and 3 live tests deselected; affected augmentation, SSL, callback, dataset, component, and module suites passed 120 tests.
 
 ### Completion Notes List
 
+- `DsioModule.training_step()` is the sole stochastic training hook. It accepts one native, non-learnable augmentation module and records canonical seed/component identity.
+- Masked reconstruction and two-view contrastive training now run on the transferred batch with explicit device-local generators; no process-global RNG state is modified.
+- SSL loaders return raw identity-bearing windows. Dataset masking, seeded mask state, and `TwoViewCollate` were deleted rather than retained as a second path.
+- SSL no longer manufactures a stochastic pretext validation result. OnlineProbe and RankMe run from train-epoch end over their own deterministic raw loaders.
+- Existing MAE, SimCLR, VICReg, supervised training, checkpoint, MLflow, and encoder handoff flows remain green.
+
 ### File List
+
+- `_bmad-output/implementation-artifacts/3-3-apply-reproducible-stochastic-augmentation-on-the-accelerator.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `docs/adr/0010-lightning-lives-inside-a-fold.md`
+- `docs/adr/0011-ssl-is-first-class.md`
+- `src/dsio/batches.py`
+- `src/dsio/dataset/dataset.py`
+- `src/dsio/model/components.py`
+- `src/dsio/model/module.py`
+- `src/dsio/train/augmentation.py`
+- `src/dsio/train/callbacks.py`
+- `src/dsio/train/ssl_task.py`
+- `src/dsio/train/trainer.py`
+- `tests/dataset/test_dataset.py`
+- `tests/model/test_components.py`
+- `tests/train/test_augmentation.py`
+- `tests/train/test_callbacks.py`
+- `tests/train/test_ssl_runner.py`
+- `tests/typing/batch_contracts.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 3.3 and started implementation.
+- 2026-09-22: Moved reproducible stochastic augmentation to the accelerator-side training step and removed the data-layer implementation.

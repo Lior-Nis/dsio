@@ -54,10 +54,8 @@ def build_callbacks(
 
     Takes a bare :class:`TrainerConfig`, not a task, so both runners that read one --
     ``run_torch``'s ``TorchTask`` and ``run_ssl_pretrain``'s ``SslPretrainTask`` -- can
-    share this one construction (I1: pretraining used to read none of
-    ``checkpoint``/``early_stopping_patience``/``monitor``/``monitor_mode`` at all, so
-    ``SslPretrainTask``'s own deliberate ``TrainerConfig(monitor="val/loss")`` default did
-    nothing).
+    share this one construction. Pretraining has no stochastic validation objective, so it
+    uses the no-validation branch while still honoring the checkpoint enablement policy.
 
     ``has_validation`` gates anything that monitors ``trainer.monitor``: with no
     validation loader, that metric is never logged (``DsioModule._common_step`` only logs
