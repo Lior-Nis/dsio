@@ -239,6 +239,22 @@ def test_length_one_masked_target_remains_finite() -> None:
     assert torch.isfinite(result["y"][valid]).all()
 
 
+def test_length_one_jitter_views_remain_finite() -> None:
+    batch = {
+        "sample_id": ["single"],
+        "x": torch.tensor([[[3.0]]]),
+        "row": torch.tensor([0]),
+    }
+    result = TwoView(Jitter(sigma=0.5))(
+        batch,
+        seed=1,
+        epoch=0,
+        step=0,
+        identity={"component": "jitter"},
+    )
+    assert torch.isfinite(result["x"]).all()
+
+
 def test_cyclic_augmentation_identity_is_a_module_error() -> None:
     identity: dict[str, Any] = {}
     identity["cycle"] = identity

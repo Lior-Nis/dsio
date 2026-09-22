@@ -502,7 +502,7 @@ class Jitter(nn.Module):
 
     def forward(self, x: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
         _check_3d(x, "Jitter")
-        scale = x.std(dim=-1, keepdim=True) * self.sigma
+        scale = x.std(dim=-1, keepdim=True, correction=0) * self.sigma
         noise = torch.randn(x.shape, dtype=x.dtype, device=x.device, generator=generator)
         return x + noise * scale
 

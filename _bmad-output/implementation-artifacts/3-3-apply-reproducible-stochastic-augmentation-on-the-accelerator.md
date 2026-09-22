@@ -79,6 +79,7 @@ Codex (GPT-5)
 - 2026-09-22: Created from merged Story 3.2 at `32c42de`; compared three interface designs and selected one training-step seam with explicit device-local generators and no new objective abstraction.
 - 2026-09-22: The complete repository suite passed with 855 tests and 3 live tests deselected; affected augmentation, SSL, callback, dataset, component, and module suites passed 120 tests.
 - 2026-09-22: First independent review blocked the candidate on retained identity-augmentor compatibility, in-place aliasing, length-one normalization, malformed metadata boundaries, test-split RankMe use, and silently accepted validation-dependent controls. All findings were reproduced and fixed test-first; 128 affected tests passed.
+- 2026-09-22: Second edge audit found the same length-one standard-deviation boundary in `Jitter`; a failing regression reproduced NaN views and population standard deviation closed it.
 
 ### Completion Notes List
 
