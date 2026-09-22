@@ -301,6 +301,35 @@ def test_native_preflight_proves_deserialization_and_execution() -> None:
     )
 
 
+def test_native_preflight_does_not_remap_the_predictor_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.inference.export as export_module
+
+    predictor = _predictor()
+    input_example = _example()
+    example = export_module._input_arrays(input_example, ("pytorch",))
+    expected = export_module._arrays(predictor(input_example), "test output")
+    real_load = torch.load
+    observed_map_locations: list[Any] = []
+
+    def preserving_load(*args: Any, **kwargs: Any) -> Any:
+        observed_map_locations.append(kwargs.get("map_location"))
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(export_module.torch, "load", preserving_load)
+
+    export_module._preflight(
+        predictor,
+        input_example,
+        example,
+        expected,
+        ("pytorch",),
+    )
+
+    assert observed_map_locations == [None]
+
+
 def test_numpy_incompatible_dtype_names_form_and_field() -> None:
     experiment_id, run_id = _run()
 

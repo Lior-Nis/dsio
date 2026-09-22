@@ -207,7 +207,7 @@ def _preflight(
             buffer = io.BytesIO()
             torch.save(predictor, buffer)
             buffer.seek(0)
-            restored = torch.load(buffer, map_location="cpu", weights_only=False)
+            restored = torch.load(buffer, weights_only=False)
             with _preserve_rng():
                 observed = restored(input_example)
             _require_equivalent(
