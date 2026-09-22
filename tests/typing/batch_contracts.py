@@ -18,13 +18,10 @@ from dsio.batches import (
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex
 from dsio.dataset.dataset import (
-    MaskStrategy,
-    TwoViewCollate,
     WindowDataset,
     labelled_dataset,
     make_loader,
     make_target_loader,
-    masked_dataset,
 )
 from dsio.eval.contract import Fold, FoldPrediction
 from dsio.model.module import DsioModule
@@ -35,7 +32,6 @@ from dsio.train.torch_task import _assemble
 def check_batch_contracts(
     item: WindowItem,
     loader: BatchLoader[LoaderBatch],
-    collate: TwoViewCollate,
     module: DsioModule,
     training_batch: TrainingBatch,
     predictions: list[PredictionBatch],
@@ -43,7 +39,6 @@ def check_batch_contracts(
     labels: np.ndarray,
     store: SignalStore,
     index: WindowIndex,
-    mask: MaskStrategy,
     ssl_task: SslPretrainTask,
 ) -> None:
     """Keep framework ``Any`` annotations from masking contract regressions."""
@@ -52,7 +47,6 @@ def check_batch_contracts(
     assert_type(item.get("y"), torch.Tensor | None)
     for batch in loader:
         assert_type(batch, LoaderBatch)
-    assert_type(collate([item]), TrainingBatch)
     assert_type(module.predict_step(training_batch, 0), PredictionBatch)
     assert_type(_assemble(predictions, fold, labels), FoldPrediction)
 
@@ -60,11 +54,9 @@ def check_batch_contracts(
     assert_type(window_loader, BatchLoader[WindowBatch])
     labelled_loader = make_target_loader(labelled_dataset(store, index, labels=labels))
     assert_type(labelled_loader, BatchLoader[TrainingBatch])
-    masked_loader = make_target_loader(masked_dataset(store, index, mask=mask))
-    assert_type(masked_loader, BatchLoader[TrainingBatch])
     for batch in labelled_loader:
         assert_type(module.training_step(batch, 0), torch.Tensor)
     assert_type(
         build_loaders(ssl_task, store, index, fold, 0),
-        tuple[BatchLoader[TrainingBatch], BatchLoader[TrainingBatch] | None],
+        tuple[BatchLoader[WindowBatch], None],
     )

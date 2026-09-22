@@ -31,6 +31,7 @@ class BatchInputs(TypedDict):
     sample_id: list[str]
     x: Tensor
     row: Tensor
+    view_id: NotRequired[list[str]]
 
 
 class WindowBatch(BatchInputs):

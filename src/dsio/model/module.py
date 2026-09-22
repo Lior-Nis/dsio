@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
 
@@ -15,6 +16,7 @@ from dsio.config.components import (
     ComponentError as ConfiguredComponentError,
 )
 from dsio.config.components import require_importable_component, validate_component_config
+from dsio.contracts import canonical_json
 from dsio.model.chain import ComponentError, export_encoder
 
 Stage = Literal["train", "validate", "test"]
@@ -67,6 +69,9 @@ class DsioModule(LightningModule):
         optimizer_parameters: Mapping[str, Any] | None = None,
         scheduler_factory: Any | None = None,
         scheduler_parameters: Mapping[str, Any] | None = None,
+        training_augmentation: nn.Module | None = None,
+        augmentation_seed: int = 0,
+        augmentation_identity: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__()
         if not isinstance(model, nn.Module):
@@ -79,6 +84,14 @@ class DsioModule(LightningModule):
             raise ModuleError("scheduler_factory must be callable when configured")
         if scheduler_factory is None and scheduler_parameters:
             raise ModuleError("scheduler_parameters require a scheduler_factory")
+        if (training_augmentation is None) != (augmentation_identity is None):
+            raise ModuleError(
+                "training_augmentation and augmentation_identity must be configured together"
+            )
+        if training_augmentation is not None and not isinstance(training_augmentation, nn.Module):
+            raise ModuleError("training_augmentation must be a torch nn.Module")
+        if isinstance(augmentation_seed, bool) or not isinstance(augmentation_seed, int):
+            raise ModuleError("augmentation_seed must be an integer")
         try:
             require_importable_component(model, "model")
             require_importable_component(objective, "objective")
@@ -102,8 +115,17 @@ class DsioModule(LightningModule):
                         "parameters": dict(scheduler_parameters or {}),
                     }
                 )
+            augmentation_config = None
+            if training_augmentation is not None:
+                require_importable_component(training_augmentation, "training_augmentation")
+                if any(parameter.requires_grad for parameter in training_augmentation.parameters()):
+                    raise ModuleError("training_augmentation must not have learnable parameters")
+                assert augmentation_identity is not None
+                augmentation_config = json.loads(canonical_json(dict(augmentation_identity)))
         except ConfiguredComponentError as error:
             raise ModuleError(str(error)) from None
+        except (RecursionError, TypeError, ValueError) as error:
+            raise ModuleError(f"augmentation_identity must be canonical: {error}") from None
         self.model = model
         self.objective = objective
         self.optimizer_factory = optimizer_factory
@@ -112,11 +134,16 @@ class DsioModule(LightningModule):
         self.scheduler_parameters = (
             {} if scheduler_config is None else scheduler_config["parameters"]
         )
+        self.training_augmentation = training_augmentation
+        self.augmentation_seed = augmentation_seed
+        self.augmentation_identity = augmentation_config
         self._metric_log_names: dict[int, str] = {}
         self.save_hyperparameters(
             {
                 "optimizer": optimizer_config,
                 "scheduler": scheduler_config,
+                "augmentation": augmentation_config,
+                "augmentation_seed": augmentation_seed,
             }
         )
 
@@ -177,6 +204,14 @@ class DsioModule(LightningModule):
 
     def training_step(self, batch: Batch, batch_idx: int) -> Tensor:
         del batch_idx
+        if self.training_augmentation is not None:
+            batch = self.training_augmentation(
+                batch,
+                seed=self.augmentation_seed,
+                epoch=int(self.current_epoch),
+                step=int(self.global_step),
+                identity=self.augmentation_identity,
+            )
         return self._common_step(batch, "train")
 
     def validation_step(self, batch: Batch, batch_idx: int) -> Tensor:
@@ -240,13 +275,10 @@ class DsioModule(LightningModule):
         scheduler = self.scheduler_factory(optimizer, **self.scheduler_parameters)
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             raise ModuleError(
-                "ReduceLROnPlateau requires a Lightning scheduler mapping with a "
-                "non-empty monitor"
+                "ReduceLROnPlateau requires a Lightning scheduler mapping with a non-empty monitor"
             )
         if isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
-            configured_scheduler: torch.optim.lr_scheduler.LRScheduler | dict[str, Any] = (
-                scheduler
-            )
+            configured_scheduler: torch.optim.lr_scheduler.LRScheduler | dict[str, Any] = scheduler
         elif isinstance(scheduler, Mapping):
             configured_scheduler = _scheduler_configuration(scheduler)
         else:
@@ -294,8 +326,7 @@ def _scheduler_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
     reduce_on_plateau = value.get("reduce_on_plateau", is_plateau)
     if is_plateau and reduce_on_plateau is False:
         raise ModuleError(
-            "Lightning scheduler mapping cannot disable reduce_on_plateau for "
-            "ReduceLROnPlateau"
+            "Lightning scheduler mapping cannot disable reduce_on_plateau for ReduceLROnPlateau"
         )
     if reduce_on_plateau and not value.get("monitor"):
         raise ModuleError(

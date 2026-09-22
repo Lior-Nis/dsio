@@ -168,21 +168,26 @@ in `dsio.model.components`, next to every other registered component. `masking.p
 general representation-quality tool rather than an SSL-specific one — nothing in it ever
 depended on `SslModule`, only on `encode`. (Both paths above are Task 7's names: that later
 task renamed `dsio.nn` to `dsio.model` and split a `dsio.dataset` package out of it, which
-is also where `TwoViewCollate` below now lives.)
+temporarily owned pretext collation.)
 
 **There is one `LightningModule`, not three.** `SslModule` and `ContrastiveModule` are both
 deleted; `dsio.model.module.DsioModule` — the same class a supervised `TorchTask` builds — is
 what a pretraining run builds too, for MAE, SimCLR and VICReg alike, with no `step()`
 override anywhere. This was the open question this ADR left standing (`SslMethod.step`
 existed specifically because SimCLR and VICReg needed the raw batch to build their own two
-views): that task moved the view-building to a collate function
-(`dsio.dataset.dataset.TwoViewCollate`), stacking two augmented views into the batch dimension with
-the target carrying each row's pair index — the same pair-index computation `SimCLR.step`
-used to do inline, just relocated to where a batch first exists. SimCLR's negatives turn
+views): Story 3.3 ultimately moved view-building to the one train-only accelerator seam
+(`DsioModule.training_step`, implemented by `dsio.train.augmentation.TwoView`). It stacks
+two augmented views into the batch dimension after device transfer, with the target carrying
+each row's pair index — the same pair-index computation `SimCLR.step` used to do inline.
+SimCLR's negatives turn
 out to be exactly "the rest of the batch `prediction` already carries," and VICReg's
 variance/covariance terms are per-view marginal statistics of `prediction` alone, with its
 invariance term an indexed MSE via the same index. Neither needed the batch dict this ADR's
 "one objective per family" design had reached for.
+
+The interim dataset masking and `TwoViewCollate` path is deleted. Workers and collation now
+emit raw identity-bearing windows only; explicit device-local generators derive each view
+from run seed, epoch, step, ordered sample identity, component identity, and view identity.
 
 **Label budgets left the spine.** `budget.py` is cut, not moved. This ADR argued for it at
 length and the argument was not wrong — a label-budget curve stratified over the positive

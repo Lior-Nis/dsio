@@ -104,7 +104,7 @@ def embed(module: Encodable, loader: BatchLoader[LoaderBatch]) -> tuple[np.ndarr
 
 
 def _is_scheduled(trainer: Trainer, every_n_epochs: int) -> bool:
-    """Whether a validation callback should run at this epoch."""
+    """Whether a quality callback should run at this epoch."""
     return not trainer.sanity_checking and (trainer.current_epoch + 1) % every_n_epochs == 0
 
 
@@ -136,7 +136,7 @@ class OnlineProbe(Callback):
         self.prefix = prefix
         self.history: list[dict[str, float]] = []
 
-    def on_validation_epoch_end(self, trainer: Trainer, module: LightningModule) -> None:
+    def on_train_epoch_end(self, trainer: Trainer, module: LightningModule) -> None:
         if not _is_scheduled(trainer, self.every_n_epochs):
             return
         scores = self.run(cast("Encodable", module))
@@ -193,7 +193,7 @@ class RankMeMonitor(Callback):
         self.prefix = prefix
         self.history: list[dict[str, float]] = []
 
-    def on_validation_epoch_end(self, trainer: Trainer, module: LightningModule) -> None:
+    def on_train_epoch_end(self, trainer: Trainer, module: LightningModule) -> None:
         if not _is_scheduled(trainer, self.every_n_epochs):
             return
         features, _ = embed(cast("Encodable", module), self.loader)
