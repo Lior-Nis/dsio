@@ -212,6 +212,10 @@ def _losslessly_converted(original: object, converted: object) -> bool:
                 for before, after in zip(original, converted, strict=True)
             )
         )
+    if isinstance(original, np.generic):
+        original = original.item()
+    if isinstance(converted, np.generic):
+        converted = converted.item()
     if type(original) is not type(converted):
         return False
     try:

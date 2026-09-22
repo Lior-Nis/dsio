@@ -40,6 +40,12 @@ class MixedSequenceOutput(nn.Module):
         return {"prediction": [1, "2"]}
 
 
+class NumpySequenceOutput(nn.Module):
+    def forward(self, value: Tensor) -> Mapping[str, list[np.float32]]:
+        del value
+        return {"prediction": [np.float32(1), np.float32(2)]}
+
+
 class DeepcopyOnlyState:
     def __deepcopy__(self, memo: dict[int, Any]) -> DeepcopyOnlyState:
         del memo
@@ -383,6 +389,33 @@ def test_lossy_sequence_output_fails_before_logging() -> None:
     assert (
         mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
     )
+
+
+def test_homogeneous_numpy_scalar_output_is_lossless() -> None:
+    _, run_id = _run()
+    predictor = Predictor(
+        model=nn.Identity(),
+        preprocessor=nn.Identity(),
+        normalizer=NumpySequenceOutput(),
+        validator=accept_prediction,
+        checkpoint_uri="runs:/training/checkpoint",
+        checkpoint_digest="d" * 64,
+    )
+
+    models = log_predictor(
+        predictor,
+        run_id=run_id,
+        input_example=_example(),
+        forms=("pyfunc",),
+    )
+
+    result = mlflow.pyfunc.load_model(models["pyfunc"].model_uri).predict(
+        {
+            "sample_id": np.asarray(["second", "first"]),
+            "x": np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        }
+    )
+    np.testing.assert_array_equal(result["prediction"], np.asarray([1, 2], dtype=np.float32))
 
 
 def test_source_run_is_refreshed_after_preflight(
