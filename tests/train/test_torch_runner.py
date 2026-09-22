@@ -538,7 +538,7 @@ def test_each_fold_gets_a_fresh_module(corpus: Path) -> None:
     first = build_module(task, channels=2, length=128)
     second = build_module(task, channels=2, length=128)
     assert first is not second
-    assert first.backbone is not second.backbone
+    assert first.model is not second.model
 
 
 # --- end to end ------------------------------------------------------------------------

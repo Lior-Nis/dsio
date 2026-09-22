@@ -11,6 +11,7 @@ from torch import Tensor
 class WindowItem(TypedDict):
     """One indexed window before collation."""
 
+    sample_id: str
     x: Tensor
     row: int
     y: NotRequired[Tensor]
@@ -27,6 +28,7 @@ class TrainingItem(TypedDict):
 class BatchInputs(TypedDict):
     """Fields shared by every collated input batch."""
 
+    sample_id: list[str]
     x: Tensor
     row: Tensor
 
@@ -46,7 +48,8 @@ class TrainingBatch(BatchInputs):
 class PredictionBatch(TypedDict):
     """One model prediction batch returned by Lightning."""
 
-    row: Tensor
+    sample_id: list[str]
+    row: NotRequired[Tensor]
     prediction: Tensor
 
 

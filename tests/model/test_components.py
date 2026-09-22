@@ -20,6 +20,7 @@ torch = pytest.importorskip("torch")
 from torch import nn  # noqa: E402
 
 from dsio.dataset.dataset import TwoViewCollate  # noqa: E402
+from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
 from dsio.model.components import (  # noqa: E402
     Conv1dEncoder,
     CrossEntropy,
@@ -176,11 +177,22 @@ def test_mae_trains_the_backbone_through_the_generic_step() -> None:
 
     backbone = Conv1dEncoder(channels=CHANNELS, hidden=8, out_dim=DIM, depth=1)
     head = mae_decoder_head(DIM, CHANNELS, LENGTH)
-    module = DsioModule(backbone=backbone, head=head, loss=MaskedMSE())
-    loss = module._common_step({"x": x, "y": target, "row": torch.arange(4)}, "train")
+    module = DsioModule(
+        model=ComponentChain(backbone=backbone, head=head),
+        objective=LossObjective(MaskedMSE()),
+    )
+    loss = module._common_step(
+        {
+            "sample_id": [f"sample-{index}" for index in range(4)],
+            "x": x,
+            "y": target,
+            "row": torch.arange(4),
+        },
+        "train",
+    )
     assert torch.isfinite(loss)
     loss.backward()
-    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in module.backbone.parameters())
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in backbone.parameters())
 
 
 # --- NT-Xent (SimCLR) and VICReg -----------------------------------------------------
@@ -199,7 +211,7 @@ def views() -> tuple[torch.Tensor, torch.Tensor]:
     the two views came to differ."""
     torch.manual_seed(0)
     signal = torch.randn(8, CHANNELS, LENGTH)
-    items = [{"x": signal[i], "row": i} for i in range(signal.shape[0])]
+    items = [{"sample_id": f"sample-{i}", "x": signal[i], "row": i} for i in range(signal.shape[0])]
     batch = TwoViewCollate(nn.Identity())(items)
     return batch["x"], batch["y"]
 
@@ -240,7 +252,7 @@ def test_nt_xent_loss_falls_when_views_agree() -> None:
     case, over the *same* backbone and head weights as the harder, jittered one."""
     torch.manual_seed(0)
     signal = torch.randn(8, CHANNELS, LENGTH)
-    items = [{"x": signal[i], "row": i} for i in range(8)]
+    items = [{"sample_id": f"sample-{i}", "x": signal[i], "row": i} for i in range(8)]
     easy_batch = TwoViewCollate(nn.Identity())(items)
     hard_batch = TwoViewCollate(Jitter(3.0))(items)
 
@@ -299,11 +311,25 @@ def test_contrastive_losses_train_the_same_module_as_everything_else(
     ContrastiveModule, no step() override, just a registered head and a registered loss."""
     x, target = views
     backbone = Conv1dEncoder(channels=CHANNELS, hidden=8, out_dim=DIM, depth=1)
-    module = DsioModule(backbone=backbone, head=HEADS.get(head_name)(DIM, out_dim=8), loss=loss_fn)
-    loss = module._common_step({"x": x, "y": target, "row": torch.arange(x.shape[0])}, "train")
+    module = DsioModule(
+        model=ComponentChain(
+            backbone=backbone,
+            head=HEADS.get(head_name)(DIM, out_dim=8),
+        ),
+        objective=LossObjective(loss_fn),
+    )
+    loss = module._common_step(
+        {
+            "sample_id": [f"sample-{index}" for index in range(x.shape[0])],
+            "x": x,
+            "y": target,
+            "row": torch.arange(x.shape[0]),
+        },
+        "train",
+    )
     assert torch.isfinite(loss)
     loss.backward()
-    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in module.backbone.parameters())
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in backbone.parameters())
 
 
 # --- contrastive heads ----------------------------------------------------------------
@@ -392,9 +418,18 @@ def test_embedding_encoder_trains_through_the_generic_step() -> None:
     torch.manual_seed(0)
     ids = torch.randint(0, 50, (4, 1, 32))
     backbone = EmbeddingEncoder(vocab_size=50, embed_dim=8, out_dim=DIM)
-    module = DsioModule(backbone=backbone, head=linear_head(DIM, 2), loss=CrossEntropy())
+    module = DsioModule(
+        model=ComponentChain(backbone=backbone, head=linear_head(DIM, 2)),
+        objective=LossObjective(CrossEntropy()),
+    )
     loss = module._common_step(
-        {"x": ids, "y": torch.tensor([0, 1, 1, 0]), "row": torch.arange(4)}, "train"
+        {
+            "sample_id": [f"sample-{index}" for index in range(4)],
+            "x": ids,
+            "y": torch.tensor([0, 1, 1, 0]),
+            "row": torch.arange(4),
+        },
+        "train",
     )
     assert torch.isfinite(loss)
     loss.backward()

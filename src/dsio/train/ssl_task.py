@@ -45,6 +45,7 @@ from dsio.dataset.dataset import (
     val_dataset,
 )
 from dsio.eval.contract import Fold
+from dsio.model.chain import ComponentChain, LossObjective
 from dsio.model.masking import MASKS
 from dsio.model.module import DsioModule, export_encoder
 from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
@@ -174,10 +175,12 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
         head_factory, {"in_dim": feature_dim, "channels": channels, "length": length}
     )
     module = DsioModule(
-        backbone=backbone,
-        head=head_factory(**{**head_shape, **task.head.params}),
-        loss=LOSSES.get(task.loss.name)(**task.loss.params),
-        transform=build_optional_component(task.transform, TRANSFORMS),
+        model=ComponentChain(
+            backbone=backbone,
+            head=head_factory(**{**head_shape, **task.head.params}),
+            transform=build_optional_component(task.transform, TRANSFORMS),
+        ),
+        objective=LossObjective(LOSSES.get(task.loss.name)(**task.loss.params)),
         lr=task.lr,
         weight_decay=task.weight_decay,
     )

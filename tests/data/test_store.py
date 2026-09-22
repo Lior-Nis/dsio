@@ -97,6 +97,79 @@ def test_magic_is_stable() -> None:
     assert MAGIC == b"DSIOIDX\x00"
 
 
+@pytest.mark.parametrize(
+    "entity_codes",
+    [
+        np.array([-1]),
+        np.array([2]),
+        np.array([2**32], dtype=np.uint64),
+        np.array([-2**32]),
+        np.array([0.0]),
+        np.array(["0"]),
+    ],
+)
+def test_window_index_rejects_invalid_entity_codes(entity_codes: np.ndarray) -> None:
+    with pytest.raises(ViewError, match="invalid entity code|integer array"):
+        WindowIndex(
+            starts=np.array([10]),
+            entity_codes=entity_codes,
+            entity_names=["first", "last"],
+            entity_groups=["one", "two"],
+            spec=WindowSpec(length=4, stride=4),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
+@pytest.mark.parametrize(
+    "starts",
+    [
+        np.array([-1]),
+        np.array([2**63], dtype=np.uint64),
+        np.array([0.5]),
+        np.array(["10"]),
+        np.array([[10]]),
+    ],
+)
+def test_window_index_rejects_invalid_starts(starts: np.ndarray) -> None:
+    with pytest.raises(ViewError, match="window coordinates must fit|starts must be"):
+        WindowIndex(
+            starts=starts,
+            entity_codes=np.array([0]),
+            entity_names=["first"],
+            entity_groups=["one"],
+            spec=WindowSpec(length=4, stride=4),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
+def test_window_index_rejects_a_window_end_that_overflows_int64() -> None:
+    with pytest.raises(ViewError, match="window coordinates must fit"):
+        WindowIndex(
+            starts=np.array([np.iinfo(np.int64).max]),
+            entity_codes=np.array([0]),
+            entity_names=["first"],
+            entity_groups=["one"],
+            spec=WindowSpec(length=2, stride=1),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
+def test_window_index_rejects_an_unrepresentable_window_length() -> None:
+    with pytest.raises(ViewError, match="window coordinates must fit"):
+        WindowIndex(
+            starts=np.array([], dtype=np.int64),
+            entity_codes=np.array([], dtype=np.int32),
+            entity_names=[],
+            entity_groups=[],
+            spec=WindowSpec(length=np.iinfo(np.int64).max + 2, stride=1),
+            store_name="store",
+            store_digest="digest",
+        )
+
+
 # --- store --------------------------------------------------------------------------
 
 

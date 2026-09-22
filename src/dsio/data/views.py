@@ -144,8 +144,8 @@ class WindowIndex:
         labels: np.ndarray | None = None,
         metrics: dict[str, np.ndarray] | None = None,
     ) -> None:
-        self.starts = np.ascontiguousarray(starts, dtype=np.int64)
-        self.entity_codes = np.ascontiguousarray(entity_codes, dtype=np.int32)
+        raw_starts = np.asarray(starts)
+        raw_entity_codes = np.asarray(entity_codes)
         self.entity_names = list(entity_names)
         self.entity_groups = list(entity_groups)
         self.spec = spec
@@ -153,10 +153,24 @@ class WindowIndex:
         self.store_digest = store_digest
         self.labels = labels
         self.metrics = dict(metrics or {})
-        if self.starts.size != self.entity_codes.size:
+        if raw_starts.ndim != 1 or raw_starts.dtype.kind not in "iu":
+            raise ViewError("starts must be a one-dimensional integer array")
+        max_start = np.iinfo(np.int64).max - (spec.length - 1)
+        if max_start < 0 or np.any(raw_starts < 0) or np.any(raw_starts > max_start):
+            raise ViewError("window coordinates must fit in non-negative int64 values")
+        if raw_entity_codes.ndim != 1 or raw_entity_codes.dtype.kind not in "iu":
+            raise ViewError("entity_codes must be a one-dimensional integer array")
+        if raw_starts.size != raw_entity_codes.size:
             raise ViewError("starts and entity_codes must be the same length")
         if len(self.entity_names) != len(self.entity_groups):
             raise ViewError("entity_names and entity_groups must be the same length")
+        if np.any(raw_entity_codes < 0) or np.any(raw_entity_codes >= len(self.entity_names)):
+            raise ViewError(
+                f"entity_codes must be within [0, {len(self.entity_names)}); "
+                "the index contains an invalid entity code"
+            )
+        self.starts = np.ascontiguousarray(raw_starts, dtype=np.int64)
+        self.entity_codes = np.ascontiguousarray(raw_entity_codes, dtype=np.int32)
 
     def __len__(self) -> int:
         return int(self.starts.size)
@@ -181,6 +195,14 @@ class WindowIndex:
         table = {name: i for i, name in enumerate(sorted(set(self.entity_groups)))}
         per_entity = np.array([table[g] for g in self.entity_groups], dtype=np.int32)
         return per_entity[self.entity_codes]
+
+    def sample_id(self, position: int) -> str:
+        """Return the one governed identity for a window position in this view."""
+        position = operator.index(position)
+        if position < 0 or position >= len(self):
+            raise IndexError(f"window position {position} is outside [0, {len(self)})")
+        entity = self.entity_names[int(self.entity_codes[position])]
+        return f"{entity}:{int(self.starts[position])}:{self.digest}"
 
     def subset(self, mask: np.ndarray) -> WindowIndex:
         """Restrict to a boolean mask, keeping every parallel array aligned."""

@@ -221,6 +221,33 @@ executable code for the meaning of transformed tensor values—no generic runtim
 prove that a callable did not swap two same-shaped payload rows while preserving their IDs—so
 custom collators belong in the reviewed named-component path rather than ad hoc project lambdas.
 
+Train through native Lightning with the exact reusable module and data module—variation is
+an ordinary model and objective, not a runner or subclass:
+
+```python
+import torch.nn.functional as F
+from lightning import Trainer
+from torch import nn
+
+from dsio.model.module import DsioModule
+
+
+def objective(model, batch, stage):
+    prediction = model(batch["x"])
+    loss = F.cross_entropy(prediction, batch["y"])
+    return {"loss": loss, "accuracy": (prediction.argmax(-1) == batch["y"]).float().mean()}
+
+
+module = DsioModule(model=nn.Sequential(...), objective=objective)
+Trainer(max_epochs=10).fit(module, datamodule=data)
+```
+
+The objective receives `(model, batch, stage)` and returns one flat mapping with mandatory
+scalar tensor `loss`; every other entry is a named scalar tensor metric logged by
+`LightningModule.log()`. Native Lightning checkpoints remain the resumable training state.
+Projects inject components into `DsioModule` and `DsioDataModule`; both exact classes reject
+subclassing.
+
 **Never block, always reconstructible.** A dirty working tree does not stop a run — the
 diff is captured as an artifact, so even a dirty run reproduces exactly. The clean-tree
 gate belongs at model-registry promotion, and **is not implemented**: there is no

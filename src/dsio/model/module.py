@@ -1,186 +1,231 @@
-"""The component chain, as one LightningModule with one step implementation.
-
-A fixed chain of slots with declared always-present / maybe-present invariants, so every
-training paradigm is the same object with different pieces in it.
-
-```
-x -> preprocessor? -> transform -> backbone -> head
-```
-
-Three changes from the original, each fixing something that cost real time there:
-
-**No stochastic slot, so nothing here can augment a validation batch.** The chain used to
-carry two train-only slots, skipped unless ``self.training`` — a runtime flag a validation
-loop could get wrong without anything in a config file revealing it. That property now holds
-structurally instead: a pretext transform like masking lives on the *dataset*
-(:class:`~dsio.dataset.dataset.WindowDataset`), so a training dataset built with ``mask=`` and a
-validation dataset built without one is the whole mechanism. There is no flag here to check
-and nothing to get wrong on the model side — ``encode`` runs the same chain regardless of
-``self.training``.
-
-**One step implementation, not three.** ``_common_step(batch, stage)`` removes the
-train/val/test triplication, because the alternative is three near-identical methods that
-drift apart.
-
-**Predictions carry their row positions.** The batch dict carries ``row``, so predictions
-can be aligned back to the fold that produced them by identity rather than by trusting
-DataLoader ordering. This is the same failure class the fold loop refuses — an off-by-one
-that scores row *i* against row *j*'s label and looks merely disappointing.
-
-**A loss may report its own diagnostics, from inside the one forward pass this step
-already does.** ``self.loss`` sees only ``(prediction, target)`` by contract — but a loss
-that also implements ``diagnostics(prediction, target, x) -> dict[str, Tensor]`` gets it
-called here and each entry logged under ``{stage}/{name}``. This dispatches on what the
-loss object *is* (``getattr(self.loss, "diagnostics", None)``), the same shape every
-registry in this codebase already uses to add a capability without every caller needing to
-know which concrete type it is talking to — not on which task or method configured it, so
-a loss with nothing to add costs one attribute lookup and a loss with something to add
-costs no second forward pass to get it.
-
-**One `LightningModule`, no paradigm subclass.** A pretraining run and a supervised one are
-both this class: what differs is which backbone/head/loss/transform go into the slots, and
-what the dataset behind the loader hands the ``(x, target)`` pair. Contrastive objectives
-(SimCLR, VICReg) build their two views at collate time through
-:class:`~dsio.dataset.dataset.TwoViewCollate`, so their loss is an ordinary
-``(prediction, target)`` loss too (:class:`~dsio.model.components.NTXent`,
-:class:`~dsio.model.components.VICReg`) and needs no module subclass.
-"""
+"""The exact reusable Lightning module for every training task."""
 
 from __future__ import annotations
 
-from typing import Literal
+import math
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, Protocol, cast
 
 import torch
 from lightning import LightningModule
-from torch import nn
+from torch import Tensor, nn
 
-from dsio.batches import BatchInputs, PredictionBatch, TrainingBatch
+from dsio.batches import PredictionBatch
+from dsio.model.chain import ComponentError, export_encoder
 
-Stage = Literal["train", "val", "test"]
+Stage = Literal["train", "validate", "test"]
+type Batch = Mapping[str, Any]
+type ObjectiveResult = Mapping[str, Tensor]
+
+_INTEGER_ROW_DTYPES = {
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+}
 
 
-class ComponentError(ValueError):
-    """Raised when the component chain is missing a required piece or is misassembled."""
+class Objective(Protocol):
+    """One task step: execute a model on a batch and return loss plus metrics."""
+
+    def __call__(
+        self,
+        model: nn.Module,
+        batch: Batch,
+        stage: Stage,
+    ) -> ObjectiveResult: ...
+
+
+class ModuleError(ValueError):
+    """The configured model, objective, or batch violated the training contract."""
 
 
 class DsioModule(LightningModule):
-    """A model assembled from registered components, trained by one shared step.
+    """Compose one PyTorch model and objective behind native Lightning lifecycle hooks."""
 
-    Required slots — ``transform``, ``backbone``, ``head``, ``loss`` — are never ``None``.
-    ``transform`` defaults to identity rather than being optional, so the chain has one
-    shape and ``forward`` needs no branch for it.
-    """
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        del kwargs
+        raise TypeError(
+            "DsioModule cannot be subclassed; vary training through injected components"
+        )
 
     def __init__(
         self,
         *,
-        backbone: nn.Module,
-        head: nn.Module,
-        loss: nn.Module,
-        transform: nn.Module | None = None,
-        preprocessor: nn.Module | None = None,
+        model: nn.Module,
+        objective: Objective,
         lr: float = 1e-3,
         weight_decay: float = 0.0,
     ) -> None:
         super().__init__()
-        for name, component in (("backbone", backbone), ("head", head), ("loss", loss)):
-            if component is None:
-                raise ComponentError(f"{name} is required and may not be None")
-        self.transform = transform if transform is not None else nn.Identity()
-        self.backbone = backbone
-        self.head = head
-        self.loss = loss
-        self.preprocessor = preprocessor
-
+        if not isinstance(model, nn.Module):
+            raise ModuleError(f"model must be a torch nn.Module, got {type(model).__name__}")
+        if not callable(objective):
+            raise ModuleError("objective must be callable")
+        lr = _finite_hyperparameter(lr, "lr", positive=True)
+        weight_decay = _finite_hyperparameter(
+            weight_decay,
+            "weight_decay",
+            positive=False,
+        )
+        self.model = model
+        self.objective = objective
         self.lr = lr
         self.weight_decay = weight_decay
-        self.save_hyperparameters(ignore=["backbone", "head", "loss", "transform", "preprocessor"])
+        self.save_hyperparameters("lr", "weight_decay")
 
-    # --- the chain --------------------------------------------------------------
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
+        """Delegate inference to the configured native PyTorch model."""
+        return self.model(*args, **kwargs)
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """Run the chain up to and including the backbone, returning features.
+    def encode(self, x: Tensor) -> Tensor:
+        """Expose an encoder capability when the injected model deliberately provides it."""
+        encode = getattr(self.model, "encode", None)
+        if not callable(encode):
+            raise ModuleError("the configured model does not expose an encode() capability")
+        result = encode(x)
+        if not isinstance(result, Tensor):
+            raise ModuleError("model.encode() must return a tensor")
+        return result
 
-        Separate from :meth:`forward` because SSL callbacks inspect backbone features and
-        pretrained runs export them for downstream tasks. A head is a task's opinion about
-        features; the features themselves outlive it.
-        """
-        if self.preprocessor is not None:
-            x = self.preprocessor(x)
-        x = self.transform(x)
-        return self.backbone(x)
+    def _common_step(self, batch: Batch, stage: Stage) -> Tensor:
+        """Execute and log the one objective contract shared by every training stage."""
+        sample_ids = _batch_ids(batch)
+        result = self.objective(self.model, batch, stage)
+        values = _objective_values(result)
+        prefix = "val" if stage == "validate" else stage
+        for name, value in values.items():
+            self.log(
+                f"{prefix}/{name}",
+                value,
+                batch_size=len(sample_ids),
+                on_step=stage == "train" and name == "loss",
+                on_epoch=True,
+                prog_bar=stage == "validate" and name == "loss",
+            )
+        return values["loss"]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.head(self.encode(x))
-
-    # --- one step, three stages -------------------------------------------------
-
-    def _common_step(self, batch: TrainingBatch, stage: Stage) -> torch.Tensor:
-        """The single implementation every stage shares."""
-        x = batch["x"]
-        target = batch["y"]
-        prediction = self(x)
-        value = self.loss(prediction, target)
-        if value.ndim > 0:
-            value = value.mean()
-        self.log(
-            f"{stage}/loss",
-            value,
-            batch_size=x.shape[0],
-            on_step=stage == "train",
-            on_epoch=True,
-            prog_bar=stage == "val",
-        )
-        diagnostics = getattr(self.loss, "diagnostics", None)
-        if diagnostics is not None:
-            for name, diagnostic in diagnostics(prediction, target, x).items():
-                self.log(f"{stage}/{name}", diagnostic, batch_size=x.shape[0], on_epoch=True)
-        return value
-
-    def training_step(self, batch: TrainingBatch, batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Batch, batch_idx: int) -> Tensor:
+        del batch_idx
         return self._common_step(batch, "train")
 
-    def validation_step(self, batch: TrainingBatch, batch_idx: int) -> torch.Tensor:
-        return self._common_step(batch, "val")
+    def validation_step(self, batch: Batch, batch_idx: int) -> Tensor:
+        del batch_idx
+        return self._common_step(batch, "validate")
 
-    def test_step(self, batch: TrainingBatch, batch_idx: int) -> torch.Tensor:
+    def test_step(self, batch: Batch, batch_idx: int) -> Tensor:
+        del batch_idx
         return self._common_step(batch, "test")
 
-    def predict_step(self, batch: BatchInputs, batch_idx: int) -> PredictionBatch:
-        """Return predictions *with* the row positions they belong to.
-
-        Returning bare logits would make alignment a property of DataLoader ordering, which
-        is true today and silently untrue the moment anyone shuffles a prediction loader or
-        uses a sampler. Carrying the position makes it checkable instead.
-        """
-        prediction = self(batch["x"])
-        return {
-            "row": batch["row"],
-            "prediction": prediction.detach(),
-        }
+    def predict_step(
+        self,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> PredictionBatch:
+        del batch_idx, dataloader_idx
+        sample_ids = _batch_ids(batch)
+        try:
+            x = batch["x"]
+        except KeyError:
+            raise ModuleError("prediction batch must contain 'x'") from None
+        prediction = self.model(x)
+        if not isinstance(prediction, Tensor):
+            raise ModuleError(f"model prediction must be a tensor, got {type(prediction).__name__}")
+        if prediction.ndim == 0 or prediction.shape[0] != len(sample_ids):
+            size = None if prediction.ndim == 0 else prediction.shape[0]
+            raise ModuleError(
+                f"model returned {size} predictions for {len(sample_ids)} sample_id values"
+            )
+        result = PredictionBatch(
+            sample_id=sample_ids,
+            prediction=prediction.detach(),
+        )
+        if "row" in batch:
+            row = batch["row"]
+            if not isinstance(row, Tensor):
+                raise ModuleError(f"prediction row must be a tensor, got {type(row).__name__}")
+            if row.ndim != 1 or row.shape[0] != len(sample_ids):
+                size = None if row.ndim == 0 else row.shape[0]
+                raise ModuleError(
+                    f"prediction row must be one-dimensional with {len(sample_ids)} values; "
+                    f"got shape {tuple(row.shape)} with leading size {size}"
+                )
+            if row.layout != torch.strided or row.dtype not in _INTEGER_ROW_DTYPES:
+                raise ModuleError(
+                    f"prediction row must be a dense integer tensor, got {row.layout} {row.dtype}"
+                )
+            result["row"] = row
+        return result
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         return torch.optim.AdamW(
-            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+            self.parameters(),
+            lr=self.lr,
+            weight_decay=self.weight_decay,
         )
 
 
-def export_encoder(module: DsioModule) -> dict[str, torch.Tensor]:
-    """The weights worth keeping from a trained module: everything the chain needs to
-    produce features, none of what only the pretext objective needed.
+def _batch_ids(batch: object) -> list[str]:
+    if not isinstance(batch, Mapping):
+        raise ModuleError(f"training batch must be a mapping, got {type(batch).__name__}")
+    identities = batch.get("sample_id")
+    if isinstance(identities, str) or not isinstance(identities, Sequence):
+        raise ModuleError("training batch must contain sample_id as a sequence of strings")
+    result = list(identities)
+    if not result or any(not isinstance(sample_id, str) for sample_id in result):
+        raise ModuleError("training batch sample_id must be a non-empty sequence of strings")
+    return cast("list[str]", result)
 
-    Excludes ``head``. A decoder trained to reconstruct masked spans has no meaning outside
-    the pretext task, and shipping it invites someone to load it as though it were part of
-    the model — the same is true of a contrastive projector, which exists only to give a
-    loss a space to compare views in.
 
-    A free function because exportability is a policy about which slots to keep, callable on
-    any :class:`DsioModule` regardless of what trained it.
-    """
-    state: dict[str, torch.Tensor] = {}
-    for name in ("preprocessor", "transform", "backbone"):
-        component = getattr(module, name, None)
-        if isinstance(component, nn.Module):
-            for key, value in component.state_dict().items():
-                state[f"{name}.{key}"] = value
-    return state
+def _finite_hyperparameter(value: object, name: str, *, positive: bool) -> float:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise ModuleError(f"{name} must be a finite number")
+    try:
+        normalized = float(value)
+    except OverflowError:
+        raise ModuleError(f"{name} must be a finite number") from None
+    valid_range = normalized > 0 if positive else normalized >= 0
+    if not math.isfinite(normalized) or not valid_range:
+        qualifier = "positive" if positive else "non-negative"
+        raise ModuleError(f"{name} must be a {qualifier} finite number")
+    return normalized
+
+
+def _objective_values(result: object) -> dict[str, Tensor]:
+    if not isinstance(result, Mapping):
+        raise ModuleError(f"objective must return a mapping, got {type(result).__name__}")
+    if "loss" not in result:
+        raise ModuleError("objective result requires mandatory scalar tensor 'loss'")
+    values: dict[str, Tensor] = {}
+    for name, value in result.items():
+        if not isinstance(name, str) or not name or "/" in name:
+            raise ModuleError("objective result names must be non-empty strings without '/'")
+        if name in {"loss_step", "loss_epoch"}:
+            raise ModuleError(f"objective result name {name!r} is reserved by Lightning")
+        if not isinstance(value, Tensor):
+            raise ModuleError(
+                f"objective result {name!r} must be a tensor, got {type(value).__name__}"
+            )
+        if value.ndim != 0:
+            raise ModuleError(
+                f"objective result {name!r} must be scalar, got shape {tuple(value.shape)}"
+            )
+        values[name] = value
+    return values
+
+
+__all__ = [
+    "Batch",
+    "ComponentError",
+    "DsioModule",
+    "ModuleError",
+    "Objective",
+    "ObjectiveResult",
+    "Stage",
+    "export_encoder",
+]

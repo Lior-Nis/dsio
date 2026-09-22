@@ -191,12 +191,7 @@ class SignalExamples:
     @property
     def sample_ids(self) -> np.ndarray:
         return np.asarray(
-            [
-                f"{entity_id}:{int(start)}:{self.index.digest}"
-                for entity_id, start in zip(
-                    self.index.entity_ids.tolist(), self.index.starts.tolist(), strict=True
-                )
-            ],
+            [self.index.sample_id(position) for position in range(len(self.index))],
             dtype=str,
         )
 
