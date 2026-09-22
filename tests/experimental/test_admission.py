@@ -106,6 +106,27 @@ def test_indirect_project_flag_is_rejected(tmp_path: Path) -> None:
 
 def test_domain_value_named_like_project_is_not_project_branching(tmp_path: Path) -> None:
     assert _audit(tmp_path, "if signal_kind == 'pulse':\n    value = 1\n") == ()
+    assert _audit(tmp_path, "if projection == 'pulse':\n    value = 1\n") == ()
+
+
+def test_explicit_consumer_name_needs_no_project_identifier(tmp_path: Path) -> None:
+    assert any(
+        message.startswith("genericity:")
+        for message in _audit(tmp_path, "if client == 'consumer_x':\n    value = 1\n")
+    )
+
+
+def test_project_alias_and_match_guard_are_rejected(tmp_path: Path) -> None:
+    for source in (
+        "p = project\nif p == 'pulse':\n    value = 1\n",
+        "match project:\n    case item if item == 'pulse':\n        value = 1\n",
+    ):
+        assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
+
+
+def test_project_name_constant_is_rejected(tmp_path: Path) -> None:
+    source = "PROJECT_PULSE = 'pulse'\nif project == PROJECT_PULSE:\n    value = 1\n"
+    assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
 
 @pytest.mark.parametrize(
@@ -159,6 +180,60 @@ def test_known_registry_mutation_forms_are_rejected(
     )
 
 
+def test_importing_closed_registry_api_is_itself_rejected(tmp_path: Path) -> None:
+    source = """
+from dsio.eval.metrics import METRICS
+def mutate(target):
+    target.add('x', score)
+mutate(METRICS)
+"""
+    assert any(
+        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
+    )
+
+
+def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path) -> None:
+    for source in (
+        "from dsio.train.torch_task import TASKS\n",
+        "REGISTRY = {}\nREGISTRY['x'] = component\n",
+    ):
+        assert any(
+            message.startswith("runtime-registration:")
+            for message in _audit(tmp_path, source)
+        )
+
+
+def test_registry_descendants_and_reflection_are_rejected(tmp_path: Path) -> None:
+    for mutation in (
+        "metrics.METRICS._items.update({'x': score})",
+        "setattr(metrics.METRICS, '_items', {})",
+    ):
+        source = f"import dsio.eval.metrics as metrics\n{mutation}\n"
+        assert any(
+            message.startswith("runtime-registration:")
+            for message in _audit(tmp_path, source)
+        )
+
+
+def test_star_import_is_not_statically_admissible(tmp_path: Path) -> None:
+    failures = _audit(tmp_path, "from dsio.eval.metrics import *\nmetric('x')(score)\n")
+    assert any(message.startswith("stable-contract:") for message in failures)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import importlib\nload = importlib.import_module\nload('consumer_x.private')\n",
+        "import importlib\nimportlib.import_module(name='consumer_x.private')\n",
+        "import importlib\nimportlib.import_module(module_name)\n",
+    ],
+)
+def test_dynamic_import_aliases_keywords_and_unknown_targets_are_rejected(
+    tmp_path: Path, source: str
+) -> None:
+    assert any(message.startswith("dependency:") for message in _audit(tmp_path, source))
+
+
 def test_imported_experimental_helpers_are_audited(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -177,6 +252,55 @@ def test_imported_experimental_helpers_are_audited(
     )
 
     assert any(message.startswith("dependency:") for message in failures)
+
+
+def test_package_relative_helper_is_audited(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from dsio.experimental.admission import source as admission_source
+
+    package = tmp_path / "experimental"
+    candidate = package / "candidate"
+    candidate.mkdir(parents=True)
+    (candidate / "__init__.py").write_text("from . import helper\n")
+    (candidate / "helper.py").write_text("from consumer_x.private import Model\n")
+    monkeypatch.setattr(admission_source, "_EXPERIMENTAL_ROOT", package)
+
+    failures = audit_source(
+        candidate / "__init__.py",
+        module="dsio.experimental.candidate",
+        project_names=("consumer_x",),
+    )
+
+    assert any(message.startswith("dependency:") for message in failures)
+
+
+def test_package_source_wins_module_package_name_collision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from dsio.experimental.admission import source as admission_source
+
+    root = tmp_path / "experimental"
+    package = root / "candidate"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("class Component: pass\n")
+    (root / "candidate.py").write_text("class Component: pass\n")
+    monkeypatch.setattr(admission_source, "_EXPERIMENTAL_ROOT", root)
+
+    assert admission_source.component_source("dsio.experimental.candidate") == (
+        package / "__init__.py"
+    )
+
+
+def test_one_project_name_string_is_normalized(tmp_path: Path) -> None:
+    path = tmp_path / "candidate.py"
+    path.write_text("if client == 'consumer_x':\n    value = 1\n")
+
+    failures = audit_source(
+        path, module="dsio.experimental.candidate", project_names="consumer_x"
+    )
+
+    assert any(message.startswith("genericity:") for message in failures)
 
 
 def test_named_audit_validates_before_importing(

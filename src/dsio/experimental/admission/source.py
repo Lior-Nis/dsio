@@ -34,6 +34,8 @@ def audit_source(
     project_names: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """Return deterministic rule messages for one proposed component module."""
+    if isinstance(project_names, str):
+        project_names = (project_names,)
     return _audit_source(
         Path(path), module=module, project_names=project_names, seen_modules=set()
     )
@@ -60,16 +62,32 @@ def _audit_source(
         failures.append(f"source: cannot parse {source_path}: {error}")
         return tuple(failures)
 
-    aliases = syntax.aliases(tree, module)
+    is_package = source_path.name == "__init__.py"
+    aliases = syntax.assigned_aliases(tree, syntax.aliases(tree, module, is_package=is_package))
+    dynamic_imports = syntax.dynamic_imports(tree, aliases)
     imported_modules = (
-        *syntax.imports(tree, module),
-        *syntax.dynamic_imports(tree, aliases),
+        *syntax.imports(tree, module, is_package=is_package),
+        *(target for target in dynamic_imports if target is not None),
     )
+    if any(target is None for target in dynamic_imports):
+        failures.append(
+            "dependency: dynamic imports must name one literal public module for static audit"
+        )
     for imported in imported_modules:
         root = imported.partition(".")[0]
+        if imported.endswith(".*"):
+            failures.append(
+                f"stable-contract: star import {imported!r} prevents static dependency audit"
+            )
         if root == "dsio" and any(part.startswith("_") for part in imported.split(".")):
             failures.append(f"stable-contract: import {imported!r} uses a private DSIO module")
-        if imported == "dsio.config.registry" or imported.startswith("dsio.config.registry."):
+        if syntax.is_registry_api(imported):
+            failures.append(
+                f"runtime-registration: import {imported!r} exposes a closed DSIO dispatcher"
+            )
+        elif imported == "dsio.config.registry" or imported.startswith(
+            "dsio.config.registry."
+        ):
             failures.append(
                 "runtime-registration: experimental components cannot depend on the "
                 "closed DSIO registry implementation"
@@ -80,19 +98,22 @@ def _audit_source(
                 "private consumer-project imports are forbidden"
             )
 
-    forbidden_projects = {
+    explicit_projects = {
         name.casefold()
-        for name in (*_KNOWN_PROJECTS, *project_names)
+        for name in project_names
         if isinstance(name, str) and name
     }
-    for branch in syntax.project_branches(tree):
-        matched = _matched_project(branch, forbidden_projects)
+    known_projects = set(_KNOWN_PROJECTS) - explicit_projects
+    string_constants = syntax.string_constants(tree)
+    for branch, has_project_context in syntax.project_branches(tree):
+        matched = _matched_project(branch, explicit_projects, string_constants)
+        if matched is None and has_project_context:
+            matched = _matched_project(branch, known_projects, string_constants)
         if matched is not None:
             failures.append(f"genericity: conditional branches on consumer project {matched!r}")
 
-    aliases = syntax.assigned_aliases(tree, aliases)
     if any(
-        syntax.registry_mutation(node.func, aliases)
+        syntax.registry_mutation(node, aliases)
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
     ) or any(syntax.registry_assignment(node, aliases) for node in ast.walk(tree)):
@@ -126,11 +147,11 @@ def component_source(module: str) -> Path | None:
     if not all(part.isidentifier() for part in parts):
         return None
     candidate = _EXPERIMENTAL_ROOT.joinpath(*parts)
-    module_path = candidate.with_suffix(".py")
-    if module_path.is_file():
-        return module_path
     package_path = candidate / "__init__.py"
-    return package_path if package_path.is_file() else None
+    if package_path.is_file():
+        return package_path
+    module_path = candidate.with_suffix(".py")
+    return module_path if module_path.is_file() else None
 
 
 def _experimental_source(imported: str) -> tuple[str, Path] | None:
@@ -143,13 +164,18 @@ def _experimental_source(imported: str) -> tuple[str, Path] | None:
     return None
 
 
-def _matched_project(branch: ast.AST, projects: set[str]) -> str | None:
-    if not syntax.mentions_project(branch) and not isinstance(branch, ast.pattern):
-        return None
-    values = (
+def _matched_project(
+    branch: ast.AST, projects: set[str], string_constants: dict[str, str]
+) -> str | None:
+    values = [
         node.value.casefold()
         for node in ast.walk(branch)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    values.extend(
+        string_constants[node.id].casefold()
+        for node in ast.walk(branch)
+        if isinstance(node, ast.Name) and node.id in string_constants
     )
     return next(
         (
