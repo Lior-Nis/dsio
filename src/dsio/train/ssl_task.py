@@ -13,7 +13,7 @@ has since been written there; a verified artifact reference can do neither.
 
 **There is no pretext-objective registry.** A pretraining run is built from the same pieces
 a supervised one is
-(:class:`~dsio.model.module.DsioModule`, a registered ``backbone``/``head``/``loss``), plus
+(:class:`~dsio.model.module.DsioModule`, an importable ``backbone``/``head``/``loss``), plus
 exactly one of ``mask`` or ``augmentor`` telling this module which of the two
 training-dataset contracts to build — masked-reconstruction (MAE's shape) or two-view
 contrastive collation (SimCLR/VICReg's shape). Which one is set is what used to be implied
@@ -29,9 +29,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+import torch
 from pydantic import Field, model_validator
 
 from dsio.batches import BatchLoader, TrainingBatch
+from dsio.config.components import ComponentConfig, resolve_component
 from dsio.config.schema import TASKS, TaskConfig
 from dsio.data.adapters import SignalExamples
 from dsio.data.splits.folds import load_folds, require_fold, split_path
@@ -46,14 +48,12 @@ from dsio.dataset.dataset import (
 )
 from dsio.eval.contract import Fold
 from dsio.model.chain import ComponentChain, LossObjective
-from dsio.model.masking import MASKS
 from dsio.model.module import DsioModule, export_encoder
-from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LABELS, LOSSES, TRANSFORMS
 from dsio.train.artifacts import save_artifact
 from dsio.train.assembly import (
-    Component,
     accepted_shape_arguments,
     build_optional_component,
+    component_factory,
 )
 from dsio.train.callbacks import OnlineProbe, RankMeMonitor
 from dsio.train.runner import preflight, runner
@@ -77,7 +77,7 @@ class SslPretrainTask(TaskConfig):
     and ``loss`` are named directly, exactly as a supervised :class:`~dsio.train.torch_task.
     TorchTask` names them. What used to select between MAE, SimCLR and VICReg was a
     ``method`` string resolved into an object that built its own head and drove its own
-    step; here it is simply which registered head/loss a caller names, plus exactly one of
+    step; here it is simply which importable head/loss a caller names, plus exactly one of
     ``mask`` (draws a masked-reconstruction training dataset) or ``augmentor`` (builds two
     augmented views at collate time) — see :func:`build_loaders`.
     """
@@ -90,12 +90,12 @@ class SslPretrainTask(TaskConfig):
     splits_root: Path = Path("splits")
     fold: int = Field(default=0, description="Which fold's train part to pretrain on.")
 
-    backbone: Component
-    head: Component
-    loss: Component
-    mask: Component | None = None
-    augmentor: Component | None = None
-    transform: Component | None = None
+    backbone: ComponentConfig
+    head: ComponentConfig
+    loss: ComponentConfig
+    mask: ComponentConfig | None = None
+    augmentor: ComponentConfig | None = None
+    transform: ComponentConfig | None = None
     normalize_target: bool = Field(
         default=True,
         description=(
@@ -106,15 +106,20 @@ class SslPretrainTask(TaskConfig):
 
     register_as: str = Field(description="Name the encoder artifact is saved under.")
 
-    labels: str | None = Field(
+    labels: ComponentConfig | None = Field(
         default=None,
         description="Optional label provider, used only by the online probe.",
     )
     probe_every_n_epochs: int = Field(default=1, ge=1)
     probe_metrics: tuple[str, ...] = ("accuracy", "roc_auc")
 
-    lr: float = Field(default=1e-3, gt=0.0)
-    weight_decay: float = Field(default=0.0, ge=0.0)
+    optimizer: ComponentConfig = Field(
+        default_factory=lambda: ComponentConfig(
+            reference="torch.optim:AdamW",
+            parameters={"lr": 1e-3, "weight_decay": 0.0},
+        )
+    )
+    scheduler: ComponentConfig | None = None
     batch_size: int = Field(default=64, ge=2)
     num_workers: int = Field(default=0, ge=0)
     trainer: TrainerConfig = TrainerConfig(monitor="val/loss")
@@ -135,24 +140,27 @@ class SslPretrainTask(TaskConfig):
 def check_ssl(config: RunConfig) -> None:
     """Resolve every name, including the ones only the probe needs.
 
-    ``require_mlflow`` runs first, ahead of every registry lookup below: decision 7 makes
+    ``require_mlflow`` runs first, ahead of every component import below: decision 7 makes
     MLflow a run's hard dependency, and a run that cannot write to it should not spend even
     a typo-check's worth of time before saying so.
     """
     require_mlflow()
     task = config.task
     assert isinstance(task, SslPretrainTask)
-    BACKBONES.get(task.backbone.name)
-    HEADS.get(task.head.name)
-    LOSSES.get(task.loss.name)
+    component_factory(task.backbone)
+    component_factory(task.head)
+    component_factory(task.loss)
+    component_factory(task.optimizer)
+    if task.scheduler is not None:
+        component_factory(task.scheduler)
     if task.mask is not None:
-        MASKS.get(task.mask.name)
+        component_factory(task.mask)
     if task.augmentor is not None:
-        AUGMENTORS.get(task.augmentor.name)
+        component_factory(task.augmentor)
     if task.transform is not None:
-        TRANSFORMS.get(task.transform.name)
+        component_factory(task.transform)
     if task.labels is not None:
-        LABELS.get(task.labels)
+        component_factory(task.labels)
     require_fold(task.splits_root, task.split, task.fold)
 
 
@@ -165,24 +173,32 @@ def build_module(task: SslPretrainTask, *, channels: int, length: int) -> tuple[
     and to record in the encoder artifact below, so it is computed once here rather than
     twice.
     """
-    factory = BACKBONES.get(task.backbone.name)
+    factory, _ = component_factory(task.backbone)
     shape = accepted_shape_arguments(factory, {"channels": channels, "length": length})
-    backbone = factory(**{**shape, **task.backbone.params})
+    backbone = resolve_component(task.backbone, expected=torch.nn.Module, **shape)
     feature_dim = int(getattr(backbone, "out_dim", 0)) or _infer_dim(backbone, channels, length)
 
-    head_factory = HEADS.get(task.head.name)
+    head_factory, _ = component_factory(task.head)
     head_shape = accepted_shape_arguments(
         head_factory, {"in_dim": feature_dim, "channels": channels, "length": length}
     )
+    optimizer_factory, optimizer_parameters = component_factory(task.optimizer)
+    scheduler_factory = None
+    scheduler_parameters: dict[str, Any] = {}
+    if task.scheduler is not None:
+        scheduler_factory, scheduler_parameters = component_factory(task.scheduler)
+
     module = DsioModule(
         model=ComponentChain(
             backbone=backbone,
-            head=head_factory(**{**head_shape, **task.head.params}),
-            transform=build_optional_component(task.transform, TRANSFORMS),
+            head=resolve_component(task.head, expected=torch.nn.Module, **head_shape),
+            transform=build_optional_component(task.transform),
         ),
-        objective=LossObjective(LOSSES.get(task.loss.name)(**task.loss.params)),
-        lr=task.lr,
-        weight_decay=task.weight_decay,
+        objective=LossObjective(resolve_component(task.loss, expected=torch.nn.Module)),
+        optimizer_factory=optimizer_factory,
+        optimizer_parameters=optimizer_parameters,
+        scheduler_factory=scheduler_factory,
+        scheduler_parameters=scheduler_parameters,
     )
     return module, feature_dim
 
@@ -214,7 +230,7 @@ def build_loaders(
     validation = fold.val if fold.val is not None and fold.val.size else None
 
     if task.mask is not None:
-        mask = MASKS.get(task.mask.name)(**task.mask.params)
+        mask: Any = resolve_component(task.mask)
         train_loader = make_target_loader(
             masked_dataset(
                 store, index, fold.train, mask=mask, normalize_target=task.normalize_target
@@ -252,7 +268,7 @@ def build_loaders(
         return train_loader, val_loader
 
     assert task.augmentor is not None, "enforced by SslPretrainTask's model_validator"
-    augment = AUGMENTORS.get(task.augmentor.name)(**task.augmentor.params)
+    augment = resolve_component(task.augmentor, expected=torch.nn.Module)
     train_loader = make_loader(
         val_dataset(store, index, fold.train),
         batch_size=task.batch_size,
@@ -298,7 +314,11 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         require_fold(task.splits_root, task.split, task.fold)
 
         store = SignalStore(data_root() / task.store)
-        row_labels = None if task.labels is None else np.asarray(LABELS.get(task.labels)(store))
+        row_labels = (
+            None
+            if task.labels is None
+            else resolve_component(task.labels, store, expected=np.ndarray)
+        )
         index = load_or_build(store, task.window, labels=row_labels)
         examples = SignalExamples(store, index)
         folds = load_folds(examples, split_path(task.splits_root, task.split))
@@ -367,10 +387,8 @@ def run_ssl_pretrain(config: RunConfig, run: Run) -> dict[str, float]:
         torch.save(
             {
                 "state_dict": export_encoder(module),
-                "backbone": task.backbone.model_dump(mode="json"),
-                "transform": (
-                    None if task.transform is None else task.transform.model_dump(mode="json")
-                ),
+                "backbone": dict(task.backbone),
+                "transform": None if task.transform is None else dict(task.transform),
                 "feature_dim": feature_dim,
                 "channels": store.channels,
                 "length": task.window.length,

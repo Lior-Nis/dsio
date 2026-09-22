@@ -1,4 +1,4 @@
-"""Registered components: backbones, heads, losses, transforms, augmentors.
+"""Importable native components: backbones, heads, losses, transforms, augmentors.
 
 The mask-aware loss gets the most scrutiny here, because it is the whole point of Task
 6a: a NaN sentinel in the target (see ``WindowDataset`` in ``dsio.dataset.dataset``) is only
@@ -8,10 +8,12 @@ before computing error actually rewards reconstruction over copying.
 The contrastive losses and heads below moved here from the deleted
 ``tests/ssl/test_methods.py`` when Task 6b dissolved ``dsio.ssl``: ``SimCLR``/``VICReg``
 are no longer objects with their own ``step()``, they are an ``nt_xent``/``vicreg`` loss
-plus a projector head, exactly like every other registered component.
+plus a projector head, exactly like every other importable component.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -35,7 +37,6 @@ from dsio.model.components import (  # noqa: E402
     vicreg_projector_head,
 )
 from dsio.model.module import DsioModule  # noqa: E402
-from dsio.model.registry import AUGMENTORS, BACKBONES, HEADS, LOSSES  # noqa: E402
 
 CHANNELS, LENGTH, DIM = 2, 128, 16
 
@@ -156,10 +157,6 @@ def test_masked_mse_rejects_a_target_with_nothing_to_reconstruct() -> None:
     target = torch.full((2, 1, 4), float("nan"))
     with pytest.raises(ValueError, match="no masked positions"):
         MaskedMSE()(prediction, target)
-
-
-def test_masked_mse_is_registered() -> None:
-    assert "masked_mse" in LOSSES.names()
 
 
 def test_mae_trains_the_backbone_through_the_generic_step() -> None:
@@ -299,12 +296,12 @@ def test_vicreg_needs_more_than_one_pair() -> None:
 
 
 @pytest.mark.parametrize(
-    ("head_name", "loss_fn"),
-    [("simclr_projector", NTXent(temperature=0.2)), ("vicreg_projector", VICReg())],
+    ("head_factory", "loss_fn"),
+    [(simclr_projector_head, NTXent(temperature=0.2)), (vicreg_projector_head, VICReg())],
     ids=["simclr", "vicreg"],
 )
 def test_contrastive_losses_train_the_same_module_as_everything_else(
-    head_name: str, loss_fn: nn.Module, views: tuple[torch.Tensor, torch.Tensor]
+    head_factory: Any, loss_fn: nn.Module, views: tuple[torch.Tensor, torch.Tensor]
 ) -> None:
     """The property this task exists to prove: DsioModule's one generic step trains a
     contrastive objective exactly the way it trains everything else -- no
@@ -314,7 +311,7 @@ def test_contrastive_losses_train_the_same_module_as_everything_else(
     module = DsioModule(
         model=ComponentChain(
             backbone=backbone,
-            head=HEADS.get(head_name)(DIM, out_dim=8),
+            head=head_factory(DIM, out_dim=8),
         ),
         objective=LossObjective(loss_fn),
     )
@@ -346,15 +343,6 @@ def test_simclr_projector_head_projects_to_the_configured_dimension() -> None:
 
 def test_vicreg_projector_head_projects_to_the_configured_dimension() -> None:
     assert vicreg_projector_head(DIM, out_dim=8)(torch.randn(4, DIM)).shape == (4, 8)
-
-
-def test_contrastive_heads_and_losses_are_registered() -> None:
-    assert {"mae_decoder", "simclr_projector", "vicreg_projector"} <= set(HEADS.names())
-    assert {"masked_mse", "nt_xent", "vicreg"} <= set(LOSSES.names())
-
-
-def test_augmentors_are_registered() -> None:
-    assert {"jitter", "random_scale", "none"} <= set(AUGMENTORS.names())
 
 
 # --- the embedding backbone ----------------------------------------------------------
@@ -406,10 +394,6 @@ def test_embedding_encoder_rejects_an_id_outside_the_vocabulary() -> None:
 def test_embedding_encoder_is_shape_checked_like_every_other_component() -> None:
     with pytest.raises(ValueError, match=r"\[batch, channels, time\]"):
         EmbeddingEncoder(vocab_size=50)(torch.randint(0, 50, (4, 32)))
-
-
-def test_embedding_backbone_is_registered() -> None:
-    assert BACKBONES.get("embedding") is EmbeddingEncoder
 
 
 def test_embedding_encoder_trains_through_the_generic_step() -> None:

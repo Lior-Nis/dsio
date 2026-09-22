@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
 
@@ -11,6 +10,10 @@ from lightning import LightningModule
 from torch import Tensor, nn
 
 from dsio.batches import PredictionBatch
+from dsio.config.components import (
+    ComponentError as ConfiguredComponentError,
+)
+from dsio.config.components import require_importable_component, validate_component_config
 from dsio.model.chain import ComponentError, export_encoder
 
 Stage = Literal["train", "validate", "test"]
@@ -58,25 +61,61 @@ class DsioModule(LightningModule):
         *,
         model: nn.Module,
         objective: Objective,
-        lr: float = 1e-3,
-        weight_decay: float = 0.0,
+        optimizer_factory: Any = torch.optim.AdamW,
+        optimizer_parameters: Mapping[str, Any] | None = None,
+        scheduler_factory: Any | None = None,
+        scheduler_parameters: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__()
         if not isinstance(model, nn.Module):
             raise ModuleError(f"model must be a torch nn.Module, got {type(model).__name__}")
         if not callable(objective):
             raise ModuleError("objective must be callable")
-        lr = _finite_hyperparameter(lr, "lr", positive=True)
-        weight_decay = _finite_hyperparameter(
-            weight_decay,
-            "weight_decay",
-            positive=False,
-        )
+        if not callable(optimizer_factory):
+            raise ModuleError("optimizer_factory must be callable")
+        if scheduler_factory is not None and not callable(scheduler_factory):
+            raise ModuleError("scheduler_factory must be callable when configured")
+        if scheduler_factory is None and scheduler_parameters:
+            raise ModuleError("scheduler_parameters require a scheduler_factory")
+        try:
+            require_importable_component(model, "model")
+            require_importable_component(objective, "objective")
+            optimizer_reference = require_importable_component(
+                optimizer_factory, "optimizer_factory"
+            )
+            optimizer_config = validate_component_config(
+                {
+                    "reference": optimizer_reference,
+                    "parameters": dict(optimizer_parameters or {}),
+                }
+            )
+            scheduler_config = None
+            if scheduler_factory is not None:
+                scheduler_reference = require_importable_component(
+                    scheduler_factory, "scheduler_factory"
+                )
+                scheduler_config = validate_component_config(
+                    {
+                        "reference": scheduler_reference,
+                        "parameters": dict(scheduler_parameters or {}),
+                    }
+                )
+        except ConfiguredComponentError as error:
+            raise ModuleError(str(error)) from None
         self.model = model
         self.objective = objective
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.save_hyperparameters("lr", "weight_decay")
+        self.optimizer_factory = optimizer_factory
+        self.optimizer_parameters = optimizer_config["parameters"]
+        self.scheduler_factory = scheduler_factory
+        self.scheduler_parameters = (
+            {} if scheduler_config is None else scheduler_config["parameters"]
+        )
+        self.save_hyperparameters(
+            {
+                "optimizer": optimizer_config,
+                "scheduler": scheduler_config,
+            }
+        )
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Delegate inference to the configured native PyTorch model."""
@@ -162,12 +201,22 @@ class DsioModule(LightningModule):
             result["row"] = row
         return result
 
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.AdamW(
-            self.parameters(),
-            lr=self.lr,
-            weight_decay=self.weight_decay,
-        )
+    def configure_optimizers(self) -> Any:
+        optimizer = self.optimizer_factory(self.parameters(), **self.optimizer_parameters)
+        if not isinstance(optimizer, torch.optim.Optimizer):
+            raise ModuleError(
+                f"optimizer_factory must return a native torch optimizer, "
+                f"got {type(optimizer).__name__}"
+            )
+        if self.scheduler_factory is None:
+            return optimizer
+        scheduler = self.scheduler_factory(optimizer, **self.scheduler_parameters)
+        if not isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler | Mapping):
+            raise ModuleError(
+                "scheduler_factory must return a native torch scheduler or "
+                f"Lightning scheduler mapping, got {type(scheduler).__name__}"
+            )
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
 
 
 def _batch_ids(batch: object) -> list[str]:
@@ -180,20 +229,6 @@ def _batch_ids(batch: object) -> list[str]:
     if not result or any(not isinstance(sample_id, str) for sample_id in result):
         raise ModuleError("training batch sample_id must be a non-empty sequence of strings")
     return cast("list[str]", result)
-
-
-def _finite_hyperparameter(value: object, name: str, *, positive: bool) -> float:
-    if not isinstance(value, int | float) or isinstance(value, bool):
-        raise ModuleError(f"{name} must be a finite number")
-    try:
-        normalized = float(value)
-    except OverflowError:
-        raise ModuleError(f"{name} must be a finite number") from None
-    valid_range = normalized > 0 if positive else normalized >= 0
-    if not math.isfinite(normalized) or not valid_range:
-        qualifier = "positive" if positive else "non-negative"
-        raise ModuleError(f"{name} must be a {qualifier} finite number")
-    return normalized
 
 
 def _objective_values(result: object) -> dict[str, Tensor]:

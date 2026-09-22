@@ -1,13 +1,11 @@
 """Name-to-value registries populated by decorators.
 
-This replaces Hydra's ``_target_`` string plus reflective import. The difference that
-matters: an unknown name fails here at parse time against a known key set, with a
-suggestion, instead of failing inside ``instantiate()`` after data loading has begun.
-Renaming a registered class is also caught by mypy at every use site, which a string
-target never is.
+This remains only for DSio's closed task, runner, and built-in evaluation dispatchers.
+Reusable training components use explicit ``module:qualname`` references instead; projects
+never mutate these registries to extend the training system.
 
-Registries hold values, not types, so the same machinery serves component classes
-(``Registry[type[TaskConfig]]``) and reusable component factories.
+Registries hold values, not types, so the same machinery serves task classes and the
+closed built-in metric dispatcher.
 """
 
 from __future__ import annotations

@@ -34,7 +34,12 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
             "database": {"user": "reader", "password": "SENTINEL-PASSWORD"},
             "task_run_id": "ephemeral-id",
         },
-        components={"model": "project.models:Net"},
+        components={
+            "model": {
+                "reference": "torch.nn:Linear",
+                "parameters": {"in_features": 3, "out_features": 2},
+            }
+        },
         secrets="password",
         ephemeral="task_run_id",
     )
@@ -47,7 +52,12 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
     artifact = Path(client.download_artifacts(run.info.run_id, "provenance.json", tmp_path))
     payload = json.loads(artifact.read_text())
     assert payload == {
-        "components": {"model": "project.models:Net"},
+        "components": {
+            "model": {
+                "parameters": {"in_features": 3, "out_features": 2},
+                "reference": "torch.nn:Linear",
+            }
+        },
         "configuration": {
             "database": {"user": "reader"},
             "dataset": "sha256:data",

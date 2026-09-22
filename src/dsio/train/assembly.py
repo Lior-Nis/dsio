@@ -1,28 +1,25 @@
-"""Shared component configuration primitives for concrete training runners."""
+"""Shared assembly helpers for concrete training runners."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
-
-from dsio.contracts import DsioModel
-
-
-class Component(DsioModel):
-    """A registered component plus its keyword arguments.
-
-    Name and parameters travel together so a config records exactly what was built. The
-    alternative -- a name here and a parameter block somewhere else -- is how a config
-    directory fills with files that differ only in one exponent.
-    """
-
-    name: str
-    params: dict[str, Any] = Field(default_factory=dict)
+from dsio.config.components import (
+    ComponentConfig,
+    resolve_component,
+    resolve_reference,
+    validate_component_config,
+)
 
 
-def build_optional_component(component: Component | None, registry: Any) -> Any:
-    return None if component is None else registry.get(component.name)(**component.params)
+def component_factory(component: ComponentConfig) -> tuple[Any, dict[str, Any]]:
+    """Return the named native callable and its declared parameters."""
+    validated = validate_component_config(component)
+    return resolve_reference(validated["reference"]), validated["parameters"]
+
+
+def build_optional_component(component: ComponentConfig | None) -> Any:
+    return None if component is None else resolve_component(component)
 
 
 def accepted_shape_arguments(factory: Any, shape: dict[str, Any]) -> dict[str, Any]:

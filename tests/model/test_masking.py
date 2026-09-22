@@ -7,7 +7,6 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from dsio.model.masking import (  # noqa: E402
-    MASKS,
     CausalMask,
     PatchMask,
     RandomMask,
@@ -112,10 +111,6 @@ def test_apply_mask_broadcasts_over_channels(signal: torch.Tensor) -> None:
 def test_degenerate_ratios_are_rejected(ratio: float) -> None:
     with pytest.raises(ValueError, match="mask ratio"):
         RandomMask(ratio)
-
-
-def test_strategies_are_registered() -> None:
-    assert {"random", "span", "patch", "causal"} <= set(MASKS.names())
 
 
 def test_a_generator_makes_masking_reproducible(signal: torch.Tensor) -> None:

@@ -1,8 +1,8 @@
 """Concrete components: enough to train something real, few enough to read in one sitting.
 
-The spine ships a small set deliberately. A project registers its own — that is what the
-registries are for — and dsio's job is to make the slot exist and be wired correctly, not
-to be a model zoo it then has to maintain.
+Every component is addressed by its ordinary ``module:qualname`` import reference. DSio's
+job is to keep these components generic and tested, not to maintain a parallel registry or
+plugin type system.
 
 Every module here takes ``[batch, channels, time]`` and is shape-checked on the way in,
 because a silent broadcast between a channels-first and a channels-last tensor produces a
@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import torch
 from torch import nn
-
-from dsio.model.registry import augmentor, backbone, head, loss, preprocessor, transform
 
 
 def _check_3d(x: torch.Tensor, who: str) -> None:
@@ -28,7 +26,6 @@ def _check_3d(x: torch.Tensor, who: str) -> None:
 # --- backbones ----------------------------------------------------------------------
 
 
-@backbone("mlp1d")
 class MLP1d(nn.Module):
     """Flatten and project. The baseline every other backbone must beat."""
 
@@ -47,7 +44,6 @@ class MLP1d(nn.Module):
         return self.net(x)
 
 
-@backbone("conv1d")
 class Conv1dEncoder(nn.Module):
     """Strided dilated convolutions with global pooling.
 
@@ -91,7 +87,6 @@ class Conv1dEncoder(nn.Module):
         return self.project(pooled)
 
 
-@backbone("embedding")
 class EmbeddingEncoder(nn.Module):
     """Token ids to a pooled representation. The baseline any sequence model over text
     must beat, and the reason a token corpus needs a backbone of its own at all.
@@ -164,30 +159,26 @@ class EmbeddingEncoder(nn.Module):
 # --- heads --------------------------------------------------------------------------
 
 
-@head("linear")
 def linear_head(in_dim: int = 64, out_dim: int = 2) -> nn.Module:
     return nn.Linear(in_dim, out_dim)
 
 
-@head("mlp")
 def mlp_head(in_dim: int = 64, hidden: int = 64, out_dim: int = 2) -> nn.Module:
     return nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Linear(hidden, out_dim))
 
 
-@head("identity")
 def identity_head() -> nn.Module:
     """For pretraining, where the loss consumes features directly."""
     return nn.Identity()
 
 
-@head("mae_decoder")
 def mae_decoder_head(in_dim: int, channels: int, length: int, hidden_mult: int = 2) -> nn.Module:
     """MAE's reconstruction head: predict every position of the original window, back in
     the ``[channels, length]`` shape the input arrived in.
 
-    Registered like any other head, moved here from the deleted ``ssl.methods.
-    MaskedReconstruction.build_head`` — ``ssl_task.py`` now builds it through ``HEADS`` and
-    ``_accepted`` exactly the way ``torch_task.py`` builds a classification head, which is
+    Importable like any other head, moved here from the deleted ``ssl.methods.
+    MaskedReconstruction.build_head`` — ``ssl_task.py`` now resolves it exactly the way
+    ``torch_task.py`` resolves a classification head, which is
     what let the pretext objective stop being a separate kind of thing that builds its own
     head. Its output only makes sense paired with :class:`MaskedMSE` and a masked
     :class:`~dsio.dataset.dataset.WindowDataset` target, which is why
@@ -201,14 +192,12 @@ def mae_decoder_head(in_dim: int, channels: int, length: int, hidden_mult: int =
     )
 
 
-@head("simclr_projector")
 def simclr_projector_head(in_dim: int, out_dim: int = 64) -> nn.Module:
     """SimCLR's projection head: NT-Xent compares windows in this space, not the encoder's
     own feature space — moved here from the deleted ``ssl.methods.SimCLR.build_head``."""
     return nn.Sequential(nn.Linear(in_dim, in_dim), nn.ReLU(), nn.Linear(in_dim, out_dim))
 
 
-@head("vicreg_projector")
 def vicreg_projector_head(in_dim: int, out_dim: int = 64) -> nn.Module:
     """VICReg's projection head, moved here from the deleted ``ssl.methods.VICReg.
     build_head``. The ``BatchNorm1d`` matters: :class:`VICReg`'s variance term assumes a
@@ -224,7 +213,6 @@ def vicreg_projector_head(in_dim: int, out_dim: int = 64) -> nn.Module:
 # --- losses -------------------------------------------------------------------------
 
 
-@loss("cross_entropy")
 class CrossEntropy(nn.Module):
     """Cross-entropy that accepts either hard integer labels or soft ratios.
 
@@ -255,7 +243,6 @@ class CrossEntropy(nn.Module):
         return nn.functional.cross_entropy(prediction, target.long(), weight=self.weight)
 
 
-@loss("bce")
 def bce_loss() -> nn.Module:
     class _BCE(nn.Module):
         def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -266,7 +253,6 @@ def bce_loss() -> nn.Module:
     return _BCE()
 
 
-@loss("mse")
 def mse_loss() -> nn.Module:
     class _MSE(nn.Module):
         def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -275,7 +261,6 @@ def mse_loss() -> nn.Module:
     return _MSE()
 
 
-@loss("masked_mse")
 class MaskedMSE(nn.Module):
     """Reconstruction loss for a target that carries NaN outside masked positions.
 
@@ -341,7 +326,6 @@ def _pair_halves(
     return prediction[first], prediction[target[first]]
 
 
-@loss("nt_xent")
 class NTXent(nn.Module):
     """SimCLR's contrastive loss, over a batch :class:`~dsio.dataset.dataset.TwoViewCollate` built.
 
@@ -394,7 +378,6 @@ class NTXent(nn.Module):
         return {"nt_xent": nt_xent, "mean_abs_cosine": off_diagonal}
 
 
-@loss("vicreg")
 class VICReg(nn.Module):
     """Variance-Invariance-Covariance regularisation: no negatives, no momentum encoder —
     collapse is prevented by an explicit variance term instead.
@@ -465,12 +448,10 @@ class VICReg(nn.Module):
 # --- transforms and preprocessors ---------------------------------------------------
 
 
-@transform("identity")
 def identity_transform() -> nn.Module:
     return nn.Identity()
 
 
-@transform("instance_standardize")
 class InstanceStandardize(nn.Module):
     """Per-window, per-channel standardisation.
 
@@ -491,7 +472,6 @@ class InstanceStandardize(nn.Module):
         return (x - mean) / (std + self.eps)
 
 
-@preprocessor("fixed_standardize")
 class FixedStandardize(nn.Module):
     """Standardise by statistics supplied from outside — fitted on the train fold only."""
 
@@ -513,7 +493,6 @@ class FixedStandardize(nn.Module):
 # --- stochastic slot; see TwoViewCollate in dataset/dataset.py) -------------------------
 
 
-@augmentor("jitter")
 class Jitter(nn.Module):
     """Additive Gaussian noise, scaled per channel by that channel's own spread.
 
@@ -532,7 +511,6 @@ class Jitter(nn.Module):
         return x + torch.randn_like(x) * scale
 
 
-@augmentor("random_scale")
 class RandomScale(nn.Module):
     """Multiply each channel by a random gain, for amplitude-invariant features."""
 
@@ -550,6 +528,5 @@ class RandomScale(nn.Module):
         return x * gain
 
 
-@augmentor("none")
 def no_augmentation() -> nn.Module:
     return nn.Identity()

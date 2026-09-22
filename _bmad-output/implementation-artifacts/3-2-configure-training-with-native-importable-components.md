@@ -23,17 +23,17 @@ so that tasks vary without forks, subclasses, or a custom plugin framework.
 
 ## Tasks / Subtasks
 
-- [ ] Add one generic named-component boundary (AC: 1, 2)
-  - [ ] Represent configuration as a plain canonical mapping, not a registry or result model.
-  - [ ] Resolve `module:qualname`, validate import identity and the requested native type, and instantiate with declared parameters.
-  - [ ] Reject ambiguous or non-importable callables before execution.
-- [ ] Inject native optimization components into `DsioModule` (AC: 2-4)
-  - [ ] Replace built-in learning-rate fields with an importable optimizer factory and parameter mapping.
-  - [ ] Support an optional importable scheduler factory and return native Lightning configuration.
-  - [ ] Keep callbacks Trainer-owned and metrics on the existing `self.log()` path.
-- [ ] Make full component configuration first-class provenance (AC: 1, 5)
-  - [ ] Accept canonical component mappings in execution identity and MLflow provenance.
-  - [ ] Prove reference and parameter changes alter identity and are logged exactly.
+- [x] Add one generic named-component boundary (AC: 1, 2)
+  - [x] Represent configuration as a plain canonical mapping, not a registry or result model.
+  - [x] Resolve `module:qualname`, validate import identity and the requested native type, and instantiate with declared parameters.
+  - [x] Reject ambiguous or non-importable callables before execution.
+- [x] Inject native optimization components into `DsioModule` (AC: 2-4)
+  - [x] Replace built-in learning-rate fields with an importable optimizer factory and parameter mapping.
+  - [x] Support an optional importable scheduler factory and return native Lightning configuration.
+  - [x] Keep callbacks Trainer-owned and metrics on the existing `self.log()` path.
+- [x] Make full component configuration first-class provenance (AC: 1, 5)
+  - [x] Accept canonical component mappings in execution identity and MLflow provenance.
+  - [x] Prove reference and parameter changes alter identity and are logged exactly.
 - [ ] Migrate current consumers and pass full quality and independent review gates (AC: 1-6)
 
 ## Dev Notes
@@ -67,14 +67,48 @@ Codex (GPT-5)
 ### Debug Log References
 
 - 2026-09-22: Created from merged Story 3.1 at `fddc018`; constrained the design to one import resolver, plain mappings, native Lightning/PyTorch structures, and existing provenance.
+- 2026-09-22: Removed the model-component and mask registries; current supervised, SSL, token, label, optimizer, and scheduler consumers now use ordinary import references.
+- 2026-09-22: Candidate release gate passed: 859 tests passed (3 deselected), locked sync, builds, Ruff, mypy, root-import inertia, and diff checks.
 
 ### Completion Notes List
+
+- One `module:qualname` resolver constructs and validates native components from canonical plain mappings; no plugin base, registry, or resolution result model was added.
+- `DsioModule` validates importability before training and returns native optimizer or Lightning optimizer/scheduler structures.
+- Full component mappings are hashed and stored unchanged in MLflow provenance; references and parameters independently affect identity.
+- Existing training configs now name models, objectives, transforms, masks, labels, optimizers, and schedulers by import path.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/3-2-configure-training-with-native-importable-components.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `README.md`
+- `src/dsio/config/components.py`
+- `src/dsio/config/registry.py`
+- `src/dsio/data/labels.py`
+- `src/dsio/model/__init__.py`
+- `src/dsio/model/components.py`
+- `src/dsio/model/masking.py`
+- `src/dsio/model/module.py`
+- `src/dsio/model/registry.py` (deleted)
+- `src/dsio/tracking/provenance.py`
+- `src/dsio/train/assembly.py`
+- `src/dsio/train/ssl_task.py`
+- `src/dsio/train/torch_task.py`
+- `tests/config/test_component_resolution.py`
+- `tests/conftest.py`
+- `tests/model/test_components.py`
+- `tests/model/test_masking.py`
+- `tests/model/test_module.py`
+- `tests/model/test_registry_bootstrap.py` (deleted)
+- `tests/model/test_training_spine.py`
+- `tests/tracking/provenance/test_identity.py`
+- `tests/tracking/provenance/test_mlflow.py`
+- `tests/train/test_execute_seeding.py`
+- `tests/train/test_ssl_runner.py`
+- `tests/train/test_token_run.py`
+- `tests/train/test_torch_runner.py`
 
 ### Change Log
 
 - 2026-09-22: Created Story 3.2 and started implementation.
+- 2026-09-22: Implemented native importable component configuration and passed the complete candidate gate.

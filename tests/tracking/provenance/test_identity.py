@@ -72,6 +72,23 @@ def test_component_reference_changes_identity() -> None:
     )
 
 
+def test_component_parameters_change_identity() -> None:
+    from dsio.tracking import execution_identity
+
+    baseline = {
+        "reference": "torch.optim:AdamW",
+        "parameters": {"lr": 1e-3, "weight_decay": 0.0},
+    }
+    changed = {
+        "reference": "torch.optim:AdamW",
+        "parameters": {"lr": 5e-3, "weight_decay": 0.0},
+    }
+
+    assert execution_identity({}, components={"optimizer": baseline}) != execution_identity(
+        {}, components={"optimizer": changed}
+    )
+
+
 def test_component_references_must_be_explicit_strings() -> None:
     from dsio.contracts import NonCanonicalValueError
     from dsio.tracking import execution_identity

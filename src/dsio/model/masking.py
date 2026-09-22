@@ -20,15 +20,6 @@ from __future__ import annotations
 
 import torch
 
-from dsio.config.registry import Registry
-
-MASKS: Registry[type] = Registry("mask")
-
-
-def mask_strategy(name: str):  # type: ignore[no-untyped-def]
-    """Register a masking strategy."""
-    return MASKS.register(name)
-
 
 def _check(ratio: float) -> float:
     if not 0.0 < ratio < 1.0:
@@ -36,7 +27,6 @@ def _check(ratio: float) -> float:
     return ratio
 
 
-@mask_strategy("random")
 class RandomMask:
     """Mask individual timesteps uniformly at random.
 
@@ -59,7 +49,6 @@ class RandomMask:
         return mask
 
 
-@mask_strategy("span")
 class SpanMask:
     """Mask contiguous runs, the SpanBERT / wav2vec 2.0 shape.
 
@@ -90,7 +79,6 @@ class SpanMask:
         return mask
 
 
-@mask_strategy("patch")
 class PatchMask:
     """Mask whole non-overlapping patches, the MAE shape.
 
@@ -127,7 +115,6 @@ class PatchMask:
         return mask
 
 
-@mask_strategy("causal")
 class CausalMask:
     """Hide the final fraction of the window: forecasting as a pretext task.
 

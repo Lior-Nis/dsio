@@ -25,10 +25,9 @@ from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
 from dsio.eval.contract import PREDICTIONS_FILE  # noqa: E402
 from dsio.model.components import EmbeddingEncoder  # noqa: E402
-from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
 from dsio.train.runner import execute  # noqa: E402
-from dsio.train.torch_task import Component, TorchTask, TrainerConfig  # noqa: E402
+from dsio.train.torch_task import TorchTask, TrainerConfig  # noqa: E402
 
 VOCAB = 32
 
@@ -47,15 +46,6 @@ def token_corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             builder.add(
                 f"d{doc}", ids, group=f"d{doc}", attrs={"positive": int(positive)}
             )
-
-    if "topic" not in LABELS:
-
-        @labels("topic")
-        def _topic(store: SignalStore) -> np.ndarray:
-            out = np.zeros(store.n_rows, dtype=np.float32)
-            for entity in store.entities:
-                out[entity.start_row : entity.end_row] = float(entity.attrs["positive"])
-            return out
 
     store = SignalStore(root / "docs")
     SplitFile(
@@ -81,13 +71,25 @@ def _task(root: Path, **overrides: object) -> TorchTask:
     defaults = dict(
         store="docs",
         window=WindowSpec(length=64, stride=32, label_policy="majority"),
-        labels="topic",
+        labels={
+            "reference": "dsio.data.labels:entity_attribute_labels",
+            "parameters": {"attribute": "positive"},
+        },
         split="k1",
         fold=0,
         splits_root=root / "splits",
-        backbone=Component(name="embedding", params={"vocab_size": VOCAB, "out_dim": 8}),
-        head=Component(name="linear", params={"out_dim": 2}),
-        loss=Component(name="cross_entropy", params={"threshold": 0.5}),
+        backbone={
+            "reference": "dsio.model.components:EmbeddingEncoder",
+            "parameters": {"vocab_size": VOCAB, "out_dim": 8},
+        },
+        head={
+            "reference": "dsio.model.components:linear_head",
+            "parameters": {"out_dim": 2},
+        },
+        loss={
+            "reference": "dsio.model.components:CrossEntropy",
+            "parameters": {"threshold": 0.5},
+        },
         payload_dtype="long",
         batch_size=16,
         metrics=("accuracy",),

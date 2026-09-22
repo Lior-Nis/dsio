@@ -16,16 +16,16 @@ import pytest
 pytest.importorskip("torch")
 pytest.importorskip("lightning")
 
+from dsio.config.components import ComponentError  # noqa: E402
 from dsio.config.schema import RunConfig  # noqa: E402
 from dsio.data.adapters import entity_examples  # noqa: E402
+from dsio.data.labels import entity_attribute_labels  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import DATA_ROOT_ENV, SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec  # noqa: E402
-from dsio.model.registry import LABELS, labels  # noqa: E402
 from dsio.runs.record import start_run  # noqa: E402
 from dsio.train.runner import check, execute  # noqa: E402
 from dsio.train.torch_task import (  # noqa: E402
-    Component,
     TorchTask,
     TrainerConfig,
     _fold_invariant_config_hash,
@@ -52,15 +52,6 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             builder.add(
                 f"p{group}", signal, group=f"p{group}", attrs={"positive": int(positive)}
             )
-
-    if "tone" not in LABELS:
-
-        @labels("tone")
-        def _tone(store: SignalStore) -> np.ndarray:
-            out = np.zeros(store.n_rows, dtype=np.float32)
-            for entity in store.entities:
-                out[entity.start_row : entity.end_row] = float(entity.attrs["positive"])
-            return out
 
     # Three hand-picked folds over the eight groups, each mixing positive and negative
     # subjects across train/val/test so the separable-signal test below has both classes
@@ -92,14 +83,26 @@ def make_task(root: Path, **overrides) -> TorchTask:  # type: ignore[no-untyped-
     defaults = dict(
         store="tone",
         window=WindowSpec(length=128, stride=64, label_policy="majority"),
-        labels="tone",
+        labels={
+            "reference": "dsio.data.labels:entity_attribute_labels",
+            "parameters": {"attribute": "positive"},
+        },
         split="k3",
         fold=0,
         splits_root=root / "splits",
-        backbone=Component(name="conv1d", params={"hidden": 8, "out_dim": 8, "depth": 1}),
-        head=Component(name="linear", params={"out_dim": 2}),
-        loss=Component(name="cross_entropy", params={"threshold": 0.5}),
-        transform=Component(name="instance_standardize"),
+        backbone={
+            "reference": "dsio.model.components:Conv1dEncoder",
+            "parameters": {"hidden": 8, "out_dim": 8, "depth": 1},
+        },
+        head={
+            "reference": "dsio.model.components:linear_head",
+            "parameters": {"out_dim": 2},
+        },
+        loss={
+            "reference": "dsio.model.components:CrossEntropy",
+            "parameters": {"threshold": 0.5},
+        },
+        transform={"reference": "dsio.model.components:InstanceStandardize"},
         batch_size=32,
         metrics=("accuracy", "roc_auc"),
         trainer=TrainerConfig(max_epochs=2, accelerator="cpu", devices=1, checkpoint=False),
@@ -134,8 +137,22 @@ def test_a_different_seed_is_a_different_experiment(corpus: Path) -> None:
 def test_a_different_hyperparameter_is_a_different_experiment(corpus: Path) -> None:
     """The identity is derived from the task, not hardcoded to a constant -- which is the
     way this guard would fail while every refusal test above still passed."""
-    left = RunConfig(name="exp", task=make_task(corpus, fold=0, lr=1e-3))
-    right = RunConfig(name="exp", task=make_task(corpus, fold=1, lr=5e-3))
+    left = RunConfig(
+        name="exp",
+        task=make_task(
+            corpus,
+            fold=0,
+            optimizer={"reference": "torch.optim:AdamW", "parameters": {"lr": 1e-3}},
+        ),
+    )
+    right = RunConfig(
+        name="exp",
+        task=make_task(
+            corpus,
+            fold=1,
+            optimizer={"reference": "torch.optim:AdamW", "parameters": {"lr": 5e-3}},
+        ),
+    )
     assert _fold_invariant_config_hash(left) != _fold_invariant_config_hash(right)
 
 
@@ -145,9 +162,10 @@ def test_a_different_hyperparameter_is_a_different_experiment(corpus: Path) -> N
 def test_preflight_catches_a_typo_before_any_data_is_read(corpus: Path) -> None:
     """Deferred validation surfaces a typo only after the corpus has loaded."""
     config = RunConfig(
-        name="typo", task=make_task(corpus, backbone=Component(name="conv1D"))
+        name="typo",
+        task=make_task(corpus, backbone={"reference": "dsio.model.components:Conv1D"}),
     )
-    with pytest.raises(KeyError, match="did you mean"):
+    with pytest.raises(ComponentError, match="does not resolve"):
         check(config)
 
 
@@ -586,9 +604,10 @@ def test_pool_folds_refuses_folds_trained_under_different_backbones(
         task = make_task(
             corpus,
             fold=fold,
-            backbone=Component(
-                name="conv1d", params={"hidden": hidden, "out_dim": 8, "depth": 1}
-            ),
+            backbone={
+                "reference": "dsio.model.components:Conv1dEncoder",
+                "parameters": {"hidden": hidden, "out_dim": 8, "depth": 1},
+            },
         )
         config = RunConfig(name="mismatch", seed=0, task=task)
         run = start_run(
@@ -614,7 +633,7 @@ def test_the_runner_learns_a_separable_signal(corpus: Path, tmp_path: Path) -> N
     """
     task = make_task(
         corpus,
-        lr=3e-3,
+        optimizer={"reference": "torch.optim:AdamW", "parameters": {"lr": 3e-3}},
         trainer=TrainerConfig(
             max_epochs=30, accelerator="cpu", devices=1, checkpoint=False
         ),
@@ -638,7 +657,7 @@ def test_no_group_is_both_trained_on_and_tested(corpus: Path, tmp_path: Path) ->
 
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)
-    row_labels = LABELS.get("tone")(store)
+    row_labels = entity_attribute_labels(store, "positive")
     index = load_or_build(store, task.window, labels=row_labels)
     folds = load_folds(SignalExamples(store, index), split_path(task.splits_root, task.split))
 
@@ -668,7 +687,11 @@ def test_running_one_fold_writes_only_that_folds_predictions(
 
     store = SignalStore(Path(corpus) / "stores" / "tone")
     task = make_task(corpus)
-    index = load_or_build(store, task.window, labels=LABELS.get("tone")(store))
+    index = load_or_build(
+        store,
+        task.window,
+        labels=entity_attribute_labels(store, "positive"),
+    )
     folds = load_folds(SignalExamples(store, index), split_path(task.splits_root, task.split))
     fold1 = next(f for f in folds if f.index == 1)
 

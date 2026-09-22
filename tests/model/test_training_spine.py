@@ -68,6 +68,21 @@ class ClassificationObjective(nn.Module):
         }
 
 
+class StaticObjective:
+    def __init__(self, result: object) -> None:
+        self.result = result
+
+    def __call__(self, *args: object) -> object:
+        del args
+        return self.result
+
+
+class InvalidOptimizerFactory:
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return object()
+
+
 def _data_module(path: Path) -> DsioDataModule:
     with SignalStore.builder(path, channels=1, dtype="float32") as builder:
         for index in range(8):
@@ -101,7 +116,8 @@ def _module() -> DsioModule:
     return DsioModule(
         model=nn.Sequential(nn.Flatten(), nn.Linear(2, 2)),
         objective=ClassificationObjective(),
-        lr=0.01,
+        optimizer_factory=torch.optim.AdamW,
+        optimizer_parameters={"lr": 0.01, "weight_decay": 0.0},
     )
 
 
@@ -156,7 +172,7 @@ def test_malformed_objective_results_fail_at_the_boundary(
     result: object,
     message: str,
 ) -> None:
-    module = DsioModule(model=nn.Identity(), objective=lambda *_: result)  # type: ignore[arg-type]
+    module = DsioModule(model=nn.Identity(), objective=StaticObjective(result))
     module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
     batch = {"sample_id": ["sample"], "x": torch.ones(1, 1)}
 
@@ -171,27 +187,45 @@ def test_training_batches_require_ordered_sample_identity() -> None:
         module.training_step({"x": torch.ones(1, 2), "y": torch.zeros(1)}, 0)
 
 
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"lr": float("nan")},
-        {"lr": float("inf")},
-        {"weight_decay": float("nan")},
-        {"weight_decay": float("inf")},
-        {"lr": 10**10000},
-        {"weight_decay": 10**10000},
-    ],
-)
-def test_optimizer_hyperparameters_must_be_finite(kwargs: dict[str, float]) -> None:
-    with pytest.raises(ModuleError, match="finite"):
-        DsioModule(model=nn.Linear(1, 1), objective=ClassificationObjective(), **kwargs)
+def test_native_optimizer_and_scheduler_factories_return_lightning_configuration() -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        optimizer_factory=torch.optim.SGD,
+        optimizer_parameters={"lr": 0.25},
+        scheduler_factory=torch.optim.lr_scheduler.StepLR,
+        scheduler_parameters={"step_size": 2, "gamma": 0.5},
+    )
+
+    configured = module.configure_optimizers()
+
+    assert isinstance(configured, dict)
+    assert type(configured["optimizer"]) is torch.optim.SGD
+    assert configured["optimizer"].param_groups[0]["lr"] == 0.25
+    assert type(configured["lr_scheduler"]) is torch.optim.lr_scheduler.StepLR
+
+
+def test_optimizer_factory_must_return_a_native_optimizer() -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=ClassificationObjective(),
+        optimizer_factory=InvalidOptimizerFactory(),
+    )
+
+    with pytest.raises(ModuleError, match="native torch optimizer"):
+        module.configure_optimizers()
+
+
+def test_anonymous_components_fail_before_training() -> None:
+    with pytest.raises(ModuleError, match="named importable"):
+        DsioModule(model=nn.Identity(), objective=lambda *_: {"loss": torch.tensor(1.0)})
 
 
 @pytest.mark.parametrize("name", ["loss_step", "loss_epoch"])
 def test_objective_metrics_cannot_collide_with_lightning_loss_names(name: str) -> None:
     module = DsioModule(
         model=nn.Identity(),
-        objective=lambda *_: {"loss": torch.tensor(1.0), name: torch.tensor(2.0)},
+        objective=StaticObjective({"loss": torch.tensor(1.0), name: torch.tensor(2.0)}),
     )
 
     with pytest.raises(ModuleError, match="reserved by Lightning"):
