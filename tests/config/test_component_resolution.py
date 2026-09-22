@@ -91,4 +91,3 @@ def test_local_components_are_rejected() -> None:
 
     with pytest.raises(ComponentError, match="local|named importable"):
         importable_reference(local_factory)
-
