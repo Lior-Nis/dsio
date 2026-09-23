@@ -25,9 +25,10 @@ class RegressionSamples(Dataset[Mapping[str, Any]]):
 
     def __getitem__(self, position: int) -> Mapping[str, Any]:
         sample = self.store.read_sample(self.sample_ids[position])
+        data = np.ascontiguousarray(sample["data"].T)
         return {
             "sample_id": sample["sample_id"],
-            "x": torch.from_numpy(np.array(sample["data"], copy=True)),
+            "x": torch.from_numpy(data),
             "y": torch.tensor([float(sample["attrs"]["target"])], dtype=torch.float32),
         }
 
@@ -41,12 +42,52 @@ def regression_samples(
     return RegressionSamples(store, sample_ids)
 
 
-class TinyRegressor(nn.Module):
-    def __init__(self) -> None:
+class TimeMajorToChannelFirst(nn.Module):
+    """Validate raw signal shape and prepare the shared channel-first model layout."""
+
+    def __init__(self, *, channels: int, time: int) -> None:
         super().__init__()
-        self.network = nn.Sequential(nn.Flatten(), nn.Linear(4, 1))
+        for name, extent in (("channels", channels), ("time", time)):
+            if isinstance(extent, bool) or not isinstance(extent, int) or extent <= 0:
+                raise ValueError(f"{name} extent must be a positive integer, got {extent!r}")
+        self.channels = channels
+        self.time = time
 
     def forward(self, x: Tensor) -> Tensor:
+        if x.ndim != 3:
+            raise ValueError(
+                "expected [batch, time, channels], "
+                f"got shape {tuple(x.shape)}"
+            )
+        if x.shape[1] != self.time:
+            raise ValueError(
+                f"expected time extent {self.time}, got {x.shape[1]} in shape {tuple(x.shape)}"
+            )
+        if x.shape[2] != self.channels:
+            raise ValueError(
+                f"expected channel extent {self.channels}, got {x.shape[2]} "
+                f"in shape {tuple(x.shape)}"
+            )
+        return x.transpose(1, 2).contiguous()
+
+
+class TinyRegressor(nn.Module):
+    input_shape = (1, 4)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(self.input_shape[0] * self.input_shape[1], 1),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        if x.ndim != 3 or tuple(x.shape[1:]) != self.input_shape:
+            raise ValueError(
+                "TinyRegressor expects [batch, channels, time] shape "
+                f"(batch, {self.input_shape[0]}, {self.input_shape[1]}), "
+                f"got {tuple(x.shape)}"
+            )
         return self.network(x.float())
 
 

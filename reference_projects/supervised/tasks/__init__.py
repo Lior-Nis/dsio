@@ -2,7 +2,8 @@
 
 from reference_projects.supervised.tasks.data import build_data, split_data
 from reference_projects.supervised.tasks.downstream import evaluate_model, infer
-from reference_projects.supervised.tasks.training import export_model, train_model
+from reference_projects.supervised.tasks.export import export_model
+from reference_projects.supervised.tasks.training import train_model
 
 __all__ = [
     "build_data",

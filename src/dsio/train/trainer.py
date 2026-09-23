@@ -30,6 +30,7 @@ class TrainerConfig(DsioModel):
     enable_progress_bar: bool = False
     deterministic: bool = True
     limit_val_batches: int | float | None = None
+    num_sanity_val_steps: int | None = Field(default=None, ge=0)
 
     @field_validator("limit_val_batches", mode="before")
     @classmethod
@@ -44,6 +45,13 @@ class TrainerConfig(DsioModel):
             return value
         if not 0.0 <= value <= 1.0:
             raise ValueError("float limit_val_batches must be in [0, 1]")
+        return value
+
+    @field_validator("num_sanity_val_steps", mode="before")
+    @classmethod
+    def validate_num_sanity_val_steps(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("num_sanity_val_steps must be a non-negative integer or None")
         return value
 
 
@@ -138,6 +146,7 @@ def build_trainer(
         # the signal that this run's numbers will not reproduce bit-for-bit.
         deterministic="warn" if config.deterministic else False,
         limit_val_batches=config.limit_val_batches,
+        num_sanity_val_steps=config.num_sanity_val_steps,
         default_root_dir=directory,
         logger=logger,
         # Without this, Lightning installs its own default ModelCheckpoint regardless of

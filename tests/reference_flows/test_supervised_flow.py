@@ -8,12 +8,57 @@ from typing import Any
 
 import numpy as np
 import pytest
+import torch
 from lightning import Trainer
 from mlflow import MlflowClient
 
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
 from dsio.tracking import TrackingError, experiment
+
+
+def test_training_and_inference_share_channel_first_signal_layout(
+    tmp_path: Path,
+    reference_services: None,
+) -> None:
+    del reference_services
+    from reference_projects.supervised.components import (
+        RegressionSamples,
+        TimeMajorToChannelFirst,
+        evaluation_arrays,
+    )
+
+    from dsio.data.store import SignalStore
+
+    values = np.asarray(
+        [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]],
+        dtype=np.float32,
+    )
+    path = tmp_path / "layout-store"
+    with SignalStore.builder(path, channels=2, dtype="float32") as builder:
+        builder.add("sample", values, group="group", attrs={"target": 0.0})
+    store = SignalStore(path)
+    raw, _ = evaluation_arrays(str(path), ["sample"])
+
+    prepared = TimeMajorToChannelFirst(channels=2, time=3)(torch.from_numpy(raw["x"]))
+
+    training_tensor = RegressionSamples(store, ["sample"])[0]["x"]
+    assert prepared.shape == (1, 2, 3)
+    assert prepared.is_contiguous()
+    assert training_tensor.is_contiguous()
+    torch.testing.assert_close(prepared[0], training_tensor)
+    torch.testing.assert_close(
+        prepared,
+        torch.tensor([[[1.0, 2.0, 3.0], [10.0, 20.0, 30.0]]]),
+    )
+
+
+def test_regressor_rejects_time_major_input(reference_services: None) -> None:
+    del reference_services
+    from reference_projects.supervised.components import TinyRegressor
+
+    with pytest.raises(ValueError, match=r"\[batch, channels, time\].*\(batch, 1, 4\)"):
+        TinyRegressor()(torch.ones(2, 4, 1))
 
 
 def test_supervised_reference_flow_replays_and_reevaluates_without_training(
@@ -23,11 +68,15 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
 ) -> None:
     del reference_services
     from prefect.testing.utilities import prefect_test_harness
-    from reference_projects.supervised.components import build_synthetic_store
+    from reference_projects.supervised.components import (
+        RegressionObjective,
+        TinyRegressor,
+        build_synthetic_store,
+    )
     from reference_projects.supervised.flow import reevaluate, supervised_flow
     from reference_projects.supervised.tasks import infer, split_data
 
-    observed_types: list[tuple[type[object], type[object]]] = []
+    observed_runtime: list[dict[str, Any]] = []
     original_fit = Trainer.fit
 
     def recording_fit(
@@ -37,8 +86,40 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         **kwargs: object,
     ) -> Any:
         datamodule = kwargs.get("datamodule")
-        observed_types.append((type(model), type(datamodule)))
-        return original_fit(trainer, model, *args, **kwargs)
+        assert isinstance(datamodule, DsioDataModule)
+        assert isinstance(model, DsioModule)
+        result = original_fit(trainer, model, *args, **kwargs)
+        train_batches = list(datamodule.train_dataloader())
+        validate_batches = list(datamodule.val_dataloader())
+        observed_runtime.append(
+            {
+                "types": (type(model), type(datamodule)),
+                "model_type": type(model.model),
+                "objective_type": type(model.objective),
+                "optimizer_factory": model.optimizer_factory,
+                "optimizer_parameters": model.optimizer_parameters,
+                "drop_last": datamodule.drop_last,
+                "shuffle": datamodule.shuffle,
+                "max_epochs": trainer.max_epochs,
+                "limit_val_batches": trainer.limit_val_batches,
+                "num_sanity_val_steps": trainer.num_sanity_val_steps,
+                "num_devices": trainer.num_devices,
+                "precision": str(trainer.precision),
+                "checkpoint_callbacks": list(trainer.checkpoint_callbacks),
+                "train_batch_sizes": [len(batch["sample_id"]) for batch in train_batches],
+                "train_sample_ids": sorted(
+                    sample_id
+                    for batch in train_batches
+                    for sample_id in batch["sample_id"]
+                ),
+                "validate_sample_ids": sorted(
+                    sample_id
+                    for batch in validate_batches
+                    for sample_id in batch["sample_id"]
+                ),
+            }
+        )
+        return result
 
     monkeypatch.setattr(Trainer, "fit", recording_fit)
     with prefect_test_harness():
@@ -57,14 +138,42 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         with pytest.raises(ValueError, match="store identity"):
             reevaluate({**first, "store_path": str(other_store.path)}, metrics=("rmse",))
 
-    assert observed_types == [
-        (DsioModule, DsioDataModule),
-        (DsioModule, DsioDataModule),
-    ]
+    expected_runtime = {
+        "types": (DsioModule, DsioDataModule),
+        "model_type": TinyRegressor,
+        "objective_type": RegressionObjective,
+        "optimizer_factory": torch.optim.SGD,
+        "optimizer_parameters": {"lr": 0.05},
+        "drop_last": {
+            "train": False,
+            "validate": False,
+            "test": False,
+            "predict": False,
+        },
+        "shuffle": {
+            "train": True,
+            "validate": False,
+            "test": False,
+            "predict": False,
+        },
+        "max_epochs": 3,
+        "limit_val_batches": 1.0,
+        "num_sanity_val_steps": 0,
+        "num_devices": 1,
+        "precision": "32-true",
+        "checkpoint_callbacks": [],
+        "train_batch_sizes": [4, 2],
+        "train_sample_ids": sorted(first["assignments"]["train"]),
+        "validate_sample_ids": sorted(first["assignments"]["test"]),
+    }
+    assert observed_runtime == [expected_runtime, expected_runtime]
     assert first["split_digest"] == second["split_digest"]
     assert first["assignments"] == second["assignments"]
     assert first["identities"] == second["identities"]
     np.testing.assert_array_equal(first["prediction"], second["prediction"])
+    assert first["prediction"].shape == (len(first["test_sample_id"]), 1)
+    assert np.isfinite(first["prediction"]).all()
+    assert set(first["metrics"]) == {"mae", "rmse"}
     assert first["inference_sample_id"] == first["test_sample_id"]
 
     assert downstream["metrics"] == {"rmse": first["metrics"]["rmse"]}
@@ -89,10 +198,39 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         provenance = json.loads(Path(provenance_path).read_text())
         expected_training_configuration = {
             "batch_size": 4,
+            "drop_last": {
+                "train": False,
+                "validate": False,
+                "test": False,
+                "predict": False,
+            },
             "fold": 0,
-            "max_epochs": 3,
+            "num_workers": 0,
             "optimizer_parameters": {"lr": 0.05},
             "roles": {"train": "train", "validate": "test"},
+            "shuffle": {
+                "train": True,
+                "validate": False,
+                "test": False,
+                "predict": False,
+            },
+            "trainer": {
+                "accelerator": "cpu",
+                "accumulate_grad_batches": 1,
+                "checkpoint": False,
+                "deterministic": True,
+                "devices": 1,
+                "early_stopping_patience": None,
+                "enable_progress_bar": False,
+                "gradient_clip_val": None,
+                "limit_val_batches": 1.0,
+                "log_every_n_steps": 1,
+                "max_epochs": 3,
+                "monitor": "val/loss",
+                "monitor_mode": "min",
+                "num_sanity_val_steps": 0,
+                "precision": "32-true",
+            },
         }
         for key, value in expected_training_configuration.items():
             assert provenance["configuration"][key] == value
@@ -100,6 +238,59 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         assert provenance["components"]["dataset_factory"] == (
             "reference_projects.supervised.components:regression_samples"
         )
+        execution = provenance["configuration"]["execution"]
+        assert execution["requested_accelerator"] == "cpu"
+        assert execution["resolved_device"] == "cpu"
+        assert execution["resolved_devices"] == "1"
+        assert execution["resolved_precision"] == "32-true"
+        assert execution["resolved_deterministic"] == "warn"
+        assert execution["strategy"]
+        assert execution["torch_version"] == torch.__version__
+        for key, value in execution.items():
+            assert training.data.params[f"execution.{key}"] == value
+        for removed in (
+            "accelerator",
+            "deterministic",
+            "devices",
+            "limit_val_batches",
+            "max_epochs",
+            "num_sanity_val_steps",
+        ):
+            assert removed not in provenance["configuration"]
+
+        export_provenance_path = client.download_artifacts(
+            result["export_run_id"],
+            "provenance.json",
+            str(tmp_path / result["export_run_id"]),
+        )
+        export_provenance = json.loads(Path(export_provenance_path).read_text())
+        assert export_provenance["configuration"]["checkpoint_digest"] == result[
+            "checkpoint_digest"
+        ]
+        assert export_provenance["configuration"]["dataset_digest"] == result[
+            "dataset_digest"
+        ]
+        assert export_provenance["configuration"]["export_form"] == "pyfunc"
+        assert export_provenance["configuration"]["split_digest"] == result["split_digest"]
+        assert export_provenance["components"]["builder"] == (
+            "dsio.inference.predictor:build_predictor"
+        )
+        assert export_provenance["components"]["model"] == (
+            "reference_projects.supervised.components:TinyRegressor"
+        )
+        assert export_provenance["components"]["normalizer"] == (
+            "dsio.inference.predictor:TensorOutput"
+        )
+        assert export_provenance["components"]["preprocessor"] == (
+            "reference_projects.supervised.components:TimeMajorToChannelFirst"
+        )
+        assert export_provenance["components"]["validator"] == (
+            "dsio.inference.predictor:validate_tensor_prediction"
+        )
+        assert export_provenance["configuration"]["preprocessor"] == {
+            "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+            "parameters": {"channels": 1, "time": 4},
+        }
 
         inference = client.get_run(result["inference_run_id"])
         assert inference.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]

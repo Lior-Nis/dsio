@@ -1,4 +1,4 @@
-"""Export an SSL checkpoint through the shared inference contract."""
+"""Export a supervised checkpoint through the shared inference contract."""
 
 from __future__ import annotations
 
@@ -8,15 +8,18 @@ import torch
 from prefect import task
 
 from dsio.config.components import ComponentConfig, resolve_component
-from dsio.inference import build_predictor, log_predictor
+from dsio.inference import (
+    TensorOutput,
+    build_predictor,
+    log_predictor,
+    validate_tensor_prediction,
+)
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef
-from reference_projects.self_supervised.components import (
-    EmbeddingNorm,
-    TinyEmbedding,
-    validate_embedding_norm,
+from reference_projects.supervised.components import (
+    TinyRegressor,
+    evaluation_arrays,
 )
-from reference_projects.supervised.components import evaluation_arrays
 
 
 @task(persist_result=False)
@@ -32,8 +35,8 @@ def export_model(
         preprocessor_config: ComponentConfig = {
             "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
             "parameters": {
-                "channels": TinyEmbedding.input_shape[0],
-                "time": TinyEmbedding.input_shape[1],
+                "channels": TinyRegressor.input_shape[0],
+                "time": TinyRegressor.input_shape[1],
             },
         }
         preprocessor = resolve_component(preprocessor_config, expected=torch.nn.Module)
@@ -48,12 +51,10 @@ def export_model(
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
-                "model": "reference_projects.self_supervised.components:TinyEmbedding",
-                "normalizer": "reference_projects.self_supervised.components:EmbeddingNorm",
+                "model": "reference_projects.supervised.components:TinyRegressor",
+                "normalizer": "dsio.inference.predictor:TensorOutput",
                 "preprocessor": preprocessor_config["reference"],
-                "validator": (
-                    "reference_projects.self_supervised.components:validate_embedding_norm"
-                ),
+                "validator": "dsio.inference.predictor:validate_tensor_prediction",
             },
         )
         input_example = {
@@ -62,10 +63,10 @@ def export_model(
         }
         predictor = build_predictor(
             reference,
-            model=TinyEmbedding(),
+            model=TinyRegressor(),
             preprocessor=preprocessor,
-            normalizer=EmbeddingNorm(),
-            validator=validate_embedding_norm,
+            normalizer=TensorOutput(),
+            validator=validate_tensor_prediction,
             input_example=input_example,
         )
         info = log_predictor(
@@ -73,7 +74,7 @@ def export_model(
             run_id=child.info.run_id,
             input_example=input_example,
             forms=("pyfunc",),
-            name="self-supervised-reference",
+            name="supervised-reference",
         )["pyfunc"]
         return {
             "export_run_id": child.info.run_id,

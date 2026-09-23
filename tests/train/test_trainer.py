@@ -83,6 +83,7 @@ def test_build_trainer_maps_every_runtime_setting(
         enable_progress_bar=True,
         deterministic=deterministic,
         limit_val_batches=0.25,
+        num_sanity_val_steps=5,
     )
     logger = object()
     callbacks = [object(), object()]
@@ -102,6 +103,7 @@ def test_build_trainer_maps_every_runtime_setting(
         "enable_model_summary": False,
         "deterministic": expected_deterministic,
         "limit_val_batches": 0.25,
+        "num_sanity_val_steps": 5,
         "default_root_dir": tmp_path,
         "logger": logger,
         "enable_checkpointing": checkpoint,
@@ -127,3 +129,13 @@ def test_limit_val_batches_preserves_native_value_type(
 def test_limit_val_batches_rejects_non_native_ranges(value: object) -> None:
     with pytest.raises(ValidationError, match="limit_val_batches"):
         TrainerConfig(limit_val_batches=value)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [True, False, -1])
+def test_num_sanity_val_steps_rejects_invalid_values(value: object) -> None:
+    with pytest.raises(ValidationError, match="num_sanity_val_steps"):
+        TrainerConfig(num_sanity_val_steps=value)  # type: ignore[arg-type]
+
+
+def test_num_sanity_val_steps_preserves_lightning_default() -> None:
+    assert TrainerConfig().num_sanity_val_steps is None

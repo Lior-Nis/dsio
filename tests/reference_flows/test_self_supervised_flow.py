@@ -18,9 +18,21 @@ from dsio.model.module import DsioModule
 from dsio.train.augmentation import TwoView
 
 
+def test_legacy_ssl_preprocessor_reference_remains_resolvable(
+    reference_services: None,
+) -> None:
+    del reference_services
+    from reference_projects.self_supervised.components import (
+        TimeMajorToChannelFirst as legacy_preprocessor,
+    )
+    from reference_projects.supervised.components import TimeMajorToChannelFirst
+
+    assert legacy_preprocessor is TimeMajorToChannelFirst
+
+
 def test_time_major_preprocessor_preserves_values_and_input(reference_services: None) -> None:
     del reference_services
-    from reference_projects.self_supervised.components import TimeMajorToChannelFirst
+    from reference_projects.supervised.components import TimeMajorToChannelFirst
 
     source = torch.tensor(
         [
@@ -60,7 +72,7 @@ def test_time_major_preprocessor_rejects_wrong_external_shape(
     reference_services: None,
 ) -> None:
     del reference_services
-    from reference_projects.self_supervised.components import TimeMajorToChannelFirst
+    from reference_projects.supervised.components import TimeMajorToChannelFirst
 
     with pytest.raises(ValueError, match=message):
         TimeMajorToChannelFirst(channels=2, time=3)(value)
@@ -81,7 +93,7 @@ def test_time_major_preprocessor_requires_positive_integer_extents(
     reference_services: None,
 ) -> None:
     del reference_services
-    from reference_projects.self_supervised.components import TimeMajorToChannelFirst
+    from reference_projects.supervised.components import TimeMajorToChannelFirst
 
     with pytest.raises(ValueError, match="positive integer"):
         TimeMajorToChannelFirst(**parameters)
@@ -92,11 +104,8 @@ def test_predictor_preprocessing_matches_the_training_dataset_tensor(
     reference_services: None,
 ) -> None:
     del reference_services
-    from reference_projects.self_supervised.components import (
-        TimeMajorToChannelFirst,
-        UnlabelledSamples,
-    )
-    from reference_projects.supervised.components import evaluation_arrays
+    from reference_projects.self_supervised.components import UnlabelledSamples
+    from reference_projects.supervised.components import TimeMajorToChannelFirst, evaluation_arrays
 
     from dsio.data.store import SignalStore
 
@@ -305,6 +314,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
             "max_epochs": 3,
             "monitor": "val/loss",
             "monitor_mode": "min",
+            "num_sanity_val_steps": None,
             "precision": "32-true",
         }
         for removed in (
@@ -333,11 +343,11 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         export_provenance = json.loads(Path(export_provenance_path).read_text())
         assert export_provenance["configuration"]["split_digest"] == result["split_digest"]
         assert export_provenance["components"]["preprocessor"] == (
-            "reference_projects.self_supervised.components:TimeMajorToChannelFirst"
+            "reference_projects.supervised.components:TimeMajorToChannelFirst"
         )
         assert export_provenance["configuration"]["preprocessor"] == {
             "reference": (
-                "reference_projects.self_supervised.components:TimeMajorToChannelFirst"
+                "reference_projects.supervised.components:TimeMajorToChannelFirst"
             ),
             "parameters": {"channels": 1, "time": 4},
         }
