@@ -13,6 +13,9 @@ from torch.utils.data import Dataset
 from dsio.data.store import SignalStore
 from dsio.inference import validate_tensor_prediction
 from dsio.model.components import NTXent
+from reference_projects.supervised.components import (
+    TimeMajorToChannelFirst as TimeMajorToChannelFirst,
+)
 
 
 class UnlabelledSamples(Dataset[Mapping[str, Any]]):
@@ -38,35 +41,6 @@ def unlabelled_samples(
 ) -> Dataset[Mapping[str, Any]]:
     del examples
     return UnlabelledSamples(store, sample_ids)
-
-
-class TimeMajorToChannelFirst(nn.Module):
-    """Validate the external signal shape and match the training tensor layout."""
-
-    def __init__(self, *, channels: int, time: int) -> None:
-        super().__init__()
-        for name, extent in (("channels", channels), ("time", time)):
-            if isinstance(extent, bool) or not isinstance(extent, int) or extent <= 0:
-                raise ValueError(f"{name} extent must be a positive integer, got {extent!r}")
-        self.channels = channels
-        self.time = time
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3:
-            raise ValueError(
-                "expected [batch, time, channels], "
-                f"got shape {tuple(x.shape)}"
-            )
-        if x.shape[1] != self.time:
-            raise ValueError(
-                f"expected time extent {self.time}, got {x.shape[1]} in shape {tuple(x.shape)}"
-            )
-        if x.shape[2] != self.channels:
-            raise ValueError(
-                f"expected channel extent {self.channels}, got {x.shape[2]} "
-                f"in shape {tuple(x.shape)}"
-            )
-        return x.transpose(1, 2).contiguous()
 
 
 class TinyEmbedding(nn.Module):
