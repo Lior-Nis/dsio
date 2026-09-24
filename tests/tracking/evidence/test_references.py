@@ -76,7 +76,7 @@ def test_consuming_attempt_records_source_reference_without_copying_evidence(
     )
     configuration = json.loads(artifact.read_text())["configuration"]
     assert configuration == {"source_run_id": source.info.run_id, "source_uri": uri}
-    assert [item.path for item in client.list_artifacts(consumer.info.run_id)] == [
-        "provenance.json"
-    ]
+    artifact_paths = {item.path for item in client.list_artifacts(consumer.info.run_id)}
+    assert artifact_paths <= {"git.patch", "provenance.json"}
+    assert "provenance.json" in artifact_paths
     assert [item.path for item in client.list_artifacts(source.info.run_id)] == ["model"]

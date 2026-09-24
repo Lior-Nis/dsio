@@ -43,6 +43,7 @@ config, the local scratch directory) and the runner is who actually talks to MLf
 from __future__ import annotations
 
 import os
+import shlex
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -193,7 +194,7 @@ def start_run(
     temp directory (see :data:`RUNS_ROOT_ENV`).
     """
     git = capture_git(cwd=repo_root)
-    env = capture_env()
+    env = capture_env(lock_path=repo_root / "uv.lock" if repo_root is not None else None)
     run_id = _run_id(config_hash)
 
     record = RunRecord(
@@ -258,13 +259,10 @@ def _reproduce_script(record: RunRecord) -> str:
     else:
         lines.append('echo "WARNING: no git provenance was captured for this run" >&2')
 
-    lines += ["", "uv sync --locked", ""]
+    sync = "uv sync --locked" if record.env.lock_sha256 is not None else "uv sync"
+    lines += ["", sync, ""]
     if record.command:
-        lines.append(" ".join(_quote(part) for part in record.command))
+        lines.append(shlex.join(record.command))
     else:
         lines.append('echo "WARNING: no command was recorded for this run" >&2')
     return "\n".join(lines) + "\n"
-
-
-def _quote(token: str) -> str:
-    return token if all(ch.isalnum() or ch in "-_=./:" for ch in token) else f"'{token}'"

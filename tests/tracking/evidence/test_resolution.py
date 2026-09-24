@@ -126,6 +126,29 @@ def test_require_evidence_matches_selected_configuration_fields() -> None:
         )
 
 
+def test_require_evidence_accepts_recorded_component_configuration() -> None:
+    from mlflow import MlflowClient
+
+    from dsio.tracking import record_provenance, require_evidence
+
+    client = MlflowClient()
+    experiment_id = client.create_experiment("configured-component-evidence")
+    run = client.create_run(experiment_id)
+    identity = record_provenance(
+        run.info.run_id,
+        {"seed": 7},
+        components={
+            "model": {
+                "reference": "torch.nn:Linear",
+                "parameters": {"in_features": 2, "out_features": 1},
+            }
+        },
+    )
+    client.set_terminated(run.info.run_id, "FINISHED")
+
+    assert require_evidence(run.info.run_id, identity=identity).info.run_id == run.info.run_id
+
+
 def test_require_evidence_rejects_provenance_content_changed_after_recording() -> None:
     from mlflow import MlflowClient
 

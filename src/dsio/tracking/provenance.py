@@ -5,15 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Collection, Mapping
 from importlib.metadata import version
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 from mlflow import MlflowClient
 
 from dsio.config.components import ComponentError, validate_component_config
 from dsio.contracts import NonCanonicalValueError, canonical_json, sha256_of
+from dsio.tracking._execution import capture_execution
 from dsio.tracking._lifecycle import TrackingError, is_cancellation, require_writable_run
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _SET_MARKER = "$dsio.set"
 
 
@@ -37,12 +40,16 @@ def execution_identity(
     ephemeral: Collection[str] = (),
 ) -> str:
     """Hash the complete safe identity document for one experiment node."""
+    secret_names = _field_names(secrets)
+    ephemeral_names = _field_names(ephemeral)
+    execution, _ = capture_execution(secrets=secret_names | ephemeral_names)
     return sha256_of(
         _identity_document(
             config,
             components=components,
-            secrets=secrets,
-            ephemeral=ephemeral,
+            secrets=secret_names,
+            ephemeral=ephemeral_names,
+            execution=execution,
         )
     )
 
@@ -56,11 +63,15 @@ def record_provenance(
     ephemeral: Collection[str] = (),
 ) -> str:
     """Record one safe identity document on an explicit native MLflow Run."""
+    secret_names = _field_names(secrets)
+    ephemeral_names = _field_names(ephemeral)
+    execution, patch = capture_execution(secrets=secret_names | ephemeral_names)
     document = _identity_document(
         config,
         components=components,
-        secrets=secrets,
-        ephemeral=ephemeral,
+        secrets=secret_names,
+        ephemeral=ephemeral_names,
+        execution=execution,
     )
     identity = sha256_of(document)
     client = MlflowClient()
@@ -73,8 +84,20 @@ def record_provenance(
             {**document, "execution_identity": identity},
             "provenance.json",
         )
+        if patch is not None:
+            with TemporaryDirectory(prefix="dsio-patch-") as directory:
+                path = Path(directory) / "git.patch"
+                path.write_bytes(patch)
+                client.log_artifact(run_id, str(path))
         client.set_tag(run_id, "dsio.execution_identity", identity)
         client.set_tag(run_id, "dsio.version", document["dsio_version"])
+        git = execution["git"]
+        environment = execution["environment"]
+        if git["code_hash"] is not None:
+            client.set_tag(run_id, "dsio.code_hash", git["code_hash"])
+        if environment["lock_sha256"] is not None:
+            client.set_tag(run_id, "dsio.lock_sha256", environment["lock_sha256"])
+        client.set_tag(run_id, "dsio.package_sha256", execution["package_sha256"])
     except BaseException as error:
         if is_cancellation(error) or not isinstance(error, Exception):
             error.add_note(f"Interrupted while recording provenance for MLflow Run {run_id!r}.")
@@ -92,6 +115,7 @@ def _identity_document(
     components: Mapping[str, str | Mapping[str, Any]] | None,
     secrets: Collection[str],
     ephemeral: Collection[str],
+    execution: Mapping[str, Any],
 ) -> dict[str, Any]:
     secret_names = _field_names(secrets)
     ephemeral_names = _field_names(ephemeral)
@@ -127,6 +151,7 @@ def _identity_document(
             ephemeral=ephemeral_names,
         ),
         "components": normalize(normalized_components),
+        "execution": normalize(execution),
     }
 
 

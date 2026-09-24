@@ -156,7 +156,13 @@ def _write_kaggle_fixtures(root: Path) -> None:
 
 
 def _run(*command: str, cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
-    subprocess.run(command, cwd=cwd, env=env, check=True, text=True, capture_output=True)
+    completed = subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True)
+    if completed.returncode != 0:
+        pytest.fail(
+            f"command {command!r} failed with exit code {completed.returncode}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
 
 
 @pytest.fixture(scope="module")

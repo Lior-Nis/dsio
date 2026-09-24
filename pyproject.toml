@@ -17,6 +17,8 @@ dependencies = [
     "lightning>=2.5,<3",
     "torchmetrics>=1.7,<2",
     "mlflow>=3,<4",
+    # 2.1.0's sdist declares duplicate normalized extras and current uv rejects it.
+    "sqlalchemy!=2.1.0",
     "scikit-learn>=1.9,<2",
 ]
 

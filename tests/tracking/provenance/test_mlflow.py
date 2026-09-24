@@ -56,6 +56,11 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
     assert stored.data.params["dsio.execution_identity"] == identity
     artifact = Path(client.download_artifacts(run.info.run_id, "provenance.json", tmp_path))
     payload = json.loads(artifact.read_text())
+    execution = payload["execution"]
+    assert set(execution) == {"command", "environment", "git", "package_sha256"}
+    assert len(execution["package_sha256"]) == 64
+    assert execution["command"]
+    assert execution["environment"]["python"]
     assert payload == {
         "components": {
             "model": {
@@ -69,8 +74,9 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
             "seed": 7,
         },
         "dsio_version": version("dsio"),
+        "execution": execution,
         "execution_identity": identity,
-        "schema_version": 1,
+        "schema_version": 2,
     }
     all_evidence = json.dumps(
         {
@@ -84,6 +90,44 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
     assert "password" not in all_evidence
     assert "ephemeral-id" not in all_evidence
     assert "task_run_id" not in all_evidence
+
+
+def test_record_provenance_captures_consumer_git_patch_and_root_lock(
+    tmp_path: Path,
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mlflow import MlflowClient
+
+    from dsio.contracts import sha256_of_file
+    from dsio.tracking import TrackingError, record_provenance, require_evidence
+
+    (git_repo / "uv.lock").write_text("version = 1\n")
+    (git_repo / "tracked.txt").write_text("dirty consumer code\n")
+    nested = git_repo / "project" / "tasks"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+    run = _running_run("consumer-execution-provenance")
+
+    record_provenance(run.info.run_id, {"seed": 7})
+
+    client = MlflowClient()
+    artifact = Path(client.download_artifacts(run.info.run_id, "provenance.json", tmp_path))
+    payload = json.loads(artifact.read_text())
+    execution = payload["execution"]
+    assert execution["git"]["dirty"] is True
+    assert execution["git"]["code_hash"].startswith(execution["git"]["sha"] + "-dirty-")
+    assert execution["environment"]["lock_sha256"] == sha256_of_file(
+        str(git_repo / "uv.lock")
+    )
+    patch = Path(client.download_artifacts(run.info.run_id, "git.patch", tmp_path))
+    assert b"dirty consumer code" in patch.read_bytes()
+    client.set_terminated(run.info.run_id, "FINISHED")
+    require_evidence(run.info.run_id)
+
+    client.log_text(run.info.run_id, "corrupt", "git.patch")
+    with pytest.raises(TrackingError, match="Git patch digest"):
+        require_evidence(run.info.run_id)
 
 
 @pytest.mark.parametrize("terminal_status", ["FINISHED", "FAILED", "KILLED"])
