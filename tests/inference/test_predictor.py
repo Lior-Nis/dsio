@@ -240,6 +240,92 @@ def test_checkpoint_lineage_must_match_the_training_inputs() -> None:
         )
 
 
+def test_checkpoint_lineage_returns_recorded_component_constructors() -> None:
+    client = MlflowClient(resolve_tracking_uri())
+    experiment_id = client.create_experiment("predictor-component-lineage")
+    run_id = client.create_run(experiment_id).info.run_id
+    components = {
+        "model": {
+            "reference": "torch.nn:Linear",
+            "parameters": {"in_features": 2, "out_features": 1},
+        },
+        "preprocessor": {"reference": "torch.nn:Identity", "parameters": {}},
+    }
+    identity = record_provenance(
+        run_id,
+        {"dataset_digest": "dataset", "split_digest": "split"},
+        components=components,
+    )
+    reference = save_artifact(b"checkpoint", run_id=run_id, name="checkpoint")
+    client.set_terminated(run_id, "FINISHED")
+
+    resolved = require_checkpoint_lineage(
+        reference,
+        training_run_id=run_id,
+        training_identity=identity,
+        dataset_digest="dataset",
+        split_digest="split",
+        components=("model", "preprocessor"),
+    )
+
+    assert resolved == components
+
+
+def test_checkpoint_components_require_the_recorded_execution_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dsio.tracking._execution import capture_execution
+
+    client = MlflowClient(resolve_tracking_uri())
+    experiment_id = client.create_experiment("predictor-versioned-components")
+    run_id = client.create_run(experiment_id).info.run_id
+    identity = record_provenance(
+        run_id,
+        {"dataset_digest": "dataset", "split_digest": "split"},
+        components={"model": {"reference": "torch.nn:Identity", "parameters": {}}},
+    )
+    reference = save_artifact(b"checkpoint", run_id=run_id, name="checkpoint")
+    client.set_terminated(run_id, "FINISHED")
+    execution, _ = capture_execution()
+    monkeypatch.setattr(
+        "dsio.inference.lineage.capture_execution",
+        lambda: ({**execution, "package_sha256": "0" * 64}, None),
+    )
+
+    with pytest.raises(PredictorError, match="DSIO package identity"):
+        require_checkpoint_lineage(
+            reference,
+            training_run_id=run_id,
+            training_identity=identity,
+            dataset_digest="dataset",
+            split_digest="split",
+            components=("model",),
+        )
+
+
+def test_checkpoint_components_must_be_complete_component_configs() -> None:
+    client = MlflowClient(resolve_tracking_uri())
+    experiment_id = client.create_experiment("predictor-incomplete-components")
+    run_id = client.create_run(experiment_id).info.run_id
+    identity = record_provenance(
+        run_id,
+        {"dataset_digest": "dataset", "split_digest": "split"},
+        components={"model": "torch.nn:Identity"},
+    )
+    reference = save_artifact(b"checkpoint", run_id=run_id, name="checkpoint")
+    client.set_terminated(run_id, "FINISHED")
+
+    with pytest.raises(PredictorError, match="model.*not reconstructible"):
+        require_checkpoint_lineage(
+            reference,
+            training_run_id=run_id,
+            training_identity=identity,
+            dataset_digest="dataset",
+            split_digest="split",
+            components=("model",),
+        )
+
+
 def test_checkpoint_must_belong_to_an_active_run(tmp_path: Path) -> None:
     ref = _checkpoint(tmp_path)
     MlflowClient(resolve_tracking_uri()).delete_run(ref.run_id)

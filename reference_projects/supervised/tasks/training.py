@@ -12,6 +12,7 @@ from lightning.pytorch.loggers import MLFlowLogger
 from mlflow import MlflowClient
 from prefect import task
 
+from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
@@ -43,13 +44,26 @@ _TRAINER = TrainerConfig(
     num_sanity_val_steps=0,
 )
 
+_MODEL: ComponentConfig = {
+    "reference": "reference_projects.supervised.components:TinyRegressor",
+    "parameters": {},
+}
+_PREPROCESSOR: ComponentConfig = {
+    "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+    "parameters": {
+        "channels": TinyRegressor.input_shape[0],
+        "time": TinyRegressor.input_shape[1],
+    },
+}
+
 _COMPONENTS = {
     "module": "dsio.model.module:DsioModule",
     "data_module": "dsio.data.loading.module:DsioDataModule",
     "dataset_factory": "reference_projects.supervised.components:regression_samples",
-    "model": "reference_projects.supervised.components:TinyRegressor",
+    "model": _MODEL,
     "objective": "reference_projects.supervised.components:RegressionObjective",
     "optimizer": "torch.optim:SGD",
+    "preprocessor": _PREPROCESSOR,
 }
 
 _TRAINING = {
@@ -95,7 +109,7 @@ def train_model(
             drop_last=_DROP_LAST,
         )
         module = DsioModule(
-            model=TinyRegressor(),
+            model=resolve_component(_MODEL, expected=torch.nn.Module),
             objective=RegressionObjective(),
             optimizer_factory=torch.optim.SGD,
             optimizer_parameters=_TRAINING["optimizer_parameters"],

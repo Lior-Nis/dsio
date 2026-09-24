@@ -350,9 +350,10 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         )
         export_provenance = json.loads(Path(export_provenance_path).read_text())
         assert export_provenance["configuration"]["split_digest"] == result["split_digest"]
-        assert export_provenance["components"]["preprocessor"] == (
-            "reference_projects.supervised.components:TimeMajorToChannelFirst"
-        )
+        assert export_provenance["components"]["preprocessor"] == {
+            "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+            "parameters": {"channels": 1, "time": 4},
+        }
         assert export_provenance["configuration"]["preprocessor"] == {
             "reference": ("reference_projects.supervised.components:TimeMajorToChannelFirst"),
             "parameters": {"channels": 1, "time": 4},

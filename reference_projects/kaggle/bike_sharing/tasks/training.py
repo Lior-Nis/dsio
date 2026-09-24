@@ -13,6 +13,7 @@ from lightning.pytorch.loggers import MLFlowLogger
 from mlflow import MlflowClient
 from prefect import task
 
+from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.model.module import DsioModule
@@ -48,6 +49,7 @@ FOLD = 0
 BATCH_SIZE = 4
 NUM_WORKERS = 0
 OPTIMIZER_PARAMETERS = {"lr": 0.005}
+PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters": {}}
 
 
 def _scaler(store: SignalStore, sample_ids: list[str]) -> tuple[list[float], list[float]]:
@@ -73,6 +75,10 @@ def train(
         )
         fit_ids = list(manifest.fold(0).assignments["train"])
         mean, scale = _scaler(store, fit_ids)
+        model_config: ComponentConfig = {
+            "reference": "reference_projects.kaggle.bike_sharing.components:DemandRegressor",
+            "parameters": {"mean": mean, "scale": scale},
+        }
         seed_everything(seed, workers=True, verbose=False)
         data_module = DsioDataModule(
             store,
@@ -88,7 +94,7 @@ def train(
             drop_last=DROP_LAST,
         )
         module = DsioModule(
-            model=DemandRegressor(mean, scale),
+            model=resolve_component(model_config, expected=DemandRegressor),
             objective=DemandObjective(),
             optimizer_factory=torch.optim.SGD,
             optimizer_parameters=OPTIMIZER_PARAMETERS,
@@ -130,9 +136,10 @@ def train(
                 "dataset_factory": (
                     "reference_projects.kaggle.bike_sharing.components:hourly_samples"
                 ),
-                "model": "reference_projects.kaggle.bike_sharing.components:DemandRegressor",
+                "model": model_config,
                 "objective": "reference_projects.kaggle.bike_sharing.components:DemandObjective",
                 "optimizer": "torch.optim:SGD",
+                "preprocessor": PREPROCESSOR,
             },
         )
         log_capabilities(logger, execution)
@@ -148,8 +155,6 @@ def train(
         return {
             "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
-            "mean": mean,
-            "scale": scale,
             "scaler_fit_ids": fit_ids,
             "identity": identity,
         }

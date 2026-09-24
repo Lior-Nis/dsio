@@ -51,7 +51,7 @@ def resolve_evidence(
     for run in ordered:
         try:
             current = _get_run(client, run.info.run_id)
-            return validate_run(client, current, identity, artifacts, {})
+            return validate_run(client, current, identity, artifacts, {})[0]
         except UnusableEvidence:
             continue
     return None
@@ -65,6 +65,37 @@ def require_evidence(
     expected_configuration: Mapping[str, Any] | None = None,
 ) -> Run:
     """Validate and return one exact immutable MLflow Run reference."""
+    return _require_evidence(
+        run_id,
+        identity=identity,
+        required_artifacts=required_artifacts,
+        expected_configuration=expected_configuration,
+    )[0]
+
+
+def require_provenance(
+    run_id: str,
+    *,
+    identity: str | None = None,
+    required_artifacts: Collection[str] = (),
+    expected_configuration: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return provenance only after its exact MLflow Run passes evidence validation."""
+    return _require_evidence(
+        run_id,
+        identity=identity,
+        required_artifacts=required_artifacts,
+        expected_configuration=expected_configuration,
+    )[1]
+
+
+def _require_evidence(
+    run_id: str,
+    *,
+    identity: str | None,
+    required_artifacts: Collection[str],
+    expected_configuration: Mapping[str, Any] | None,
+) -> tuple[Run, dict[str, Any]]:
     require_run_id(run_id)
     if identity is not None:
         _require_identity(identity)

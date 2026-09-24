@@ -30,7 +30,7 @@ def validate_run(
     identity: str | None,
     required_artifacts: tuple[str, ...],
     expected_configuration: dict[str, Any],
-) -> Run:
+) -> tuple[Run, dict[str, Any]]:
     run_id = run.info.run_id
     parameter_identity = _validate_metadata(run, identity)
 
@@ -102,7 +102,7 @@ def validate_run(
         raise UnusableEvidence("DSio version tag changed during validation")
     if execution is not None:
         _validate_execution_tags(final, execution)
-    return final
+    return final, provenance
 
 
 def _validate_components(components: dict[Any, Any]) -> None:

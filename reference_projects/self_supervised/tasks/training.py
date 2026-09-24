@@ -54,15 +54,27 @@ _TRAINER = TrainerConfig(
     log_every_n_steps=1,
     limit_val_batches=0,
 )
+_MODEL: ComponentConfig = {
+    "reference": "reference_projects.self_supervised.components:TinyEmbedding",
+    "parameters": {},
+}
+_PREPROCESSOR: ComponentConfig = {
+    "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+    "parameters": {
+        "channels": TinyEmbedding.input_shape[0],
+        "time": TinyEmbedding.input_shape[1],
+    },
+}
 _COMPONENTS = {
     "augmentation": _AUGMENTATION_WRAPPER["reference"],
     "augmentor": _AUGMENTOR["reference"],
     "data_module": "dsio.data.loading.module:DsioDataModule",
     "dataset_factory": "reference_projects.self_supervised.components:unlabelled_samples",
-    "model": "reference_projects.self_supervised.components:TinyEmbedding",
+    "model": _MODEL,
     "module": "dsio.model.module:DsioModule",
     "objective": "reference_projects.self_supervised.components:ContrastiveObjective",
     "optimizer": "torch.optim:SGD",
+    "preprocessor": _PREPROCESSOR,
 }
 _TRAINING = {
     "augmentation": _AUGMENTATION,
@@ -115,7 +127,7 @@ def train_model(
             expected=torch.nn.Module,
         )
         module = DsioModule(
-            model=TinyEmbedding(),
+            model=resolve_component(_MODEL, expected=torch.nn.Module),
             objective=ContrastiveObjective(**_TRAINING["objective_parameters"]),
             optimizer_factory=torch.optim.SGD,
             optimizer_parameters=_TRAINING["optimizer_parameters"],

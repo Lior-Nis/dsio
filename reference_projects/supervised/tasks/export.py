@@ -7,7 +7,7 @@ from typing import Any
 import torch
 from prefect import task
 
-from dsio.config.components import ComponentConfig, resolve_component
+from dsio.config.components import resolve_component
 from dsio.inference import (
     TensorOutput,
     build_predictor,
@@ -17,10 +17,7 @@ from dsio.inference import (
 )
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef
-from reference_projects.supervised.components import (
-    TinyRegressor,
-    evaluation_arrays,
-)
+from reference_projects.supervised.components import evaluation_arrays
 
 
 @task(persist_result=False)
@@ -33,35 +30,30 @@ def export_model(
     with attempt(experiment_id) as run:
         inputs, _ = evaluation_arrays(data["store_path"], split["assignments"]["test"])
         reference = ArtifactRef.model_validate(training["checkpoint"])
-        require_checkpoint_lineage(
+        components = require_checkpoint_lineage(
             reference,
             training_run_id=training["train_run_id"],
             training_identity=training["identity"],
             dataset_digest=data["dataset_digest"],
             split_digest=split["split_digest"],
+            components=("model", "preprocessor"),
         )
-        preprocessor_config: ComponentConfig = {
-            "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
-            "parameters": {
-                "channels": TinyRegressor.input_shape[0],
-                "time": TinyRegressor.input_shape[1],
-            },
-        }
-        preprocessor = resolve_component(preprocessor_config, expected=torch.nn.Module)
+        model = resolve_component(components["model"], expected=torch.nn.Module)
+        preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         identity = record_provenance(
             run.info.run_id,
             {
                 "checkpoint_digest": reference.digest,
                 "dataset_digest": data["dataset_digest"],
                 "export_form": "pyfunc",
-                "preprocessor": preprocessor_config,
+                "preprocessor": components["preprocessor"],
                 "split_digest": split["split_digest"],
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
-                "model": "reference_projects.supervised.components:TinyRegressor",
+                "model": components["model"],
                 "normalizer": "dsio.inference.predictor:TensorOutput",
-                "preprocessor": preprocessor_config["reference"],
+                "preprocessor": components["preprocessor"],
                 "validator": "dsio.inference.predictor:validate_tensor_prediction",
             },
         )
@@ -71,7 +63,7 @@ def export_model(
         }
         predictor = build_predictor(
             reference,
-            model=TinyRegressor(),
+            model=model,
             preprocessor=preprocessor,
             normalizer=TensorOutput(),
             validator=validate_tensor_prediction,

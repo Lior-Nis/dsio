@@ -11,8 +11,8 @@ import numpy as np
 import torch
 from mlflow import MlflowClient
 from prefect import task
-from torch import nn
 
+from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
@@ -20,7 +20,6 @@ from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.titanic.components import (
     BinaryPrediction,
-    PassengerClassifier,
     validate_binary_prediction,
 )
 
@@ -41,13 +40,16 @@ def export(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         reference = ArtifactRef.model_validate(training["checkpoint"])
-        require_checkpoint_lineage(
+        components = require_checkpoint_lineage(
             reference,
             training_run_id=training["train_run_id"],
             training_identity=training["identity"],
             dataset_digest=data["dataset_digest"],
             split_digest=split["split_digest"],
+            components=("model", "preprocessor"),
         )
+        model = resolve_component(components["model"], expected=torch.nn.Module)
+        preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         inputs = _arrays(data["store_path"], list(split["assignments"]["validate"]))
         identity = record_provenance(
             run.info.run_id,
@@ -59,7 +61,8 @@ def export(
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
-                "model": "reference_projects.kaggle.titanic.components:PassengerClassifier",
+                "model": components["model"],
+                "preprocessor": components["preprocessor"],
                 "normalizer": "reference_projects.kaggle.titanic.components:BinaryPrediction",
                 "validator": (
                     "reference_projects.kaggle.titanic.components:validate_binary_prediction"
@@ -72,8 +75,8 @@ def export(
         }
         predictor = build_predictor(
             reference,
-            model=PassengerClassifier(),
-            preprocessor=nn.Identity(),
+            model=model,
+            preprocessor=preprocessor,
             normalizer=BinaryPrediction(),
             validator=validate_binary_prediction,
             input_example=example,
