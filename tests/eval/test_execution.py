@@ -78,13 +78,17 @@ def _inputs() -> dict[str, np.ndarray[Any, Any]]:
     }
 
 
-def _evaluation_child(client: MlflowClient, experiment_id: str) -> tuple[str, str]:
-    parent_run_id = client.create_run(experiment_id).info.run_id
-    child_run_id = client.create_run(
+def _evaluation_attempt(client: MlflowClient, experiment_id: str) -> str:
+    return client.create_run(
         experiment_id,
-        tags={"mlflow.parentRunId": parent_run_id},
+        tags={
+            "dsio.prefect.flow_run_id": "flow-run-id",
+            "dsio.prefect.task_key": "evaluation-task",
+            "dsio.prefect.task_run_id": "task-run-id",
+            "dsio.prefect.dynamic_key": "0",
+            "dsio.prefect.attempt": "1",
+        },
     ).info.run_id
-    return parent_run_id, child_run_id
 
 
 def _isolate_prefect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +100,36 @@ def _isolate_prefect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DO_NOT_TRACK", "1")
 
 
+@pytest.mark.parametrize(
+    "tags",
+    [
+        {},
+        {
+            "mlflow.parentRunId": "legacy-parent",
+            "dsio.prefect.flow_run_id": "flow-run-id",
+            "dsio.prefect.task_key": "evaluation-task",
+            "dsio.prefect.task_run_id": "task-run-id",
+            "dsio.prefect.dynamic_key": "0",
+            "dsio.prefect.attempt": "1",
+        },
+    ],
+)
+def test_evaluation_rejects_untracked_or_nested_runs(tags: dict[str, str]) -> None:
+    client = MlflowClient()
+    experiment_id = client.create_experiment("invalid-evaluation-attempt")
+    run_id = client.create_run(experiment_id, tags=tags).info.run_id
+
+    with pytest.raises(EvaluationError, match="top-level tracked Prefect attempt"):
+        evaluate(
+            run_id=run_id,
+            model_uri="models:/m-00000000000000000000000000000000",
+            dataset_run_id="dataset-run",
+            inputs={},
+            targets=np.asarray([1.0]),
+            metrics=("mae",),
+        )
+
+
 def test_project_owned_task_logs_native_evaluation_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -104,13 +138,13 @@ def test_project_owned_task_logs_native_evaluation_evidence(
     from prefect import flow, task
     from prefect.testing.utilities import prefect_test_harness
 
-    from dsio.tracking import attempt, experiment
+    from dsio.tracking import attempt, resolve_experiment
 
     model_uri, model_run_id, dataset_run_id = _sources()
 
     @task
-    def evaluation_task(parent_run_id: str) -> tuple[str, dict[str, float]]:
-        with attempt(parent_run_id) as child:
+    def evaluation_task(experiment_id: str) -> tuple[str, dict[str, float]]:
+        with attempt(experiment_id) as child:
             metrics = evaluate(
                 run_id=child.info.run_id,
                 model_uri=model_uri,
@@ -122,20 +156,19 @@ def test_project_owned_task_logs_native_evaluation_evidence(
             return child.info.run_id, metrics
 
     @flow
-    def project_flow() -> tuple[str, str, dict[str, float]]:
-        with experiment("evaluation-flow") as parent:
-            child_run_id, metrics = evaluation_task(parent.info.run_id)
-            return parent.info.run_id, child_run_id, metrics
+    def project_flow() -> tuple[str, dict[str, float]]:
+        resolved = resolve_experiment("evaluation-flow")
+        return evaluation_task(resolved.experiment_id)
 
     with prefect_test_harness():
-        parent_run_id, child_run_id, metrics = project_flow()
+        child_run_id, metrics = project_flow()
 
     assert metrics == {"mae": 0.0, "rmse": 0.0}
     client = MlflowClient()
     child = client.get_run(child_run_id)
     assert child.info.status == "FINISHED"
     assert child.data.metrics == metrics
-    assert child.data.tags["mlflow.parentRunId"] == parent_run_id
+    assert "mlflow.parentRunId" not in child.data.tags
     assert child.data.tags["dsio.evaluation.model_source_run_id"] == model_run_id
     assert child.data.tags["dsio.evaluation.dataset_source_run_id"] == dataset_run_id
     assert [item.model_id for item in child.inputs.model_inputs] == [
@@ -157,7 +190,7 @@ def test_downstream_rerun_reuses_sources_without_training(
     from prefect import flow, task
     from prefect.testing.utilities import prefect_test_harness
 
-    from dsio.tracking import attempt, experiment
+    from dsio.tracking import attempt, resolve_experiment
 
     model_uri, _, dataset_run_id = _sources()
     monkeypatch.setattr(
@@ -167,8 +200,8 @@ def test_downstream_rerun_reuses_sources_without_training(
     )
 
     @task
-    def evaluation_task(parent_run_id: str, names: tuple[str, ...]) -> str:
-        with attempt(parent_run_id) as child:
+    def evaluation_task(experiment_id: str, names: tuple[str, ...]) -> str:
+        with attempt(experiment_id) as child:
             evaluate(
                 run_id=child.info.run_id,
                 model_uri=model_uri,
@@ -180,19 +213,18 @@ def test_downstream_rerun_reuses_sources_without_training(
             return child.info.run_id
 
     @flow
-    def downstream(names: tuple[str, ...]) -> tuple[str, str]:
-        with experiment("evaluation-rerun") as parent:
-            return parent.info.run_id, evaluation_task(parent.info.run_id, names)
+    def downstream(names: tuple[str, ...]) -> str:
+        resolved = resolve_experiment("evaluation-rerun")
+        return evaluation_task(resolved.experiment_id, names)
 
     with prefect_test_harness():
         first = downstream(("mae",))
         second = downstream(("rmse",))
 
-    assert first[0] != second[0]
-    assert first[1] != second[1]
+    assert first != second
     client = MlflowClient()
     expected_model_id = model_uri.removeprefix("models:/")
-    for _, child_run_id in (first, second):
+    for child_run_id in (first, second):
         assert [item.model_id for item in client.get_run(child_run_id).inputs.model_inputs] == [
             expected_model_id
         ]
@@ -202,7 +234,7 @@ def test_invalid_target_fails_before_logging_successful_metrics() -> None:
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()
     experiment_id = client.create_experiment("evaluation-invalid")
-    _, child_run_id = _evaluation_child(client, experiment_id)
+    child_run_id = _evaluation_attempt(client, experiment_id)
 
     with pytest.raises(EvaluationError, match="target.*shape"):
         evaluate(
@@ -228,9 +260,7 @@ def test_invalid_dataset_source_fails_before_metrics(source: str) -> None:
         dataset_run_id = replacement
     else:
         client.set_terminated(dataset_run_id, "FAILED")
-    parent_run_id, child_run_id = _evaluation_child(
-        client, client.get_run(dataset_run_id).info.experiment_id
-    )
+    child_run_id = _evaluation_attempt(client, client.get_run(dataset_run_id).info.experiment_id)
 
     with pytest.raises(EvaluationError, match="dataset source Run.*FINISHED"):
         evaluate(
@@ -243,7 +273,6 @@ def test_invalid_dataset_source_fails_before_metrics(source: str) -> None:
         )
 
     assert client.get_run(child_run_id).data.metrics == {}
-    assert client.get_run(parent_run_id).info.status == "RUNNING"
 
 
 @pytest.mark.parametrize(
@@ -258,7 +287,7 @@ def test_unsafe_target_values_fail_before_writes(targets: np.ndarray[Any, Any]) 
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()
     experiment_id = client.create_experiment("evaluation-unsafe-target")
-    _, child_run_id = _evaluation_child(client, experiment_id)
+    child_run_id = _evaluation_attempt(client, experiment_id)
 
     with pytest.raises(EvaluationError, match="target"):
         evaluate(
@@ -281,7 +310,7 @@ def test_identity_cannot_be_selected_as_a_metric_field(role: str) -> None:
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()
     experiment_id = client.create_experiment("evaluation-identity-field")
-    _, child_run_id = _evaluation_child(client, experiment_id)
+    child_run_id = _evaluation_attempt(client, experiment_id)
 
     arguments = {role: "sample_id"}
     with pytest.raises(EvaluationError, match="non-identity"):
@@ -304,7 +333,7 @@ def test_incompatible_score_rank_fails_before_writes(
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()
     experiment_id = client.create_experiment("evaluation-score-rank")
-    _, child_run_id = _evaluation_child(client, experiment_id)
+    child_run_id = _evaluation_attempt(client, experiment_id)
     monkeypatch.setattr(
         execution,
         "predict",
@@ -337,7 +366,7 @@ def test_unicode_and_bytes_labels_are_not_mixed(
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()
     experiment_id = client.create_experiment("evaluation-text-dtype")
-    _, child_run_id = _evaluation_child(client, experiment_id)
+    child_run_id = _evaluation_attempt(client, experiment_id)
     monkeypatch.setattr(
         execution,
         "predict",
@@ -360,11 +389,11 @@ def test_unicode_and_bytes_labels_are_not_mixed(
     assert client.get_run(child_run_id).data.metrics == {}
 
 
-def test_evaluation_requires_a_clean_dedicated_child() -> None:
+def test_evaluation_requires_a_clean_dedicated_attempt() -> None:
     model_uri, _, dataset_run_id = _sources()
     client = MlflowClient()
     experiment_id = client.create_experiment("evaluation-collision")
-    _, child_run_id = _evaluation_child(client, experiment_id)
+    child_run_id = _evaluation_attempt(client, experiment_id)
     client.log_param(child_run_id, "evaluation.metrics", '["old"]')
 
     with pytest.raises(EvaluationError, match="already contains evaluation evidence"):

@@ -21,22 +21,22 @@ from reference_projects.supervised.components import build_synthetic_store
 
 
 @task(persist_result=False)
-def build_data(workspace: str, parent_run_id: str, seed: int) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+def build_data(workspace: str, experiment_id: str, seed: int) -> dict[str, Any]:
+    with attempt(experiment_id) as run:
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {"seed": seed, "samples": 8, "rows": 4, "channels": 1},
             components={
                 "builder": "reference_projects.supervised.components:build_synthetic_store"
             },
         )
-        path = Path(workspace) / child.info.run_id / "synthetic-supervised"
+        path = Path(workspace) / run.info.run_id / "synthetic-supervised"
         path.parent.mkdir(parents=True, exist_ok=True)
         store = build_synthetic_store(path, seed)
         store.verify()
         examples = entity_examples(store)
         MlflowClient().log_dict(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": examples.digest,
                 "sample_ids": examples.sample_ids.tolist(),
@@ -45,7 +45,7 @@ def build_data(workspace: str, parent_run_id: str, seed: int) -> dict[str, Any]:
         )
         return {
             "store_path": str(path),
-            "data_run_id": child.info.run_id,
+            "data_run_id": run.info.run_id,
             "dataset_digest": examples.digest,
             "identity": identity,
         }
@@ -54,16 +54,16 @@ def build_data(workspace: str, parent_run_id: str, seed: int) -> dict[str, Any]:
 @task(persist_result=False)
 def split_data(
     data: dict[str, Any],
-    parent_run_id: str,
+    experiment_id: str,
     seed: int,
     *,
     split_name: str = "supervised-holdout",
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         store = SignalStore(data["store_path"])
         examples = entity_examples(store)
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": examples.digest,
                 "algorithm": "group_shuffle",
@@ -81,18 +81,18 @@ def split_data(
             parameters={"test_size": 0.25},
         )
         uri = record_split_evidence(
-            child.info.run_id,
+            run.info.run_id,
             examples,
             manifest,
             source=store.path.name,
         )
         MlflowClient().set_tag(
-            child.info.run_id,
+            run.info.run_id,
             "dsio.source.dataset_uri",
             evidence_uri(data["data_run_id"], "outputs/dataset.json"),
         )
         return {
-            "split_run_id": child.info.run_id,
+            "split_run_id": run.info.run_id,
             "split_uri": uri,
             "split_digest": manifest.digest,
             "assignments": manifest.fold(0).assignments,

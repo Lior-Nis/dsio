@@ -11,7 +11,7 @@ from dsio.tracking.evidence import (
     require_evidence,
     resolve_evidence,
 )
-from dsio.tracking.experiment import experiment
+from dsio.tracking.experiment import resolve_experiment
 from dsio.tracking.provenance import execution_identity, normalize, record_provenance
 
 __all__ = [
@@ -20,7 +20,6 @@ __all__ = [
     "canonical_dataset_digest",
     "evidence_uri",
     "execution_identity",
-    "experiment",
     "load_split_evidence",
     "normalize",
     "prefect_cache_key",
@@ -28,4 +27,5 @@ __all__ = [
     "record_split_evidence",
     "require_evidence",
     "resolve_evidence",
+    "resolve_experiment",
 ]

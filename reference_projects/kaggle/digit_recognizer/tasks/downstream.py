@@ -35,13 +35,13 @@ def _arrays(store_path: str, sample_ids: list[str]) -> dict[str, np.ndarray[Any,
 
 @task(persist_result=False)
 def export(
-    data: dict[str, Any], split: dict[str, Any], training: dict[str, Any], parent_run_id: str
+    data: dict[str, Any], split: dict[str, Any], training: dict[str, Any], experiment_id: str
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         reference = ArtifactRef.model_validate(training["checkpoint"])
         inputs = _arrays(data["store_path"], list(split["assignments"]["validate"]))
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "checkpoint_digest": reference.digest,
                 "dataset_digest": data["dataset_digest"],
@@ -82,13 +82,13 @@ def export(
         )
         info = log_predictor(
             predictor,
-            run_id=child.info.run_id,
+            run_id=run.info.run_id,
             input_example=example,
             forms=("pyfunc",),
             name="digit-recognizer",
         )["pyfunc"]
         return {
-            "export_run_id": child.info.run_id,
+            "export_run_id": run.info.run_id,
             "model_uri": info.model_uri,
             "checkpoint_digest": reference.digest,
             "identity": identity,
@@ -97,16 +97,16 @@ def export(
 
 @task(persist_result=False)
 def evaluate_model(
-    data: dict[str, Any], split: dict[str, Any], exported: dict[str, Any], parent_run_id: str
+    data: dict[str, Any], split: dict[str, Any], exported: dict[str, Any], experiment_id: str
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         ids = list(split["assignments"]["validate"])
         store = SignalStore(data["store_path"])
         targets = np.asarray(
             [int(store.read_sample(value)["attrs"]["target"]) for value in ids], dtype=np.int64
         )
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "checkpoint_digest": exported["checkpoint_digest"],
@@ -117,26 +117,26 @@ def evaluate_model(
             components={"evaluation": "dsio.eval.execution:evaluate"},
         )
         metrics = evaluate(
-            run_id=child.info.run_id,
+            run_id=run.info.run_id,
             model_uri=exported["model_uri"],
             dataset_run_id=split["split_run_id"],
             inputs=_arrays(data["store_path"], ids),
             targets=targets,
             metrics=("accuracy",),
         )
-        return {"evaluation_run_id": child.info.run_id, "metrics": metrics, "identity": identity}
+        return {"evaluation_run_id": run.info.run_id, "metrics": metrics, "identity": identity}
 
 
 @task(persist_result=False)
 def infer_and_submit(
-    data: dict[str, Any], exported: dict[str, Any], workspace: str, parent_run_id: str
+    data: dict[str, Any], exported: dict[str, Any], workspace: str, experiment_id: str
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         ids = list(data["test_ids"])
         outputs = predict(exported["model_uri"], _arrays(data["store_path"], ids))
         values = np.asarray(outputs["prediction"], dtype=np.int64).tolist()
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "checkpoint_digest": exported["checkpoint_digest"],
@@ -150,15 +150,15 @@ def infer_and_submit(
         writer.writerow(["ImageId", "Label"])
         writer.writerows(zip(ids, values, strict=True))
         payload = buffer.getvalue().encode()
-        path = Path(workspace) / child.info.run_id / "submission.csv"
+        path = Path(workspace) / run.info.run_id / "submission.csv"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
-        submission = save_artifact(payload, run_id=child.info.run_id, name="submission")
+        submission = save_artifact(payload, run_id=run.info.run_id, name="submission")
         MlflowClient().log_dict(
-            child.info.run_id, submission.model_dump(mode="json"), "outputs/submission.json"
+            run.info.run_id, submission.model_dump(mode="json"), "outputs/submission.json"
         )
         return {
-            "inference_run_id": child.info.run_id,
+            "inference_run_id": run.info.run_id,
             "prediction": values,
             "submission_path": str(path),
             "submission_bytes": payload,

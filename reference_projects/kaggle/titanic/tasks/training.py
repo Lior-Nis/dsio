@@ -51,14 +51,14 @@ OPTIMIZER_PARAMETERS = {"lr": 0.02}
 
 @task(persist_result=False)
 def train(
-    data: dict[str, Any], split: dict[str, Any], parent_run_id: str, seed: int
+    data: dict[str, Any], split: dict[str, Any], experiment_id: str, seed: int
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         check_requested_capabilities(TRAINER)
         store = SignalStore(data["store_path"])
         examples = labelled_examples(store)
         manifest = load_split_evidence(
-            split["split_uri"], examples, consumer_run_id=child.info.run_id
+            split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         seed_everything(seed, workers=True, verbose=False)
         data_module = DsioDataModule(
@@ -83,7 +83,7 @@ def train(
         logger = MLFlowLogger(
             experiment_name="dsio-kaggle-titanic",
             tracking_uri=mlflow.get_tracking_uri(),
-            run_id=child.info.run_id,
+            run_id=run.info.run_id,
             log_model=False,
         )
         directory = Path(data["store_path"]).parent
@@ -95,7 +95,7 @@ def train(
         )
         capabilities = resolve_training_capabilities(trainer, requested=TRAINER)
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
@@ -126,13 +126,13 @@ def train(
         checkpoint = directory / "titanic.ckpt"
         trainer.save_checkpoint(checkpoint)
         reference = save_artifact(
-            checkpoint.read_bytes(), run_id=child.info.run_id, name="checkpoint"
+            checkpoint.read_bytes(), run_id=run.info.run_id, name="checkpoint"
         )
         MlflowClient().log_dict(
-            child.info.run_id, reference.model_dump(mode="json"), "outputs/checkpoint.json"
+            run.info.run_id, reference.model_dump(mode="json"), "outputs/checkpoint.json"
         )
         return {
-            "train_run_id": child.info.run_id,
+            "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
             "identity": identity,
         }

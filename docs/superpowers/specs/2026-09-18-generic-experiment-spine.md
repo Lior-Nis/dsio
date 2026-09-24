@@ -1,6 +1,6 @@
 # DSio — Generic Experiment Spine
 
-Status: accepted (2026-09-18), not yet implemented
+Status: accepted (2026-09-18), implemented; tracking hierarchy amended by ADR-0020
 
 Supersedes: `2026-08-20-dsio-lean-design.md`
 
@@ -43,13 +43,13 @@ DSio makes no assumption about where a project trains or serves a Predictor.
 
 ## Workflow and tracking
 
-A project flow explicitly opens `dsio.tracking.experiment(...)`, which yields MLflow's native active parent Run. Every Experiment Node is a Prefect task or child flow and logs its Evidence to a child MLflow Run.
+A project flow calls `dsio.tracking.resolve_experiment(...)` to resolve a native MLflow Experiment without creating a Run. Every evidence-producing Experiment Node is a Prefect task and logs its Evidence to a visible top-level MLflow Run created by `dsio.tracking.attempt(experiment_id)`.
 
-Each retry creates a new child Run tagged with the same Execution Identity and its Prefect task-run and attempt identities. Failed Attempts are never rewritten. A new Attempt may explicitly consume a prior checkpoint. Only a verified successful Attempt is reusable.
+Each retry creates a new Run tagged with the same Execution Identity and its native Prefect flow-run, task-run, dynamic-key, and attempt identities. Failed Attempts are never rewritten. A new Attempt may explicitly consume a prior checkpoint. Only a verified successful Attempt is reusable.
 
-Every new Prefect flow execution creates a new immutable parent MLflow Run, even when its inputs match an earlier execution. Retries within that flow execution remain under its parent. Nodes may reuse verified Evidence from earlier Experiments by immutable MLflow Run, Logged Model, or artifact reference; reused Evidence is referenced as an input rather than copied, reopened, or reparented.
+Prefect owns flow execution identity, topology, and terminal status; DSio does not duplicate them in an empty MLflow flow Run. Attempts belonging to one flow execution share the Prefect flow-run tag, while immutable MLflow inputs and source-Run references express evidence lineage. Nodes may reuse verified Evidence from earlier Experiments by immutable MLflow Run, Logged Model, or artifact reference; reused Evidence is referenced as an input rather than copied or reopened.
 
-The parent Run finishes successfully only after the Prefect flow completes and every declared MLflow output passes validation. Failure or cancellation remains visible in both Prefect and MLflow rather than being converted into a partial success.
+Each Attempt records its own successful, failed, or cancelled terminal status in MLflow, while the corresponding flow status remains authoritative in Prefect. No task or flow failure is converted into a partial success.
 
 Pure Prefect tasks may use Prefect result caching with DSio's deterministic cache-key utility. MLflow-producing tasks instead query MLflow by Execution Identity and verify required native outputs before reusing them. A cached identifier never overrules missing or invalid Evidence.
 

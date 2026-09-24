@@ -6,6 +6,8 @@ baseline_commit: 0572114
 
 Status: done
 
+> Historical implementation record. ADR-0020 supersedes the child-Run hierarchy; evaluation now writes to a visible top-level Attempt Run.
+
 ## Story
 
 As an experiment author,

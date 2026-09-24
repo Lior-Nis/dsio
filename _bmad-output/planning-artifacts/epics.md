@@ -24,15 +24,15 @@ FR1: A consumer project can install and pin DSio as a versioned Python dependenc
 
 FR2: A consumer project can define its experiment DAG directly as a Prefect flow using ordinary Prefect tasks and DSio functions.
 
-FR3: A flow can explicitly create a tracking context backed by a native MLflow parent Run; importing DSio must not create runs or other external state.
+FR3: A flow can explicitly resolve a native MLflow Experiment without creating a Run; importing DSio must not create runs or other external state.
 
-FR4: Each flow execution creates a new immutable parent Run, including retries and re-executions of the same logical experiment.
+FR4: Prefect remains authoritative for flow execution identity, topology, and status; DSio does not duplicate them in an empty MLflow Run.
 
-FR5: Each tracked DAG node records its work in a child Run, with every retry represented as a separate attempt rather than overwriting prior evidence.
+FR5: Each tracked DAG node records its work in a visible top-level Run, with every retry represented as a separate attempt rather than overwriting prior evidence.
 
 FR6: A node can reuse prior work only by resolving and validating immutable references to existing MLflow evidence.
 
-FR7: The parent Run is marked successful only after the Prefect flow and required output validation complete; failed and cancelled executions remain visible with their actual status.
+FR7: Each Attempt Run records its actual successful, failed, or cancelled status, while the corresponding flow status remains visible and authoritative in Prefect.
 
 FR8: Pure deterministic tasks can use Prefect caching, while tasks whose result is MLflow evidence resolve and validate that evidence through MLflow rather than a parallel DSio cache.
 
@@ -137,7 +137,7 @@ NFR15: DSio must not import consumer-project code; all project variation crosses
 - The architecture contains no DSio DAG abstraction, orchestration protocol, runner registry, backend registry, or duplicate orchestration state model. Prefect flows and tasks are the DAG.
 - The architecture contains no required DSio CLI. Consumer projects execute their Prefect flows using normal Python and Prefect entry points.
 - The architecture contains no duplicate `Experiment`, `EvaluationResult`, `TrainingResult`, or similar persistence model when an MLflow Run, dataset, artifact, logged model, signature, or metric is the canonical record.
-- MLflow Experiments group a project or workstream; parent and child Runs capture individual flow executions and node attempts.
+- MLflow Experiments group a project or workstream; visible top-level Runs capture node attempts and carry native Prefect flow-run, task-run, dynamic-key, and retry identities.
 - Component selection uses explicit import paths or a small closed DSio dispatcher where DSio governance is required; no general runtime plugin registry is introduced.
 - Split algorithms are admitted into DSio itself. A project with a novel split strategy contributes it to the experimental namespace with invariants and tests before using it through the supported path.
 - The store interface and split manifest are stable boundaries; the selected physical storage implementation and third-party split libraries remain replaceable internals.
@@ -155,9 +155,9 @@ Not applicable. DSio is a Python library with no user-interface deliverable in t
 
 FR1: Epic 1 - Install and pin DSio as a versioned dependency.
 FR2: Epic 1 - Define experiment DAGs directly as Prefect flows.
-FR3: Epic 1 - Create explicit MLflow-backed tracking contexts.
-FR4: Epic 1 - Record every flow execution as a new immutable parent Run.
-FR5: Epic 1 - Record node attempts as child Runs without overwriting evidence.
+FR3: Epic 1 - Resolve explicit native MLflow Experiments without creating Runs.
+FR4: Epic 1 - Keep flow identity, topology, and status solely in Prefect.
+FR5: Epic 1 - Record node attempts as visible top-level Runs without overwriting evidence.
 FR6: Epic 1 - Reuse only validated immutable MLflow references.
 FR7: Epic 1 - Reflect actual flow completion, failure, and cancellation status.
 FR8: Epic 1 - Use Prefect caching for pure work and MLflow resolution for evidence.
@@ -258,74 +258,73 @@ So that my project owns its workflow without cloning DSio or adopting a parallel
 **Then** functionality is organized by pipeline responsibility
 **And** no `dsio.torch` namespace or project-specific branch is introduced.
 
-### Story 1.2: Track Each Flow Execution as a Parent Run
+### Story 1.2: Resolve the Native MLflow Experiment
 
 As an experiment author,
-I want an explicit MLflow tracking context around my Prefect flow execution,
-So that every execution has one auditable record with an accurate terminal state.
+I want to resolve the native MLflow Experiment for my workstream without creating a Run,
+So that evidence is grouped without duplicating Prefect's flow lifecycle.
 
 **Requirements:** FR3, FR4, FR7
 
 **Acceptance Criteria:**
 
 **Given** valid MLflow tracking and experiment configuration
-**When** the flow enters the DSio tracking context
-**Then** exactly one new native MLflow parent Run is created
-**And** its Run ID is available to tasks without introducing a duplicate DSio experiment model.
+**When** the flow calls `dsio.tracking.resolve_experiment(...)`
+**Then** the native MLflow Experiment is resolved or created
+**And** its Experiment ID is available to tasks without creating or activating a Run.
 
-**Given** the same logical experiment is executed or retried more than once
-**When** each execution enters its tracking context
-**Then** each execution receives a new parent Run
-**And** previous Runs and their evidence remain unchanged.
+**Given** the same workstream executes more than once
+**When** each flow resolves its MLflow Experiment
+**Then** each receives the same native Experiment identity
+**And** no empty flow-level Run is created.
 
-**Given** the Prefect flow and its required output validation complete successfully
-**When** the tracking context exits
-**Then** the parent Run receives the successful MLflow terminal status.
+**Given** another MLflow Run is active in the process
+**When** a flow resolves its MLflow Experiment
+**Then** that Run remains active and unchanged.
 
-**Given** the flow raises, required output validation fails, or execution is cancelled
-**When** the tracking context exits
-**Then** the parent Run records the corresponding non-successful terminal status
-**And** the original exception or cancellation remains visible to Prefect.
+**Given** a flow succeeds, fails, or is cancelled
+**When** its lifecycle changes
+**Then** Prefect remains the sole source of flow status
+**And** DSio does not project or duplicate that state into MLflow.
 
-**Given** MLflow cannot create or update the required Run
-**When** execution enters or exits the tracking boundary
-**Then** DSio fails closed with an actionable error
-**And** it does not continue while pretending the execution is tracked.
+**Given** MLflow cannot resolve or create the required Experiment
+**When** the flow requests it
+**Then** DSio fails closed with an actionable error.
 
-### Story 1.3: Track Task Attempts as Immutable Child Runs
+### Story 1.3: Track Task Attempts as Visible Immutable Runs
 
 As an experiment author,
-I want every tracked Prefect task attempt recorded beneath its flow Run,
+I want every tracked Prefect task attempt recorded as a directly visible MLflow Run,
 So that retries and failures remain auditable without overwriting earlier evidence.
 
 **Requirements:** FR5
 
 **Acceptance Criteria:**
 
-**Given** a task receives a valid parent Run reference
+**Given** a task receives a valid MLflow Experiment ID
 **When** a tracked task attempt begins
-**Then** DSio creates one new native MLflow child Run linked to that parent
-**And** records the logical node identity and attempt number using native MLflow metadata.
+**Then** DSio creates one new top-level native MLflow Run in that Experiment
+**And** records its Prefect flow-run, task-run, dynamic-key, and attempt identities using native MLflow metadata.
 
 **Given** Prefect retries a failed task
 **When** the next attempt begins
-**Then** a new child Run is created for that attempt
-**And** the failed child Run and all of its evidence remain unchanged.
+**Then** a new Run is created for that attempt
+**And** the failed prior Run and all of its evidence remain unchanged.
 
 **Given** a task attempt succeeds, fails, or is cancelled
 **When** the attempt ends
-**Then** its child Run records the corresponding terminal status
+**Then** its Run records the corresponding terminal status
 **And** failures and cancellations continue to propagate through Prefect.
 
 **Given** multiple tasks execute concurrently
-**When** they create and update child Runs
-**Then** every child remains linked to the correct parent and logical node
+**When** they create and update Runs
+**Then** every Run remains linked to the correct Prefect flow and logical node
 **And** no task relies on another task's process-global active Run.
 
-**Given** a tracked task has no valid parent reference or MLflow cannot persist its required evidence
+**Given** a tracked task has no valid Experiment reference or MLflow cannot persist its required evidence
 **When** it attempts to start or finish
 **Then** it fails with an actionable tracking error
-**And** it does not create an unlinked or falsely successful record.
+**And** it does not create a falsely successful record.
 
 **Given** task code logs parameters, metrics, artifacts, or models
 **When** the task completes
@@ -398,7 +397,7 @@ So that selective reruns remain fast without silently accepting stale or ambiguo
 
 **Given** evidence from an earlier execution is reused in a new flow execution
 **When** the consuming task records its provenance
-**Then** the new parent or child Run records the source Run ID and immutable evidence URI
+**Then** the new Attempt Run records the source Run ID and immutable evidence URI
 **And** the source evidence is neither copied unnecessarily nor modified.
 
 **Given** a deterministic task produces only a pure serializable value
@@ -431,8 +430,8 @@ So that I can change and rerun downstream analysis without repeating valid upstr
 **And** no upstream training or data-production task is invoked by DSio.
 
 **Given** the downstream-only flow executes
-**When** its tracking context starts
-**Then** it creates a new parent Run for the new execution
+**When** its downstream task starts
+**Then** it creates a new visible Attempt Run
 **And** records lineage to every consumed source Run and immutable artifact.
 
 **Given** downstream configuration changes while source evidence remains unchanged
@@ -452,7 +451,7 @@ So that I can change and rerun downstream analysis without repeating valid upstr
 
 **Given** the downstream task succeeds
 **When** its outputs and required validations are complete
-**Then** the new evidence is logged beneath the new parent Run
+**Then** the new evidence is logged to its visible Attempt Run
 **And** the original source execution remains unchanged and auditable.
 
 ## Epic 2: Build Replayable Training Data
@@ -852,12 +851,12 @@ So that I can recompute metrics independently of training and deployment decisio
 
 **Given** evaluation executes within a tracked flow
 **When** metrics and supporting artifacts are complete
-**Then** they are logged to the evaluation child Run using native MLflow metrics, dataset inputs, and artifacts
+**Then** they are logged to the visible evaluation Attempt Run using native MLflow metrics, dataset inputs, and artifacts
 **And** lineage to the source model and dataset Runs is recorded.
 
 **Given** only metric configuration or evaluation data changes
 **When** the evaluation flow reruns
-**Then** it creates new evaluation evidence under a new parent Run
+**Then** it creates a new visible evaluation Attempt Run
 **And** reuses the unchanged validated predictor without retraining.
 
 **Given** incompatible prediction schema, target schema, metric inputs, or invalid source evidence

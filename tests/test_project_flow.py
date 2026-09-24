@@ -27,54 +27,52 @@ def test_project_owned_flow_calls_public_dsio_function(
     from dsio.tracking import (
         attempt,
         evidence_uri,
-        experiment,
         record_provenance,
         resolve_evidence,
+        resolve_experiment,
     )
 
     @task
-    def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[str, str]:
-        with attempt(parent_run_id) as child:
+    def identify_dataset(dataset: dict[str, object], experiment_id: str) -> tuple[str, str]:
+        with attempt(experiment_id) as run:
             digest = sha256_of(dataset)
             record_provenance(
-                child.info.run_id,
+                run.info.run_id,
                 {"dataset": dataset, "seed": 7},
                 components={"identity": "dsio.contracts:sha256_of"},
             )
-            MlflowClient().log_param(child.info.run_id, "dataset_digest", digest)
+            MlflowClient().log_param(run.info.run_id, "dataset_digest", digest)
             MlflowClient().log_dict(
-                child.info.run_id,
+                run.info.run_id,
                 {"dataset_digest": digest},
                 "outputs/dataset.json",
             )
-            return digest, child.info.run_id
+            return digest, run.info.run_id
 
     @flow
     def project_flow() -> tuple[str, str]:
-        with experiment("algae-training") as parent:
-            digest, child_run_id = identify_dataset(
-                {"name": "algae", "revision": 1}, parent.info.run_id
-            )
-            assert digest == "2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556"
-            return digest, child_run_id
+        resolved = resolve_experiment("algae-training")
+        digest, run_id = identify_dataset({"name": "algae", "revision": 1}, resolved.experiment_id)
+        assert digest == "2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556"
+        return digest, run_id
 
     with prefect_test_harness():
-        digest, child_run_id = project_flow()
+        digest, run_id = project_flow()
 
     assert digest == "2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556"
-    child = MlflowClient().get_run(child_run_id)
-    assert child.info.status == "FINISHED"
-    assert child.data.params["dataset_digest"] == digest
-    assert len(child.data.tags["dsio.execution_identity"]) == 64
-    assert child.data.tags["dsio.version"]
+    run = MlflowClient().get_run(run_id)
+    assert run.info.status == "FINISHED"
+    assert "mlflow.parentRunId" not in run.data.tags
+    assert run.data.tags["dsio.prefect.flow_run_id"]
+    assert run.data.params["dataset_digest"] == digest
+    assert len(run.data.tags["dsio.execution_identity"]) == 64
+    assert run.data.tags["dsio.version"]
     resolved = resolve_evidence(
-        child.data.params["dsio.execution_identity"],
+        run.data.params["dsio.execution_identity"],
         required_artifacts={"outputs/dataset.json"},
     )
     assert resolved is not None
-    assert resolved.info.run_id == child_run_id
+    assert resolved.info.run_id == run_id
     assert evidence_uri(resolved.info.run_id, "outputs/dataset.json") == (
-        f"runs:/{child_run_id}/outputs/dataset.json"
+        f"runs:/{run_id}/outputs/dataset.json"
     )
-    parent_run_id = child.data.tags["mlflow.parentRunId"]
-    assert MlflowClient().get_run(parent_run_id).info.status == "FINISHED"

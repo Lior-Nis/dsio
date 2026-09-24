@@ -1,4 +1,4 @@
-"""Native MLflow child Runs for Prefect task attempts."""
+"""Visible native MLflow Runs for Prefect task attempts."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from dsio.tracking._lifecycle import (
     status_for,
 )
 
-_PARENT_RUN_TAG = "mlflow.parentRunId"
+_FLOW_RUN_ID_TAG = "dsio.prefect.flow_run_id"
 _TASK_KEY_TAG = "dsio.prefect.task_key"
 _TASK_RUN_ID_TAG = "dsio.prefect.task_run_id"
 _DYNAMIC_KEY_TAG = "dsio.prefect.dynamic_key"
@@ -26,43 +26,41 @@ _ATTEMPT_TAG = "dsio.prefect.attempt"
 
 
 @contextmanager
-def attempt(parent_run_id: str) -> Iterator[Run]:
-    """Create one native MLflow child Run for the current Prefect task attempt."""
+def attempt(experiment_id: str) -> Iterator[Run]:
+    """Create one top-level MLflow Run for the current Prefect task attempt."""
     context = TaskRunContext.get()
     if context is None:
-        raise TrackingError(
-            "A Prefect task context is required to open a tracked MLflow attempt."
-        )
+        raise TrackingError("A Prefect task context is required to open a tracked MLflow attempt.")
 
     client = MlflowClient()
-    parent = _require_parent(client, parent_run_id)
+    _require_experiment(client, experiment_id)
     creation_token = uuid4().hex
-    child: Run | None = None
+    run: Run | None = None
 
     try:
-        child = _create_child(client, parent, context, creation_token)
-        yield child
+        run = _create_attempt(client, experiment_id, context, creation_token)
+        yield run
     except BaseException as error:
         status = status_for(error)
-        if child is None:
+        if run is None:
             reconciliation = reconcile_creation(
                 client,
-                parent.info.experiment_id,
+                experiment_id,
                 creation_token,
                 status,
             )
             if reconciliation is not None:
                 error.add_note(
-                    f"Interrupted while opening an MLflow child Run beneath parent "
-                    f"{parent.info.run_id!r}; {reconciliation}."
+                    f"Interrupted while opening an MLflow attempt Run in experiment "
+                    f"{experiment_id!r}; {reconciliation}."
                 )
             raise
         try:
-            client.set_terminated(child.info.run_id, status)
+            client.set_terminated(run.info.run_id, status)
         except BaseException as finalization_error:  # noqa: BLE001 - preserve task failure
-            recovery = _recover_status(client, child.info.run_id, status)
+            recovery = _recover_status(client, run.info.run_id, status)
             message = (
-                f"Could not finish MLflow child Run {child.info.run_id!r} as {status}: "
+                f"Could not finish MLflow attempt Run {run.info.run_id!r} as {status}: "
                 f"{finalization_error}"
             )
             if recovery is not None:
@@ -71,13 +69,12 @@ def attempt(parent_run_id: str) -> Iterator[Run]:
         raise
     else:
         try:
-            client.set_terminated(child.info.run_id, "FINISHED")
+            client.set_terminated(run.info.run_id, "FINISHED")
         except BaseException as error:
             status = status_for(error)
-            recovery = _recover_status(client, child.info.run_id, status)
+            recovery = _recover_status(client, run.info.run_id, status)
             message = (
-                f"Could not finish MLflow child Run {child.info.run_id!r} as FINISHED: "
-                f"{error}"
+                f"Could not finish MLflow attempt Run {run.info.run_id!r} as FINISHED: {error}"
             )
             if recovery is not None and (
                 is_cancellation(recovery) or not isinstance(recovery, Exception)
@@ -85,7 +82,7 @@ def attempt(parent_run_id: str) -> Iterator[Run]:
                 recovery_status = status_for(recovery)
                 terminal_recovery = _recover_status(
                     client,
-                    child.info.run_id,
+                    run.info.run_id,
                     recovery_status,
                 )
                 message += f"; direct {status} status recovery was interrupted: {recovery}"
@@ -116,44 +113,33 @@ def _recover_status(
     return None
 
 
-def _require_parent(client: MlflowClient, parent_run_id: str) -> Run:
-    if not parent_run_id:
-        raise TrackingError("A non-empty MLflow parent Run ID is required.")
+def _require_experiment(client: MlflowClient, experiment_id: str) -> None:
+    if not experiment_id:
+        raise TrackingError("A non-empty MLflow Experiment ID is required.")
     try:
-        parent = client.get_run(parent_run_id)
+        experiment = client.get_experiment(experiment_id)
     except BaseException as error:
         if is_cancellation(error) or not isinstance(error, Exception):
             raise
         raise TrackingError(
-            f"Could not resolve MLflow parent Run {parent_run_id!r}: {error}"
+            f"Could not resolve MLflow Experiment {experiment_id!r}: {error}"
         ) from error
-    if parent.info.lifecycle_stage != "active":
+    if experiment.lifecycle_stage != "active":
         raise TrackingError(
-            f"MLflow parent Run {parent_run_id!r} must have lifecycle stage 'active', "
-            f"not {parent.info.lifecycle_stage!r}."
+            f"MLflow Experiment {experiment_id!r} must have lifecycle stage 'active', "
+            f"not {experiment.lifecycle_stage!r}."
         )
-    if parent.info.status != "RUNNING":
-        raise TrackingError(
-            f"MLflow parent Run {parent_run_id!r} must be RUNNING, not "
-            f"{parent.info.status!r}."
-        )
-    if _PARENT_RUN_TAG in parent.data.tags:
-        raise TrackingError(
-            f"MLflow Run {parent_run_id!r} is already a child; a top-level parent Run "
-            "is required."
-        )
-    return parent
 
 
-def _create_child(
+def _create_attempt(
     client: MlflowClient,
-    parent: Run,
+    experiment_id: str,
     context: TaskRunContext,
     creation_token: str,
 ) -> Run:
     task_run = context.task_run
     tags = {
-        _PARENT_RUN_TAG: parent.info.run_id,
+        _FLOW_RUN_ID_TAG: str(task_run.flow_run_id),
         _TASK_KEY_TAG: task_run.task_key,
         _TASK_RUN_ID_TAG: str(task_run.id),
         _DYNAMIC_KEY_TAG: task_run.dynamic_key,
@@ -161,9 +147,9 @@ def _create_child(
     }
     return create_run(
         client,
-        parent.info.experiment_id,
+        experiment_id,
         run_name=f"{context.task.name} attempt {task_run.run_count}",
         tags=tags,
-        description=f"MLflow child Run beneath parent {parent.info.run_id!r}",
+        description=f"MLflow Run for Prefect task attempt {task_run.id}",
         creation_token=creation_token,
     )

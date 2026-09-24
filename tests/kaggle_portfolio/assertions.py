@@ -38,7 +38,7 @@ def assert_execution_evidence(
 
 
 def assert_replay_run_ids_differ(first: dict[str, object], second: dict[str, object]) -> None:
-    keys = {key for key in first if key == "parent_run_id" or key.endswith("_run_id")}
+    keys = {key for key in first if key.endswith("_run_id")}
     assert keys
     assert keys <= second.keys()
     for key in keys:

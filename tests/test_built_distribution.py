@@ -410,49 +410,54 @@ from prefect import flow, task
 from prefect.testing.utilities import prefect_test_harness
 from mlflow import MlflowClient
 from dsio.contracts import sha256_of
-from dsio.tracking import attempt, evidence_uri, experiment, record_provenance, resolve_evidence
+from dsio.tracking import (
+    attempt,
+    evidence_uri,
+    record_provenance,
+    resolve_evidence,
+    resolve_experiment,
+)
 
 @task
-def identify_dataset(dataset, parent_run_id):
-    with attempt(parent_run_id) as child:
+def identify_dataset(dataset, experiment_id):
+    with attempt(experiment_id) as run:
         digest = sha256_of(dataset)
         record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {'dataset': dataset, 'seed': 7},
             components={'identity': 'dsio.contracts:sha256_of'},
         )
-        MlflowClient().log_param(child.info.run_id, 'dataset_digest', digest)
+        MlflowClient().log_param(run.info.run_id, 'dataset_digest', digest)
         MlflowClient().log_dict(
-            child.info.run_id,
+            run.info.run_id,
             {'dataset_digest': digest},
             'outputs/dataset.json',
         )
-        return digest, child.info.run_id
+        return digest, run.info.run_id
 
 @flow
 def project_flow():
-    with experiment('installed-wheel-flow') as parent:
-        digest, child_run_id = identify_dataset(
-            {'name': 'algae', 'revision': 1}, parent.info.run_id
-        )
-        assert digest == '2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556'
-        return digest, parent.info.run_id, child_run_id
+    resolved = resolve_experiment('installed-wheel-flow')
+    digest, run_id = identify_dataset(
+        {'name': 'algae', 'revision': 1}, resolved.experiment_id
+    )
+    assert digest == '2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556'
+    return digest, resolved.experiment_id, run_id
 
 with prefect_test_harness():
-    digest, parent_run_id, child_run_id = project_flow()
+    digest, experiment_id, run_id = project_flow()
 client = MlflowClient()
 print('DSIO_RESULT=' + digest)
-print('DSIO_PARENT_STATUS=' + client.get_run(parent_run_id).info.status)
-print('DSIO_CHILD_STATUS=' + client.get_run(child_run_id).info.status)
-print('DSIO_CHILD_IDENTITY_LENGTH=' + str(
-    len(client.get_run(child_run_id).data.tags['dsio.execution_identity'])
+print('DSIO_RUN_STATUS=' + client.get_run(run_id).info.status)
+print('DSIO_RUN_VISIBLE=' + str(
+    'mlflow.parentRunId' not in client.get_run(run_id).data.tags
 ))
-print('DSIO_CHILD_PARENT_MATCH=' + str(
-    client.get_run(child_run_id).data.tags['mlflow.parentRunId'] == parent_run_id
+print('DSIO_RUN_IDENTITY_LENGTH=' + str(
+    len(client.get_run(run_id).data.tags['dsio.execution_identity'])
 ))
-identity = client.get_run(child_run_id).data.params['dsio.execution_identity']
+identity = client.get_run(run_id).data.params['dsio.execution_identity']
 resolved = resolve_evidence(identity, required_artifacts={'outputs/dataset.json'})
-print('DSIO_REUSED_RUN_MATCH=' + str(resolved.info.run_id == child_run_id))
+print('DSIO_REUSED_RUN_MATCH=' + str(resolved.info.run_id == run_id))
 print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.json'))
 """
     flow_result = subprocess.run(
@@ -464,10 +469,9 @@ print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.j
         capture_output=True,
     )
     assert f"DSIO_RESULT={EXPECTED_DIGEST}" in flow_result.stdout
-    assert "DSIO_PARENT_STATUS=FINISHED" in flow_result.stdout
-    assert "DSIO_CHILD_STATUS=FINISHED" in flow_result.stdout
-    assert "DSIO_CHILD_IDENTITY_LENGTH=64" in flow_result.stdout
-    assert "DSIO_CHILD_PARENT_MATCH=True" in flow_result.stdout
+    assert "DSIO_RUN_STATUS=FINISHED" in flow_result.stdout
+    assert "DSIO_RUN_VISIBLE=True" in flow_result.stdout
+    assert "DSIO_RUN_IDENTITY_LENGTH=64" in flow_result.stdout
     assert "DSIO_REUSED_RUN_MATCH=True" in flow_result.stdout
     assert "DSIO_REUSED_URI=runs:/" in flow_result.stdout
 
@@ -508,17 +512,15 @@ with prefect_test_harness():
     bike = bike_sharing_flow('kaggle-data/bike', 'portfolio-workspace', seed=11)
     digits = digit_recognizer_flow('kaggle-data/digits', 'portfolio-workspace', seed=13)
 client = MlflowClient()
-print('REFERENCE_PARENT_STATUS=' + client.get_run(supervised['parent_run_id']).info.status)
 print('REFERENCE_TRAIN_STATUS=' + client.get_run(supervised['train_run_id']).info.status)
 print('REFERENCE_PREDICTIONS=' + str(len(supervised['prediction'])))
-print('SSL_PARENT_STATUS=' + client.get_run(ssl['parent_run_id']).info.status)
 print('SSL_TRAIN_STATUS=' + client.get_run(ssl['train_run_id']).info.status)
 print('SSL_PREDICTIONS=' + str(len(ssl['prediction'])))
-print('TITANIC_STATUS=' + client.get_run(titanic['parent_run_id']).info.status)
+print('TITANIC_STATUS=' + client.get_run(titanic['train_run_id']).info.status)
 print('TITANIC_PREDICTIONS=' + str(len(titanic['prediction'])))
-print('BIKE_STATUS=' + client.get_run(bike['parent_run_id']).info.status)
+print('BIKE_STATUS=' + client.get_run(bike['train_run_id']).info.status)
 print('BIKE_PREDICTIONS=' + str(len(bike['prediction'])))
-print('DIGITS_STATUS=' + client.get_run(digits['parent_run_id']).info.status)
+print('DIGITS_STATUS=' + client.get_run(digits['train_run_id']).info.status)
 print('DIGITS_PREDICTIONS=' + str(len(digits['prediction'])))
 print('PORTFOLIO_ISOLATED=True')
 """
@@ -530,10 +532,8 @@ print('PORTFOLIO_ISOLATED=True')
         text=True,
         capture_output=True,
     )
-    assert "REFERENCE_PARENT_STATUS=FINISHED" in reference_result.stdout
     assert "REFERENCE_TRAIN_STATUS=FINISHED" in reference_result.stdout
     assert "REFERENCE_PREDICTIONS=2" in reference_result.stdout
-    assert "SSL_PARENT_STATUS=FINISHED" in reference_result.stdout
     assert "SSL_TRAIN_STATUS=FINISHED" in reference_result.stdout
     assert "SSL_PREDICTIONS=2" in reference_result.stdout
     assert "TITANIC_STATUS=FINISHED" in reference_result.stdout

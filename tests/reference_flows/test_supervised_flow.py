@@ -14,7 +14,7 @@ from mlflow import MlflowClient
 
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
-from dsio.tracking import TrackingError, canonical_dataset_digest, experiment
+from dsio.tracking import TrackingError, canonical_dataset_digest, resolve_experiment
 
 
 def test_training_and_inference_share_channel_first_signal_layout(
@@ -108,14 +108,10 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
                 "checkpoint_callbacks": list(trainer.checkpoint_callbacks),
                 "train_batch_sizes": [len(batch["sample_id"]) for batch in train_batches],
                 "train_sample_ids": sorted(
-                    sample_id
-                    for batch in train_batches
-                    for sample_id in batch["sample_id"]
+                    sample_id for batch in train_batches for sample_id in batch["sample_id"]
                 ),
                 "validate_sample_ids": sorted(
-                    sample_id
-                    for batch in validate_batches
-                    for sample_id in batch["sample_id"]
+                    sample_id for batch in validate_batches for sample_id in batch["sample_id"]
                 ),
             }
         )
@@ -182,18 +178,21 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
 
     client = MlflowClient()
     for result in (first, second):
-        assert client.get_run(result["parent_run_id"]).info.status == "FINISHED"
+        flow_run_ids: set[str] = set()
         for role in ("data", "split", "train", "export", "evaluation", "inference"):
             run = client.get_run(result[f"{role}_run_id"])
+            assert run.info.experiment_id == result["experiment_id"]
             assert run.info.status == "FINISHED"
-            assert run.data.tags["mlflow.parentRunId"] == result["parent_run_id"]
+            assert "mlflow.parentRunId" not in run.data.tags
+            flow_run_ids.add(run.data.tags["dsio.prefect.flow_run_id"])
             assert run.data.tags["dsio.execution_identity"] == result["identities"][role]
+        assert len(flow_run_ids) == 1
 
         training = client.get_run(result["train_run_id"])
         assert len(training.inputs.dataset_inputs) == 1
-        assert canonical_dataset_digest(training.inputs.dataset_inputs[0]) == result[
-            "dataset_digest"
-        ]
+        assert (
+            canonical_dataset_digest(training.inputs.dataset_inputs[0]) == result["dataset_digest"]
+        )
         provenance_path = client.download_artifacts(
             result["train_run_id"], "provenance.json", str(tmp_path / result["train_run_id"])
         )
@@ -266,12 +265,10 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
             str(tmp_path / result["export_run_id"]),
         )
         export_provenance = json.loads(Path(export_provenance_path).read_text())
-        assert export_provenance["configuration"]["checkpoint_digest"] == result[
-            "checkpoint_digest"
-        ]
-        assert export_provenance["configuration"]["dataset_digest"] == result[
-            "dataset_digest"
-        ]
+        assert (
+            export_provenance["configuration"]["checkpoint_digest"] == result["checkpoint_digest"]
+        )
+        assert export_provenance["configuration"]["dataset_digest"] == result["dataset_digest"]
         assert export_provenance["configuration"]["export_form"] == "pyfunc"
         assert export_provenance["configuration"]["split_digest"] == result["split_digest"]
         assert export_provenance["components"]["builder"] == (
@@ -295,9 +292,9 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         }
 
         inference = client.get_run(result["inference_run_id"])
-        assert canonical_dataset_digest(inference.inputs.dataset_inputs[0]) == result[
-            "dataset_digest"
-        ]
+        assert (
+            canonical_dataset_digest(inference.inputs.dataset_inputs[0]) == result["dataset_digest"]
+        )
         assert [item.model_id for item in inference.inputs.model_inputs] == [
             result["model_uri"].removeprefix("models:/")
         ]
@@ -310,7 +307,8 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
     assert evaluation.data.params["evaluation.metrics"] == '["rmse"]'
 
     client.delete_run(first["split_run_id"])
-    with prefect_test_harness(), experiment("dsio-supervised-reference") as parent:
+    with prefect_test_harness():
+        resolved = resolve_experiment("dsio-supervised-reference")
         with pytest.raises(TrackingError, match="not reusable"):
             infer(
                 store_path=first["store_path"],
@@ -319,22 +317,23 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
                 dataset_run_id=first["split_run_id"],
                 dataset_digest=first["dataset_digest"],
                 checkpoint_digest=first["checkpoint_digest"],
-                parent_run_id=parent.info.run_id,
+                experiment_id=resolved.experiment_id,
             )
 
-    with prefect_test_harness(), experiment("dsio-supervised-reference") as parent:
-        invalid_parent_run_id = parent.info.run_id
-        experiment_id = parent.info.experiment_id
+    with prefect_test_harness():
+        experiment_id = resolve_experiment("dsio-supervised-reference").experiment_id
+        existing_run_ids = {run.info.run_id for run in client.search_runs([experiment_id])}
         with pytest.raises(Exception, match="no store"):
             split_data(
                 {"store_path": str(tmp_path / "missing-store")},
-                invalid_parent_run_id,
+                experiment_id,
                 19,
             )
-    failed_children = [
+    failed_attempts = [
         run
         for run in client.search_runs([experiment_id])
-        if run.data.tags.get("mlflow.parentRunId") == invalid_parent_run_id
+        if run.info.run_id not in existing_run_ids
     ]
-    assert len(failed_children) == 1
-    assert failed_children[0].info.status == "FAILED"
+    assert len(failed_attempts) == 1
+    assert failed_attempts[0].info.status == "FAILED"
+    assert "mlflow.parentRunId" not in failed_attempts[0].data.tags

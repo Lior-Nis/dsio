@@ -49,10 +49,10 @@ def _features(row: dict[str, str]) -> np.ndarray[Any, np.dtype[np.float32]]:
 
 
 @task(persist_result=False)
-def ingest(data_dir: str, workspace: str, parent_run_id: str) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+def ingest(data_dir: str, workspace: str, experiment_id: str) -> dict[str, Any]:
+    with attempt(experiment_id) as run:
         loaded = load_competition_data(data_dir)
-        path = Path(workspace) / child.info.run_id / "titanic"
+        path = Path(workspace) / run.info.run_id / "titanic"
         path.parent.mkdir(parents=True, exist_ok=True)
         with SignalStore.builder(path, channels=10, dtype="float32") as builder:
             for source, rows in (("train", loaded["train"]), ("test", loaded["test"])):
@@ -70,7 +70,7 @@ def ingest(data_dir: str, workspace: str, parent_run_id: str) -> dict[str, Any]:
         store = SignalStore(path)
         store.verify()
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": store.identity,
                 "train_rows": len(loaded["train"]),
@@ -80,7 +80,7 @@ def ingest(data_dir: str, workspace: str, parent_run_id: str) -> dict[str, Any]:
             components={"loader": "reference_projects.kaggle.titanic.data:load_competition_data"},
         )
         MlflowClient().log_dict(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": store.identity,
                 "train_ids": loaded["train_ids"],
@@ -91,7 +91,7 @@ def ingest(data_dir: str, workspace: str, parent_run_id: str) -> dict[str, Any]:
         return {
             "store_path": str(path),
             "dataset_digest": store.identity,
-            "data_run_id": child.info.run_id,
+            "data_run_id": run.info.run_id,
             "identity": identity,
             "test_ids": loaded["test_ids"],
             "tickets": {row["PassengerId"]: row["Ticket"] for row in loaded["train"]},
@@ -99,8 +99,8 @@ def ingest(data_dir: str, workspace: str, parent_run_id: str) -> dict[str, Any]:
 
 
 @task(persist_result=False)
-def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+def split_data(data: dict[str, Any], experiment_id: str, seed: int) -> dict[str, Any]:
+    with attempt(experiment_id) as run:
         store = SignalStore(data["store_path"])
         examples = labelled_examples(store)
         manifest = generate(
@@ -112,7 +112,7 @@ def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str,
             parameters={"test_size": 0.34},
         )
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "algorithm": "group_shuffle",
@@ -121,9 +121,9 @@ def split_data(data: dict[str, Any], parent_run_id: str, seed: int) -> dict[str,
             },
             components={"splitter": "dsio.data.splits.generate:generate"},
         )
-        uri = record_split_evidence(child.info.run_id, examples, manifest, source=store.path.name)
+        uri = record_split_evidence(run.info.run_id, examples, manifest, source=store.path.name)
         return {
-            "split_run_id": child.info.run_id,
+            "split_run_id": run.info.run_id,
             "split_uri": uri,
             "split_digest": manifest.digest,
             "assignments": manifest.fold(0).assignments,

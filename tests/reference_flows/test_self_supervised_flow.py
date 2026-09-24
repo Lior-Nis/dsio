@@ -219,7 +219,9 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
     ]
     assert all(isinstance(model, TinyEmbedding) for _, _, model, _ in fits)
     assert all(isinstance(objective, ContrastiveObjective) for _, _, _, objective in fits)
-    assert runtime_configuration == [
+    assert (
+        runtime_configuration
+        == [
             {
                 "augmentation": {
                     "augmentor": {
@@ -231,21 +233,23 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
                         "parameters": {"views": ["online", "target"]},
                     },
                 },
-            "drop_last": {
-                "train": True,
-                "validate": False,
-                "test": False,
-                "predict": False,
-            },
-            "limit_val_batches": 0,
-            "shuffle": {
-                "train": True,
-                "validate": False,
-                "test": False,
-                "predict": False,
-            },
-        }
-    ] * 2
+                "drop_last": {
+                    "train": True,
+                    "validate": False,
+                    "test": False,
+                    "predict": False,
+                },
+                "limit_val_batches": 0,
+                "shuffle": {
+                    "train": True,
+                    "validate": False,
+                    "test": False,
+                    "predict": False,
+                },
+            }
+        ]
+        * 2
+    )
     assert len(views[0]) == len(views[1]) > 0
     for left, right in zip(views[0], views[1], strict=True):
         assert left["device"] == right["device"]
@@ -271,17 +275,20 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
 
     client = MlflowClient()
     for result in (first, second):
-        assert client.get_run(result["parent_run_id"]).info.status == "FINISHED"
+        flow_run_ids: set[str] = set()
         for role in ("data", "split", "train", "export", "evaluation", "inference"):
             run = client.get_run(result[f"{role}_run_id"])
+            assert run.info.experiment_id == result["experiment_id"]
             assert run.info.status == "FINISHED"
-            assert run.data.tags["mlflow.parentRunId"] == result["parent_run_id"]
+            assert "mlflow.parentRunId" not in run.data.tags
+            flow_run_ids.add(run.data.tags["dsio.prefect.flow_run_id"])
             assert run.data.tags["dsio.execution_identity"] == result["identities"][role]
+        assert len(flow_run_ids) == 1
 
         training = client.get_run(result["train_run_id"])
-        assert canonical_dataset_digest(training.inputs.dataset_inputs[0]) == result[
-            "dataset_digest"
-        ]
+        assert (
+            canonical_dataset_digest(training.inputs.dataset_inputs[0]) == result["dataset_digest"]
+        )
         split_provenance_path = client.download_artifacts(
             result["split_run_id"], "provenance.json", str(tmp_path / result["split_run_id"])
         )
@@ -295,13 +302,11 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         assert provenance["components"]["objective"] == (
             "reference_projects.self_supervised.components:ContrastiveObjective"
         )
-        assert provenance["configuration"]["augmentation"] == runtime_configuration[0][
-            "augmentation"
-        ]
+        assert (
+            provenance["configuration"]["augmentation"] == runtime_configuration[0]["augmentation"]
+        )
         assert provenance["configuration"]["augmentation_seed"] == 23
-        assert provenance["configuration"]["drop_last"] == runtime_configuration[0][
-            "drop_last"
-        ]
+        assert provenance["configuration"]["drop_last"] == runtime_configuration[0]["drop_last"]
         assert provenance["configuration"]["shuffle"] == runtime_configuration[0]["shuffle"]
         assert provenance["configuration"]["trainer"] == {
             "accelerator": "auto",
@@ -349,9 +354,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
             "reference_projects.supervised.components:TimeMajorToChannelFirst"
         )
         assert export_provenance["configuration"]["preprocessor"] == {
-            "reference": (
-                "reference_projects.supervised.components:TimeMajorToChannelFirst"
-            ),
+            "reference": ("reference_projects.supervised.components:TimeMajorToChannelFirst"),
             "parameters": {"channels": 1, "time": 4},
         }
         evaluation = client.get_run(result["evaluation_run_id"])

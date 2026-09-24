@@ -95,14 +95,14 @@ def _trainer(run_id: str, directory: Path) -> tuple[Any, dict[str, str]]:
 
 @task(persist_result=False)
 def pretrain_encoder(
-    data: dict[str, Any], split: dict[str, Any], parent_run_id: str, seed: int
+    data: dict[str, Any], split: dict[str, Any], experiment_id: str, seed: int
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         check_requested_capabilities(TRAINER)
         store = SignalStore(data["store_path"])
         examples = labelled_examples(store)
         manifest = load_split_evidence(
-            split["split_uri"], examples, consumer_run_id=child.info.run_id
+            split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         seed_everything(seed, workers=True, verbose=False)
         data_module = _data_module(store, manifest, seed, unlabelled_digit_samples)
@@ -113,9 +113,9 @@ def pretrain_encoder(
             optimizer_parameters=PRETRAIN_OPTIMIZER_PARAMETERS,
         )
         directory = Path(data["store_path"]).parent
-        trainer, execution = _trainer(child.info.run_id, directory)
+        trainer, execution = _trainer(run.info.run_id, directory)
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
@@ -149,12 +149,12 @@ def pretrain_encoder(
         trainer.fit(module, datamodule=data_module)
         buffer = io.BytesIO()
         torch.save(module.model.encoder.state_dict(), buffer)
-        encoder = save_artifact(buffer.getvalue(), run_id=child.info.run_id, name="encoder")
+        encoder = save_artifact(buffer.getvalue(), run_id=run.info.run_id, name="encoder")
         MlflowClient().log_dict(
-            child.info.run_id, encoder.model_dump(mode="json"), "outputs/encoder.json"
+            run.info.run_id, encoder.model_dump(mode="json"), "outputs/encoder.json"
         )
         return {
-            "pretrain_run_id": child.info.run_id,
+            "pretrain_run_id": run.info.run_id,
             "encoder": encoder.model_dump(mode="json"),
             "identity": identity,
             "dataset_digest": data["dataset_digest"],
@@ -207,10 +207,10 @@ def train_classifier(
     data: dict[str, Any],
     split: dict[str, Any],
     pretraining: dict[str, Any],
-    parent_run_id: str,
+    experiment_id: str,
     seed: int,
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         check_requested_capabilities(TRAINER)
         validate_encoder_handoff(pretraining, data, split)
         encoder, state = _verified_encoder(
@@ -222,7 +222,7 @@ def train_classifier(
         store = SignalStore(data["store_path"])
         examples = labelled_examples(store)
         manifest = load_split_evidence(
-            split["split_uri"], examples, consumer_run_id=child.info.run_id
+            split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         seed_everything(seed, workers=True, verbose=False)
         model = FrozenDigitClassifier()
@@ -236,9 +236,9 @@ def train_classifier(
             optimizer_parameters=CLASSIFIER_OPTIMIZER_PARAMETERS,
         )
         directory = Path(data["store_path"]).parent
-        trainer, execution = _trainer(child.info.run_id, directory)
+        trainer, execution = _trainer(run.info.run_id, directory)
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
@@ -276,16 +276,16 @@ def train_classifier(
         checkpoint = directory / "digit-classifier.ckpt"
         trainer.save_checkpoint(checkpoint)
         reference = save_artifact(
-            checkpoint.read_bytes(), run_id=child.info.run_id, name="checkpoint"
+            checkpoint.read_bytes(), run_id=run.info.run_id, name="checkpoint"
         )
         MlflowClient().log_dict(
-            child.info.run_id, reference.model_dump(mode="json"), "outputs/checkpoint.json"
+            run.info.run_id, reference.model_dump(mode="json"), "outputs/checkpoint.json"
         )
         MlflowClient().log_dict(
-            child.info.run_id, encoder.model_dump(mode="json"), "inputs/encoder.json"
+            run.info.run_id, encoder.model_dump(mode="json"), "inputs/encoder.json"
         )
         return {
-            "train_run_id": child.info.run_id,
+            "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
             "encoder_digest": encoder.digest,
             "encoder_verified": True,

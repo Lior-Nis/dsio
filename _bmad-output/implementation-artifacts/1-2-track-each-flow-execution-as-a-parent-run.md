@@ -6,6 +6,8 @@ baseline_commit: c88cc280316ab612bbfc6bc7eb297d5da8d4fd63
 
 Status: done
 
+> Historical implementation record. ADR-0020 supersedes the parent-Run hierarchy; the current contract is Story 1.2 in `epics.md`.
+
 ## Story
 
 As an experiment author,

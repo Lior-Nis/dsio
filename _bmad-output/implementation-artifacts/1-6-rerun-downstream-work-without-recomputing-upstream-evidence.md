@@ -6,6 +6,8 @@ baseline_commit: 1dd9aefa3f05e9f3cd3834427e6ee9105d3abb0b
 
 Status: done
 
+> Historical implementation record. ADR-0020 supersedes the parent/child tracking hierarchy; current downstream Attempts are visible top-level Runs.
+
 ## Story
 
 As an experiment author,
