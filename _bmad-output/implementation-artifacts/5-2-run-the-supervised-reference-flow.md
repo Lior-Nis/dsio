@@ -6,6 +6,8 @@ baseline_commit: ebf9ea6
 
 Status: done
 
+> Historical implementation record. ADR-0020 supersedes the parent/child tracking hierarchy used by this original acceptance run.
+
 ## Story
 
 As a new DSio consumer,

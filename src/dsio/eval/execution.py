@@ -26,7 +26,13 @@ from dsio.eval.metrics import compute
 from dsio.inference.loading import InferenceError, predict
 
 _LOGGED_MODEL_URI = re.compile(r"models:/(m-[0-9a-f]{32})")
-_PARENT_RUN_TAG = "mlflow.parentRunId"
+_ATTEMPT_TAGS = (
+    "dsio.prefect.flow_run_id",
+    "dsio.prefect.task_key",
+    "dsio.prefect.task_run_id",
+    "dsio.prefect.dynamic_key",
+    "dsio.prefect.attempt",
+)
 
 
 class EvaluationError(ValueError):
@@ -44,10 +50,10 @@ def evaluate(
     prediction_field: str = "prediction",
     score_field: str | None = None,
 ) -> dict[str, float]:
-    """Compute and record evaluation evidence on one caller-owned child Run."""
+    """Compute and record evaluation evidence on one caller-owned attempt Run."""
     client = MlflowClient()
-    child = _child_run(client, run_id)
-    _require_clean_child(client, child)
+    evaluation_run = _attempt_run(client, run_id)
+    _require_clean_attempt(client, evaluation_run)
     model_id, model_source_run_id = _model_evidence(client, model_uri)
     dataset_input = _dataset_evidence(client, dataset_run_id)
     names = _metric_names(metrics)
@@ -82,7 +88,7 @@ def evaluate(
     if any(not math.isfinite(value) for value in values.values()):
         raise EvaluationError("evaluation metrics must all be finite")
 
-    _require_clean_child(client, _child_run(client, run_id))
+    _require_clean_attempt(client, _attempt_run(client, run_id))
     _model_evidence(client, model_uri)
     _dataset_evidence(client, dataset_run_id)
     linked_dataset = _evaluation_dataset_input(dataset_input, dataset_run_id)
@@ -108,7 +114,7 @@ def evaluate(
         client.log_param(run_id, "evaluation.prediction_field", prediction_field)
         if score_field is not None:
             client.log_param(run_id, "evaluation.score_field", score_field)
-        _child_run(client, run_id)
+        _attempt_run(client, run_id)
         _model_evidence(client, model_uri)
         _dataset_evidence(client, dataset_run_id)
         timestamp = int(time.time() * 1000)
@@ -135,40 +141,25 @@ def evaluate(
     return values
 
 
-def _child_run(client: MlflowClient, run_id: str) -> Run:
+def _attempt_run(client: MlflowClient, run_id: str) -> Run:
     try:
         run = client.get_run(run_id)
     except Exception as error:
         raise EvaluationError(
-            f"evaluation child Run {run_id!r} cannot be resolved: {error}"
+            f"evaluation attempt Run {run_id!r} cannot be resolved: {error}"
         ) from error
     if run.info.lifecycle_stage != "active" or run.info.status != "RUNNING":
-        raise EvaluationError(f"evaluation child Run {run_id!r} must be active and RUNNING")
-    parent_run_id = run.data.tags.get(_PARENT_RUN_TAG)
-    if not parent_run_id or parent_run_id == run_id:
-        raise EvaluationError(
-            f"evaluation Run {run_id!r} must be a tracked child of a project flow"
-        )
-    try:
-        parent = client.get_run(parent_run_id)
-    except Exception as error:
-        raise EvaluationError(
-            f"evaluation parent Run {parent_run_id!r} cannot be resolved: {error}"
-        ) from error
-    if (
-        parent.info.lifecycle_stage != "active"
-        or parent.info.status != "RUNNING"
-        or parent.info.experiment_id != run.info.experiment_id
-        or parent.data.tags.get(_PARENT_RUN_TAG)
+        raise EvaluationError(f"evaluation attempt Run {run_id!r} must be active and RUNNING")
+    if "mlflow.parentRunId" in run.data.tags or any(
+        not run.data.tags.get(tag) for tag in _ATTEMPT_TAGS
     ):
         raise EvaluationError(
-            f"evaluation parent Run {parent_run_id!r} must be an active RUNNING "
-            "top-level Run in the child's experiment"
+            f"evaluation Run {run_id!r} must be a top-level tracked Prefect attempt"
         )
     return run
 
 
-def _require_clean_child(client: MlflowClient, run: Run) -> None:
+def _require_clean_attempt(client: MlflowClient, run: Run) -> None:
     inputs = run.inputs
     has_inputs = inputs is not None and bool(inputs.dataset_inputs or inputs.model_inputs)
     evaluation_metadata = any(key.startswith("evaluation.") for key in run.data.params) or any(
@@ -178,11 +169,11 @@ def _require_clean_child(client: MlflowClient, run: Run) -> None:
         artifacts = client.list_artifacts(run.info.run_id, "evaluation")
     except Exception as error:
         raise EvaluationError(
-            f"evaluation child Run {run.info.run_id!r} artifacts cannot be inspected: {error}"
+            f"evaluation attempt Run {run.info.run_id!r} artifacts cannot be inspected: {error}"
         ) from error
     if run.data.metrics or has_inputs or evaluation_metadata or artifacts:
         raise EvaluationError(
-            f"evaluation child Run {run.info.run_id!r} already contains evaluation evidence"
+            f"evaluation attempt Run {run.info.run_id!r} already contains evaluation evidence"
         )
 
 

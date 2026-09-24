@@ -12,7 +12,12 @@ from prefect import task
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.inference import predict
-from dsio.tracking import attempt, record_provenance, require_evidence
+from dsio.tracking import (
+    attempt,
+    canonical_dataset_digest,
+    record_provenance,
+    require_evidence,
+)
 from reference_projects.supervised.components import evaluation_arrays
 
 
@@ -31,7 +36,7 @@ def _sources(
 
     dataset_run = require_evidence(dataset_run_id)
     dataset_inputs = [] if dataset_run.inputs is None else dataset_run.inputs.dataset_inputs
-    if len(dataset_inputs) != 1 or dataset_inputs[0].dataset.digest != dataset_digest:
+    if len(dataset_inputs) != 1 or canonical_dataset_digest(dataset_inputs[0]) != dataset_digest:
         raise ValueError("dataset evidence does not match the consumed store")
 
     prefix = "models:/"
@@ -63,10 +68,10 @@ def evaluate_model(
     dataset_run_id: str,
     dataset_digest: str,
     checkpoint_digest: str,
-    parent_run_id: str,
+    experiment_id: str,
     metrics: tuple[str, ...],
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         _, _, dataset_identity, model_identity = _sources(
             store_path=store_path,
             dataset_run_id=dataset_run_id,
@@ -76,7 +81,7 @@ def evaluate_model(
         )
         inputs, targets = evaluation_arrays(store_path, sample_ids)
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": dataset_digest,
                 "checkpoint_digest": checkpoint_digest,
@@ -88,7 +93,7 @@ def evaluate_model(
             components={"evaluation": "dsio.eval.execution:evaluate"},
         )
         values = evaluate(
-            run_id=child.info.run_id,
+            run_id=run.info.run_id,
             model_uri=model_uri,
             dataset_run_id=dataset_run_id,
             inputs=inputs,
@@ -103,7 +108,7 @@ def evaluate_model(
             checkpoint_digest=checkpoint_digest,
         )
         return {
-            "evaluation_run_id": child.info.run_id,
+            "evaluation_run_id": run.info.run_id,
             "metrics": values,
             "identity": identity,
         }
@@ -118,9 +123,9 @@ def infer(
     dataset_run_id: str,
     dataset_digest: str,
     checkpoint_digest: str,
-    parent_run_id: str,
+    experiment_id: str,
 ) -> dict[str, Any]:
-    with attempt(parent_run_id) as child:
+    with attempt(experiment_id) as run:
         source, model_id, dataset_identity, model_identity = _sources(
             store_path=store_path,
             dataset_run_id=dataset_run_id,
@@ -130,7 +135,7 @@ def infer(
         )
         inputs, _ = evaluation_arrays(store_path, sample_ids)
         identity = record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "dataset_digest": dataset_digest,
                 "checkpoint_digest": checkpoint_digest,
@@ -146,7 +151,7 @@ def infer(
         tags["mlflow.data.context"] = "inference"
         tags["dsio.inference.source_run_id"] = dataset_run_id
         client.log_inputs(
-            child.info.run_id,
+            run.info.run_id,
             datasets=[
                 DatasetInput(
                     source.dataset,
@@ -156,7 +161,7 @@ def infer(
             models=[LoggedModelInput(model_id)],
         )
         client.log_dict(
-            child.info.run_id,
+            run.info.run_id,
             {
                 "sample_id": outputs["sample_id"].tolist(),
                 "prediction": outputs["prediction"].tolist(),
@@ -172,7 +177,7 @@ def infer(
             checkpoint_digest=checkpoint_digest,
         )
         return {
-            "inference_run_id": child.info.run_id,
+            "inference_run_id": run.info.run_id,
             "sample_id": outputs["sample_id"].tolist(),
             "prediction": np.asarray(outputs["prediction"]),
             "identity": identity,

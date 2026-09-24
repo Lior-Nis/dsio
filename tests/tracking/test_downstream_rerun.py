@@ -32,9 +32,9 @@ def test_project_reruns_only_downstream_work_from_validated_source_evidence(
         TrackingError,
         attempt,
         evidence_uri,
-        experiment,
         record_provenance,
         require_evidence,
+        resolve_experiment,
     )
 
     client = MlflowClient()
@@ -45,14 +45,12 @@ def test_project_reruns_only_downstream_work_from_validated_source_evidence(
     client.log_dict(source.info.run_id, {"samples": ["a", "b"]}, "data/dataset.json")
     client.set_terminated(source.info.run_id, "FINISHED")
     failed_source = client.create_run(experiment_id)
-    assert record_provenance(
-        failed_source.info.run_id, {"dataset": "algae-v1"}
-    ) == source_identity
+    assert record_provenance(failed_source.info.run_id, {"dataset": "algae-v1"}) == source_identity
     client.set_terminated(failed_source.info.run_id, "FAILED")
     incomplete_source = client.create_run(experiment_id)
-    assert record_provenance(
-        incomplete_source.info.run_id, {"dataset": "algae-v1"}
-    ) == source_identity
+    assert (
+        record_provenance(incomplete_source.info.run_id, {"dataset": "algae-v1"}) == source_identity
+    )
     client.set_terminated(incomplete_source.info.run_id, "FINISHED")
     incompatible_source = client.create_run(experiment_id)
     record_provenance(incompatible_source.info.run_id, {"dataset": "other"})
@@ -78,9 +76,7 @@ def test_project_reruns_only_downstream_work_from_validated_source_evidence(
                     pending.append(item.path)
                 else:
                     path = Path(
-                        client.download_artifacts(
-                            source.info.run_id, item.path, destination
-                        )
+                        client.download_artifacts(source.info.run_id, item.path, destination)
                     )
                     artifacts[item.path] = path.read_bytes()
         return metadata, artifacts
@@ -90,16 +86,16 @@ def test_project_reruns_only_downstream_work_from_validated_source_evidence(
 
     @task
     def evaluate(
-        parent_run_id: str,
+        experiment_id: str,
         source_run_id: str,
         model_uri: str,
         dataset_uri: str,
         threshold: float,
     ) -> tuple[str, str]:
         computations.append(threshold)
-        with attempt(parent_run_id) as child:
+        with attempt(experiment_id) as run:
             identity = record_provenance(
-                child.info.run_id,
+                run.info.run_id,
                 {
                     "source_run_id": source_run_id,
                     "model_uri": model_uri,
@@ -108,30 +104,30 @@ def test_project_reruns_only_downstream_work_from_validated_source_evidence(
                 },
             )
             MlflowClient().log_dict(
-                child.info.run_id,
+                run.info.run_id,
                 {"score": threshold + 0.5},
                 "evaluation/result.json",
             )
-            return child.info.run_id, identity
+            return run.info.run_id, identity
 
     @flow
     def downstream_only(threshold: float, run_id: str) -> tuple[str, str, str]:
-        with experiment("downstream-rerun") as parent:
-            verified = require_evidence(
-                run_id,
-                identity=source_identity,
-                required_artifacts={"model/model.json", "data/dataset.json"},
-            )
-            model_uri = evidence_uri(verified.info.run_id, "model/model.json")
-            dataset_uri = evidence_uri(verified.info.run_id, "data/dataset.json")
-            child_run_id, identity = evaluate(
-                parent.info.run_id,
-                verified.info.run_id,
-                model_uri,
-                dataset_uri,
-                threshold,
-            )
-            return parent.info.run_id, child_run_id, identity
+        resolved = resolve_experiment("downstream-rerun")
+        verified = require_evidence(
+            run_id,
+            identity=source_identity,
+            required_artifacts={"model/model.json", "data/dataset.json"},
+        )
+        model_uri = evidence_uri(verified.info.run_id, "model/model.json")
+        dataset_uri = evidence_uri(verified.info.run_id, "data/dataset.json")
+        attempt_run_id, identity = evaluate(
+            resolved.experiment_id,
+            verified.info.run_id,
+            model_uri,
+            dataset_uri,
+            threshold,
+        )
+        return resolved.experiment_id, attempt_run_id, identity
 
     with prefect_test_harness():
         first = downstream_only(0.4, source.info.run_id)
@@ -152,50 +148,38 @@ def test_project_reruns_only_downstream_work_from_validated_source_evidence(
     downstream_experiment = client.get_experiment_by_name("downstream-rerun")
     assert downstream_experiment is not None
     downstream_runs = client.search_runs([downstream_experiment.experiment_id])
-    parents = [
-        run for run in downstream_runs if "mlflow.parentRunId" not in run.data.tags
-    ]
-    children = [run for run in downstream_runs if "mlflow.parentRunId" in run.data.tags]
-    assert sorted(run.info.status for run in parents) == [
-        "FAILED",
-        "FAILED",
-        "FAILED",
-        "FAILED",
-        "FAILED",
-        "FINISHED",
-        "FINISHED",
-        "FINISHED",
-    ]
-    assert [run.info.status for run in children] == ["FINISHED"] * 3
-    assert first[0] != second[0]
+    assert len(downstream_runs) == 3
+    assert [run.info.status for run in downstream_runs] == ["FINISHED"] * 3
+    assert all("mlflow.parentRunId" not in run.data.tags for run in downstream_runs)
+    assert first[0] == second[0] == repeated[0] == downstream_experiment.experiment_id
     assert first[1] != second[1]
     assert first[2] != second[2]
-    assert repeated[0] not in {first[0], second[0]}
     assert repeated[1] not in {first[1], second[1]}
     assert repeated[2] == first[2]
+    assert (
+        len(
+            {
+                client.get_run(result[1]).data.tags["dsio.prefect.flow_run_id"]
+                for result in (first, second, repeated)
+            }
+        )
+        == 3
+    )
     result_payloads: list[bytes] = []
-    for (parent_run_id, child_run_id, _), threshold in zip(
+    for (_, attempt_run_id, _), threshold in zip(
         (first, second, repeated),
         (0.4, 0.7, 0.4),
         strict=True,
     ):
-        parent = client.get_run(parent_run_id)
-        child = client.get_run(child_run_id)
-        assert parent.info.status == child.info.status == "FINISHED"
-        assert child.data.tags["mlflow.parentRunId"] == parent_run_id
-        assert client.list_artifacts(child_run_id, "evaluation")[0].path == (
+        run = client.get_run(attempt_run_id)
+        assert run.info.status == "FINISHED"
+        assert client.list_artifacts(attempt_run_id, "evaluation")[0].path == (
             "evaluation/result.json"
         )
-        result = Path(
-            client.download_artifacts(
-                child_run_id, "evaluation/result.json", tmp_path
-            )
-        )
+        result = Path(client.download_artifacts(attempt_run_id, "evaluation/result.json", tmp_path))
         result_payloads.append(result.read_bytes())
         assert json.loads(result.read_text()) == {"score": threshold + 0.5}
-        provenance = Path(
-            client.download_artifacts(child_run_id, "provenance.json", tmp_path)
-        )
+        provenance = Path(client.download_artifacts(attempt_run_id, "provenance.json", tmp_path))
         assert json.loads(provenance.read_text())["configuration"] == {
             "dataset_uri": evidence_uri(source.info.run_id, "data/dataset.json"),
             "model_uri": evidence_uri(source.info.run_id, "model/model.json"),

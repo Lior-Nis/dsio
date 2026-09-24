@@ -34,12 +34,15 @@ services:
     restart: unless-stopped
   mlflow:
     build: ./docker/mlflow # ghcr.io/mlflow/mlflow + psycopg2-binary baked in
+    environment:
+      MLFLOW_SERVER_ALLOWED_HOSTS: ${MLFLOW_SERVER_ALLOWED_HOSTS:-localhost:*,127.0.0.1:*}
+      MLFLOW_SERVER_CORS_ALLOWED_ORIGINS: ${MLFLOW_SERVER_CORS_ALLOWED_ORIGINS:-http://localhost:*,http://127.0.0.1:*}
     command: >
       mlflow server --host 0.0.0.0 --port 5000
       --backend-store-uri postgresql+psycopg2://mlflow:mlflow@postgres/mlflow
       --serve-artifacts --artifacts-destination /artifacts
     volumes: [mlartifacts:/artifacts]
-    ports: ["5000:5000"]
+    ports: ["127.0.0.1:5000:5000"]
     depends_on: { postgres: { condition: service_healthy } }
     restart: unless-stopped
 volumes: { pgdata: , mlartifacts: }

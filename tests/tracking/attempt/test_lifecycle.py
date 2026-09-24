@@ -1,4 +1,4 @@
-"""Failure semantics for tracked child Runs."""
+"""Failure semantics for visible tracked attempt Runs."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ def _install_task_context(monkeypatch: pytest.MonkeyPatch) -> None:
     context = SimpleNamespace(
         task=SimpleNamespace(name="tracked"),
         task_run=SimpleNamespace(
+            flow_run_id="flow-run-id",
             task_key="tracked-key",
             id="task-run-id",
             dynamic_key="0",
@@ -23,15 +24,13 @@ def _install_task_context(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tracking.TaskRunContext, "get", staticmethod(lambda: context))
 
 
-def _running_parent(name: str) -> object:
+def _experiment_id(name: str) -> str:
     from mlflow import MlflowClient
 
-    client = MlflowClient()
-    experiment_id = client.create_experiment(name)
-    return client.create_run(experiment_id)
+    return MlflowClient().create_experiment(name)
 
 
-def test_cancellation_kills_the_child_and_propagates_unchanged(
+def test_cancellation_kills_the_attempt_and_propagates_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from mlflow import MlflowClient
@@ -39,18 +38,18 @@ def test_cancellation_kills_the_child_and_propagates_unchanged(
     from dsio.tracking import attempt
 
     _install_task_context(monkeypatch)
-    parent = _running_parent("cancelled-child")
+    experiment_id = _experiment_id("cancelled-attempt")
     cancelled = concurrent.futures.CancelledError("cancelled by Prefect")
 
     with pytest.raises(concurrent.futures.CancelledError) as caught:
-        with attempt(parent.info.run_id) as child:
+        with attempt(experiment_id) as run:
             raise cancelled
 
     assert caught.value is cancelled
-    assert MlflowClient().get_run(child.info.run_id).info.status == "KILLED"
+    assert MlflowClient().get_run(run.info.run_id).info.status == "KILLED"
 
 
-def test_cancellation_after_creation_but_before_yield_kills_the_child(
+def test_cancellation_after_creation_but_before_yield_kills_the_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from mlflow import MlflowClient
@@ -58,78 +57,57 @@ def test_cancellation_after_creation_but_before_yield_kills_the_child(
     from dsio.tracking import attempt
 
     _install_task_context(monkeypatch)
-    parent = _running_parent("cancelled-before-yield")
+    experiment_id = _experiment_id("cancelled-before-yield")
     tracking = importlib.import_module("dsio.tracking.attempt")
-    real_create_child = tracking._create_child
+    real_create_attempt = tracking._create_attempt
     cancelled = concurrent.futures.CancelledError("cancelled before body entry")
 
     def cancel_after_create(*args: object, **kwargs: object) -> object:
-        real_create_child(*args, **kwargs)
+        real_create_attempt(*args, **kwargs)
         raise cancelled
 
-    monkeypatch.setattr(tracking, "_create_child", cancel_after_create)
+    monkeypatch.setattr(tracking, "_create_attempt", cancel_after_create)
 
     with pytest.raises(concurrent.futures.CancelledError) as caught:
-        with attempt(parent.info.run_id):
+        with attempt(experiment_id):
             raise AssertionError("the body must not execute")
 
     assert caught.value is cancelled
-    children = MlflowClient().search_runs(
-        [parent.info.experiment_id],
-        filter_string=f"tags.mlflow.parentRunId = '{parent.info.run_id}'",
-    )
-    assert len(children) == 1
-    assert children[0].info.status == "KILLED"
+    runs = MlflowClient().search_runs([experiment_id])
+    assert len(runs) == 1
+    assert runs[0].info.status == "KILLED"
 
 
-def test_closed_parent_is_rejected_before_a_child_is_created(
+def test_unknown_experiment_is_rejected_before_a_run_is_created(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from mlflow import MlflowClient
-
     from dsio.tracking import TrackingError, attempt
 
     _install_task_context(monkeypatch)
-    client = MlflowClient()
-    parent = _running_parent("closed-parent")
-    client.set_terminated(parent.info.run_id, "FINISHED")
 
-    with pytest.raises(TrackingError, match="must be RUNNING"):
-        with attempt(parent.info.run_id):
+    with pytest.raises(TrackingError, match="Could not resolve MLflow Experiment"):
+        with attempt("missing-experiment"):
             raise AssertionError("the body must not execute")
 
-    runs = client.search_runs([parent.info.experiment_id])
-    assert [run.info.run_id for run in runs] == [parent.info.run_id]
 
-
-def test_deleted_running_parent_is_rejected_before_a_child_is_created(
+def test_deleted_experiment_is_rejected_before_a_run_is_created(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from mlflow import MlflowClient
-    from mlflow.entities import ViewType
 
     from dsio.tracking import TrackingError, attempt
 
     _install_task_context(monkeypatch)
     client = MlflowClient()
-    parent = _running_parent("deleted-parent")
-    client.delete_run(parent.info.run_id)
-    deleted = client.get_run(parent.info.run_id)
-    assert deleted.info.status == "RUNNING"
-    assert deleted.info.lifecycle_stage == "deleted"
+    experiment_id = _experiment_id("deleted-experiment")
+    client.delete_experiment(experiment_id)
 
     with pytest.raises(TrackingError, match="lifecycle stage"):
-        with attempt(parent.info.run_id):
+        with attempt(experiment_id):
             raise AssertionError("the body must not execute")
 
-    runs = client.search_runs(
-        [parent.info.experiment_id],
-        run_view_type=ViewType.ALL,
-    )
-    assert [run.info.run_id for run in runs] == [parent.info.run_id]
 
-
-def test_success_finalization_cancellation_kills_the_child_and_stays_visible(
+def test_success_finalization_cancellation_kills_the_attempt_and_stays_visible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from mlflow import MlflowClient
@@ -137,7 +115,7 @@ def test_success_finalization_cancellation_kills_the_child_and_stays_visible(
     from dsio.tracking import attempt
 
     _install_task_context(monkeypatch)
-    parent = _running_parent("cancelled-finalization")
+    experiment_id = _experiment_id("cancelled-finalization")
     tracking = importlib.import_module("dsio.tracking.attempt")
     real_client = MlflowClient()
     cancelled = concurrent.futures.CancelledError("cancelled while finishing")
@@ -155,11 +133,11 @@ def test_success_finalization_cancellation_kills_the_child_and_stays_visible(
     monkeypatch.setattr(tracking, "MlflowClient", CancelFinishOnceClient)
 
     with pytest.raises(concurrent.futures.CancelledError) as caught:
-        with attempt(parent.info.run_id) as child:
+        with attempt(experiment_id) as run:
             pass
 
     assert caught.value is cancelled
-    assert real_client.get_run(child.info.run_id).info.status == "KILLED"
+    assert real_client.get_run(run.info.run_id).info.status == "KILLED"
 
 
 def test_success_fails_closed_when_finished_status_cannot_be_written(
@@ -170,7 +148,7 @@ def test_success_fails_closed_when_finished_status_cannot_be_written(
     from dsio.tracking import TrackingError, attempt
 
     _install_task_context(monkeypatch)
-    parent = _running_parent("failed-success-finalization")
+    experiment_id = _experiment_id("failed-success-finalization")
     tracking = importlib.import_module("dsio.tracking.attempt")
     real_client = MlflowClient()
 
@@ -187,10 +165,10 @@ def test_success_fails_closed_when_finished_status_cannot_be_written(
     monkeypatch.setattr(tracking, "MlflowClient", FailFinishOnceClient)
 
     with pytest.raises(TrackingError, match="tracking response lost"):
-        with attempt(parent.info.run_id) as child:
+        with attempt(experiment_id) as run:
             pass
 
-    assert real_client.get_run(child.info.run_id).info.status == "FAILED"
+    assert real_client.get_run(run.info.run_id).info.status == "FAILED"
 
 
 def test_cancellation_during_failed_success_recovery_is_preserved(
@@ -201,7 +179,7 @@ def test_cancellation_during_failed_success_recovery_is_preserved(
     from dsio.tracking import attempt
 
     _install_task_context(monkeypatch)
-    parent = _running_parent("cancelled-success-recovery")
+    experiment_id = _experiment_id("cancelled-success-recovery")
     tracking = importlib.import_module("dsio.tracking.attempt")
     real_client = MlflowClient()
     cancelled = concurrent.futures.CancelledError("cancelled during recovery")
@@ -223,11 +201,11 @@ def test_cancellation_during_failed_success_recovery_is_preserved(
     monkeypatch.setattr(tracking, "MlflowClient", CancelRecoveryClient)
 
     with pytest.raises(concurrent.futures.CancelledError) as caught:
-        with attempt(parent.info.run_id) as child:
+        with attempt(experiment_id) as run:
             pass
 
     assert caught.value is cancelled
-    assert real_client.get_run(child.info.run_id).info.status == "KILLED"
+    assert real_client.get_run(run.info.run_id).info.status == "KILLED"
 
 
 def test_body_failure_survives_an_interrupted_terminal_write(
@@ -238,7 +216,7 @@ def test_body_failure_survives_an_interrupted_terminal_write(
     from dsio.tracking import attempt
 
     _install_task_context(monkeypatch)
-    parent = _running_parent("failed-finalization")
+    experiment_id = _experiment_id("failed-finalization")
     tracking = importlib.import_module("dsio.tracking.attempt")
     real_client = MlflowClient()
 
@@ -256,15 +234,15 @@ def test_body_failure_survives_an_interrupted_terminal_write(
     task_error = ValueError("task failed")
 
     with pytest.raises(ValueError) as caught:
-        with attempt(parent.info.run_id) as child:
+        with attempt(experiment_id) as run:
             raise task_error
 
     assert caught.value is task_error
     assert "tracking response lost" in " ".join(task_error.__notes__)
-    assert real_client.get_run(child.info.run_id).info.status == "FAILED"
+    assert real_client.get_run(run.info.run_id).info.status == "FAILED"
 
 
-def test_committed_child_is_reconciled_when_creation_raises(
+def test_committed_attempt_is_reconciled_when_creation_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from mlflow import MlflowClient
@@ -272,7 +250,7 @@ def test_committed_child_is_reconciled_when_creation_raises(
     from dsio.tracking import TrackingError, attempt
 
     _install_task_context(monkeypatch)
-    parent = _running_parent("uncertain-child-creation")
+    experiment_id = _experiment_id("uncertain-attempt-creation")
     tracking = importlib.import_module("dsio.tracking.attempt")
     real_client = MlflowClient()
 
@@ -282,23 +260,20 @@ def test_committed_child_is_reconciled_when_creation_raises(
 
         def create_run(
             self,
-            experiment_id: str,
+            target_experiment_id: str,
             *,
             run_name: str | None,
             tags: dict[str, str],
         ) -> object:
-            real_client.create_run(experiment_id, run_name=run_name, tags=tags)
+            real_client.create_run(target_experiment_id, run_name=run_name, tags=tags)
             raise RuntimeError("response lost after commit")
 
     monkeypatch.setattr(tracking, "MlflowClient", CommitThenFailClient)
 
     with pytest.raises(TrackingError, match="response lost after commit"):
-        with attempt(parent.info.run_id):
+        with attempt(experiment_id):
             raise AssertionError("the body must not execute")
 
-    children = real_client.search_runs(
-        [parent.info.experiment_id],
-        filter_string=f"tags.mlflow.parentRunId = '{parent.info.run_id}'",
-    )
-    assert len(children) == 1
-    assert children[0].info.status == "FAILED"
+    runs = real_client.search_runs([experiment_id])
+    assert len(runs) == 1
+    assert runs[0].info.status == "FAILED"

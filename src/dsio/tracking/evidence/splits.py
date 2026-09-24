@@ -31,7 +31,9 @@ _ARTIFACT_ROOT = "split-evidence"
 _CONTEXT = "mlflow.data.context"
 _MANIFEST_URI = "dsio.split.manifest_uri"
 _MANIFEST_DIGEST = "dsio.split.manifest_digest"
+_DATASET_DIGEST = "dsio.dataset.digest"
 _SOURCE_RUN = "dsio.split.source_run_id"
+_MLFLOW_DIGEST_MAX_LENGTH = 36
 
 
 def record_split_evidence(
@@ -53,6 +55,7 @@ def record_split_evidence(
         context="split",
         manifest_uri=uri,
         manifest_digest=manifest.digest,
+        dataset_digest=examples.digest,
     )
     already_recorded = _preflight_input(run, dataset_input)
 
@@ -68,6 +71,17 @@ def record_split_evidence(
     current = require_writable_run(client, run_id, action="record split evidence")
     _require_persisted_input(current, dataset_input)
     return uri
+
+
+def canonical_dataset_digest(dataset_input: DatasetInput) -> str:
+    """Return DSIO's full digest while validating MLflow's shortened identity."""
+    tags = _input_tags(dataset_input)
+    digest = tags.get(_DATASET_DIGEST, dataset_input.dataset.digest)
+    if dataset_input.dataset.digest != _mlflow_digest(digest):
+        raise TrackingError(
+            "Native MLflow dataset identity does not match its canonical DSIO digest."
+        )
+    return digest
 
 
 def load_split_evidence(
@@ -98,6 +112,7 @@ def load_split_evidence(
         context="split_reuse",
         manifest_uri=uri,
         manifest_digest=manifest.digest,
+        dataset_digest=examples.digest,
         source_run_id=source_run_id,
     )
     consumer = require_writable_run(
@@ -153,7 +168,7 @@ def _dataset_entity(
         config = MetaDataset(  # type: ignore[abstract]
             source=resolved_source,
             name=examples.name,
-            digest=examples.digest,
+            digest=_mlflow_digest(examples.digest),
         ).to_dict()
         return Dataset(
             name=config["name"],
@@ -175,12 +190,14 @@ def _dataset_input(
     context: str,
     manifest_uri: str,
     manifest_digest: str,
+    dataset_digest: str,
     source_run_id: str | None = None,
 ) -> DatasetInput:
     tags = [
         InputTag(_CONTEXT, context),
         InputTag(_MANIFEST_URI, manifest_uri),
         InputTag(_MANIFEST_DIGEST, manifest_digest),
+        InputTag(_DATASET_DIGEST, dataset_digest),
     ]
     if source_run_id is not None:
         tags.append(InputTag(_SOURCE_RUN, source_run_id))
@@ -211,6 +228,9 @@ def _download_manifest(
 
 
 def _source_dataset(run: Run, manifest: SplitFile, manifest_uri: str) -> Dataset:
+    dataset_digest = manifest.store_manifest_sha256
+    if dataset_digest is None:
+        raise TrackingError("Split manifest has no dataset digest.")
     inputs = run.inputs
     if inputs is None:
         raise TrackingError(f"MLflow Run {run.info.run_id!r} has no native dataset inputs.")
@@ -222,14 +242,17 @@ def _source_dataset(run: Run, manifest: SplitFile, manifest_uri: str) -> Dataset
         matches.append(dataset_input)
         if tags.get(_MANIFEST_DIGEST) != manifest.digest:
             raise TrackingError("Source dataset input manifest digest does not match the artifact.")
+        if canonical_dataset_digest(dataset_input) != dataset_digest:
+            raise TrackingError("Source dataset input digest does not match the artifact.")
         if tags != {
             _CONTEXT: "split",
             _MANIFEST_URI: manifest_uri,
             _MANIFEST_DIGEST: manifest.digest,
+            _DATASET_DIGEST: dataset_digest,
         }:
             raise TrackingError("Source native split dataset input tags do not match the artifact.")
         dataset = dataset_input.dataset
-        if dataset.name != manifest.store or dataset.digest != manifest.store_manifest_sha256:
+        if dataset.name != manifest.store:
             raise TrackingError(
                 "Source native MLflow dataset identity does not match the manifest."
             )
@@ -300,6 +323,11 @@ def _same_dataset(left: Dataset, right: Dataset) -> bool:
 
 def _same_dataset_identity(left: Dataset, right: Dataset) -> bool:
     return (left.name, left.digest) == (right.name, right.digest)
+
+
+def _mlflow_digest(digest: str) -> str:
+    """Fit DSIO's canonical digest into MLflow's native 36-character field."""
+    return digest[:_MLFLOW_DIGEST_MAX_LENGTH]
 
 
 def _input_tags(dataset_input: DatasetInput) -> dict[str, str]:

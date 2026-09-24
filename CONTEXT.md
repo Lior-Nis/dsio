@@ -6,7 +6,7 @@ DSio is the shared vocabulary for reproducible machine-learning experiments asse
 
 **Experiment**:
 One identified execution of a project-declared workflow that produces reproducible evidence.
-_Avoid_: Job, pipeline run
+_Avoid_: Job, pipeline run, MLflow Experiment
 
 **Experiment Node**:
 One independently retryable unit within an Experiment's dependency graph.

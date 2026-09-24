@@ -42,53 +42,53 @@ from dsio.contracts import sha256_of
 from dsio.tracking import (
     attempt,
     evidence_uri,
-    experiment,
+    resolve_experiment,
     record_provenance,
     resolve_evidence,
 )
 
 
 @task
-def identify_dataset(dataset: dict[str, object], parent_run_id: str) -> tuple[str, str]:
-    with attempt(parent_run_id) as child:
+def identify_dataset(dataset: dict[str, object], experiment_id: str) -> tuple[str, str]:
+    with attempt(experiment_id) as run:
         digest = sha256_of(dataset)
         record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {"dataset": dataset, "seed": 7},
             components={"identity": "dsio.contracts:sha256_of"},
         )
-        MlflowClient().log_param(child.info.run_id, "dataset_digest", digest)
+        MlflowClient().log_param(run.info.run_id, "dataset_digest", digest)
         MlflowClient().log_dict(
-            child.info.run_id,
+            run.info.run_id,
             {"dataset_digest": digest},
             "outputs/dataset.json",
         )
-        return digest, child.info.run_id
+        return digest, run.info.run_id
 
 
 @flow
 def train_experiment() -> tuple[str, str]:
-    with experiment("algae-training") as parent:
-        digest, child_run_id = identify_dataset(
-            {"name": "algae", "revision": 1}, parent.info.run_id
-        )
-        if not digest:
-            raise ValueError("dataset identity is required")
-        return digest, child_run_id
+    resolved = resolve_experiment("algae-training")
+    digest, run_id = identify_dataset(
+        {"name": "algae", "revision": 1}, resolved.experiment_id
+    )
+    if not digest:
+        raise ValueError("dataset identity is required")
+    return digest, run_id
 
 
 if __name__ == "__main__":
-    digest, child_run_id = train_experiment()
-    identity = MlflowClient().get_run(child_run_id).data.params["dsio.execution_identity"]
+    digest, run_id = train_experiment()
+    identity = MlflowClient().get_run(run_id).data.params["dsio.execution_identity"]
     prior = resolve_evidence(identity, required_artifacts={"outputs/dataset.json"})
     if prior is not None:
         print(evidence_uri(prior.info.run_id, "outputs/dataset.json"))
 ```
 
-No DSio runner or flow wrapper is involved. Each flow execution explicitly creates a fresh
-native MLflow parent Run. Tasks receive its Run ID as ordinary data and open one native child
-Run per Prefect attempt. Evidence is logged with the explicit child Run ID; required output
-validation stays inside the parent context so MLflow records failure instead of false success.
+No DSio runner or flow wrapper is involved. The flow resolves one native MLflow Experiment
+for the workstream. Tasks receive its Experiment ID as ordinary data and open one visible
+top-level Run per Prefect attempt. Evidence is logged with the explicit attempt Run ID;
+required output validation remains project-owned, and failures propagate through Prefect.
 Prefect executes the project's flow through its normal Python entry point.
 `resolve_evidence(...)` treats missing or invalid evidence as a cache miss and returns only a
 native successful MLflow `Run` whose immutable identity, provenance, and required artifacts
@@ -356,11 +356,11 @@ Decisions and their reasons live in `docs/adr/`.
 ## Tracking
 
 MLflow is the source of truth for run evidence (see the accepted generic-spine spec).
-`dsio.tracking.experiment(...)` adds the flow-level lifecycle invariant: a fresh parent Run
-per execution. `dsio.tracking.attempt(parent_run_id)` adds one native child Run for the current
-Prefect task attempt, tagged with its task and retry identity. Both contexts persist
+`dsio.tracking.resolve_experiment(...)` resolves or creates a native MLflow Experiment without creating
+a Run. `dsio.tracking.attempt(experiment_id)` adds one visible top-level Run for the current
+Prefect task attempt, tagged with its flow, task, and retry identity. Attempt Runs persist
 `FINISHED`, `FAILED`, or `KILLED` and fail closed when required lifecycle evidence cannot be
-written. Child logging always targets `child.info.run_id` explicitly; DSio does not introduce
+written. Logging always targets `run.info.run_id` explicitly; DSio does not introduce
 an evidence wrapper or depend on MLflow's ambient active Run inside concurrent tasks.
 `record_provenance(...)` writes the node's safe normalized configuration and deterministic
 identity as native MLflow evidence; projects still own the configuration itself and explicitly

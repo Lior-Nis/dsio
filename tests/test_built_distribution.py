@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -37,6 +38,121 @@ REVIEW_REPORTS = {
     "opencode_review.md",
 }
 EXPECTED_DIGEST = "2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556"
+
+
+def _write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_kaggle_fixtures(root: Path) -> None:
+    titanic_fields = [
+        "PassengerId",
+        "Survived",
+        "Pclass",
+        "Name",
+        "Sex",
+        "Age",
+        "SibSp",
+        "Parch",
+        "Ticket",
+        "Fare",
+        "Cabin",
+        "Embarked",
+    ]
+    passengers = [
+        {
+            "PassengerId": index + 1,
+            "Survived": index % 2,
+            "Pclass": index % 3 + 1,
+            "Name": f"Person {index}",
+            "Sex": "female" if index % 2 else "male",
+            "Age": 18 + index,
+            "SibSp": index % 2,
+            "Parch": 0,
+            "Ticket": f"T-{index // 2}",
+            "Fare": 10 + index,
+            "Cabin": "",
+            "Embarked": ("S", "C", "Q")[index % 3],
+        }
+        for index in range(12)
+    ]
+    _write_csv(root / "titanic/train.csv", titanic_fields, passengers)
+    _write_csv(
+        root / "titanic/test.csv",
+        [field for field in titanic_fields if field != "Survived"],
+        [
+            {
+                key: value
+                for key, value in {**passengers[index], "PassengerId": 101 + index}.items()
+                if key != "Survived"
+            }
+            for index in range(4)
+        ],
+    )
+
+    bike_features = [
+        "datetime",
+        "season",
+        "holiday",
+        "workingday",
+        "weather",
+        "temp",
+        "atemp",
+        "humidity",
+        "windspeed",
+    ]
+    hours = []
+    for index in range(24):
+        casual, registered = index % 5, 5 + index
+        hours.append(
+            {
+                "datetime": f"2011-01-01 {index:02d}:00:00",
+                "season": 1,
+                "holiday": 0,
+                "workingday": int(index % 7 not in (5, 6)),
+                "weather": index % 4 + 1,
+                "temp": 8 + index / 2,
+                "atemp": 9 + index / 2,
+                "humidity": 40 + index,
+                "windspeed": index / 3,
+                "casual": casual,
+                "registered": registered,
+                "count": casual + registered,
+            }
+        )
+    _write_csv(root / "bike/train.csv", [*bike_features, "casual", "registered", "count"], hours)
+    _write_csv(
+        root / "bike/test.csv",
+        bike_features,
+        [
+            {
+                key: value
+                for key, value in {
+                    **hours[index],
+                    "datetime": f"2011-02-01 {index:02d}:00:00",
+                }.items()
+                if key in bike_features
+            }
+            for index in range(4)
+        ],
+    )
+
+    pixels = [f"pixel{index}" for index in range(784)]
+    digit_train = []
+    for row in range(20):
+        values: dict[str, object] = {"label": row % 10}
+        values.update({name: (row * 13 + index) % 256 for index, name in enumerate(pixels)})
+        digit_train.append(values)
+    _write_csv(root / "digits/train.csv", ["label", *pixels], digit_train)
+    _write_csv(
+        root / "digits/test.csv",
+        pixels,
+        [{name: (row * 17 + index) % 256 for index, name in enumerate(pixels)} for row in range(4)],
+    )
 
 
 def _run(*command: str, cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
@@ -106,7 +222,13 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     assert not any("pytorch-cpu" in requirement for requirement in raw_requirements)
     assert SpecifierSet(metadata["Requires-Python"]) == SpecifierSet(">=3.12,<3.15")
     assert not entry_points
-    forbidden_prefixes = ("tests/", "project/", "dsio/torch/", "dsio/cli/")
+    forbidden_prefixes = (
+        "tests/",
+        "project/",
+        "reference_projects/",
+        "dsio/torch/",
+        "dsio/cli/",
+    )
     assert not any(name.startswith(forbidden_prefixes) for name in members)
     assert REMOVED_MEMBERS.isdisjoint(members)
 
@@ -249,7 +371,7 @@ print(json.dumps({
         **{
             key: value
             for key, value in os.environ.items()
-            if not key.startswith(("PREFECT_", "MLFLOW_"))
+            if not key.startswith(("PREFECT_", "MLFLOW_", "KAGGLE_")) and key != "PYTHONPATH"
         },
         "HOME": str(home),
         "PREFECT_HOME": str(prefect_home),
@@ -288,49 +410,54 @@ from prefect import flow, task
 from prefect.testing.utilities import prefect_test_harness
 from mlflow import MlflowClient
 from dsio.contracts import sha256_of
-from dsio.tracking import attempt, evidence_uri, experiment, record_provenance, resolve_evidence
+from dsio.tracking import (
+    attempt,
+    evidence_uri,
+    record_provenance,
+    resolve_evidence,
+    resolve_experiment,
+)
 
 @task
-def identify_dataset(dataset, parent_run_id):
-    with attempt(parent_run_id) as child:
+def identify_dataset(dataset, experiment_id):
+    with attempt(experiment_id) as run:
         digest = sha256_of(dataset)
         record_provenance(
-            child.info.run_id,
+            run.info.run_id,
             {'dataset': dataset, 'seed': 7},
             components={'identity': 'dsio.contracts:sha256_of'},
         )
-        MlflowClient().log_param(child.info.run_id, 'dataset_digest', digest)
+        MlflowClient().log_param(run.info.run_id, 'dataset_digest', digest)
         MlflowClient().log_dict(
-            child.info.run_id,
+            run.info.run_id,
             {'dataset_digest': digest},
             'outputs/dataset.json',
         )
-        return digest, child.info.run_id
+        return digest, run.info.run_id
 
 @flow
 def project_flow():
-    with experiment('installed-wheel-flow') as parent:
-        digest, child_run_id = identify_dataset(
-            {'name': 'algae', 'revision': 1}, parent.info.run_id
-        )
-        assert digest == '2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556'
-        return digest, parent.info.run_id, child_run_id
+    resolved = resolve_experiment('installed-wheel-flow')
+    digest, run_id = identify_dataset(
+        {'name': 'algae', 'revision': 1}, resolved.experiment_id
+    )
+    assert digest == '2ca217b09c12c36031e1078aab6a81e705f1281b1eb841c876f98cef5cb03556'
+    return digest, resolved.experiment_id, run_id
 
 with prefect_test_harness():
-    digest, parent_run_id, child_run_id = project_flow()
+    digest, experiment_id, run_id = project_flow()
 client = MlflowClient()
 print('DSIO_RESULT=' + digest)
-print('DSIO_PARENT_STATUS=' + client.get_run(parent_run_id).info.status)
-print('DSIO_CHILD_STATUS=' + client.get_run(child_run_id).info.status)
-print('DSIO_CHILD_IDENTITY_LENGTH=' + str(
-    len(client.get_run(child_run_id).data.tags['dsio.execution_identity'])
+print('DSIO_RUN_STATUS=' + client.get_run(run_id).info.status)
+print('DSIO_RUN_VISIBLE=' + str(
+    'mlflow.parentRunId' not in client.get_run(run_id).data.tags
 ))
-print('DSIO_CHILD_PARENT_MATCH=' + str(
-    client.get_run(child_run_id).data.tags['mlflow.parentRunId'] == parent_run_id
+print('DSIO_RUN_IDENTITY_LENGTH=' + str(
+    len(client.get_run(run_id).data.tags['dsio.execution_identity'])
 ))
-identity = client.get_run(child_run_id).data.params['dsio.execution_identity']
+identity = client.get_run(run_id).data.params['dsio.execution_identity']
 resolved = resolve_evidence(identity, required_artifacts={'outputs/dataset.json'})
-print('DSIO_REUSED_RUN_MATCH=' + str(resolved.info.run_id == child_run_id))
+print('DSIO_REUSED_RUN_MATCH=' + str(resolved.info.run_id == run_id))
 print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.json'))
 """
     flow_result = subprocess.run(
@@ -342,30 +469,60 @@ print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.j
         capture_output=True,
     )
     assert f"DSIO_RESULT={EXPECTED_DIGEST}" in flow_result.stdout
-    assert "DSIO_PARENT_STATUS=FINISHED" in flow_result.stdout
-    assert "DSIO_CHILD_STATUS=FINISHED" in flow_result.stdout
-    assert "DSIO_CHILD_IDENTITY_LENGTH=64" in flow_result.stdout
-    assert "DSIO_CHILD_PARENT_MATCH=True" in flow_result.stdout
+    assert "DSIO_RUN_STATUS=FINISHED" in flow_result.stdout
+    assert "DSIO_RUN_VISIBLE=True" in flow_result.stdout
+    assert "DSIO_RUN_IDENTITY_LENGTH=64" in flow_result.stdout
     assert "DSIO_REUSED_RUN_MATCH=True" in flow_result.stdout
     assert "DSIO_REUSED_URI=runs:/" in flow_result.stdout
 
     shutil.copytree(ROOT / "reference_projects", work / "reference_projects")
+    _write_kaggle_fixtures(work / "kaggle-data")
     reference_probe = """
+import pathlib
+import socket
+import sys
+
+original_connect = socket.socket.connect
+def local_only(sock, address):
+    if isinstance(address, tuple) and address[0] not in {'127.0.0.1', '::1', 'localhost'}:
+        raise AssertionError(f'consumer attempted external network access: {address!r}')
+    return original_connect(sock, address)
+socket.socket.connect = local_only
+
+import dsio
 from prefect.testing.utilities import prefect_test_harness
 from mlflow import MlflowClient
+from reference_projects.kaggle.bike_sharing.flow import bike_sharing_flow
+from reference_projects.kaggle.digit_recognizer.flow import digit_recognizer_flow
+from reference_projects.kaggle.titanic.flow import titanic_flow
 from reference_projects.self_supervised.flow import self_supervised_flow
 from reference_projects.supervised.flow import supervised_flow
+
+environment = pathlib.Path(sys.prefix).resolve()
+consumer_root = pathlib.Path.cwd().resolve()
+assert pathlib.Path(dsio.__file__).resolve().is_relative_to(environment)
+for consumer_flow in (titanic_flow, bike_sharing_flow, digit_recognizer_flow):
+    consumer_source = pathlib.Path(consumer_flow.fn.__code__.co_filename).resolve()
+    assert consumer_source.is_relative_to(consumer_root)
 
 with prefect_test_harness():
     supervised = supervised_flow('reference-workspace', seed=19)
     ssl = self_supervised_flow('reference-workspace', seed=23)
+    titanic = titanic_flow('kaggle-data/titanic', 'portfolio-workspace', seed=7)
+    bike = bike_sharing_flow('kaggle-data/bike', 'portfolio-workspace', seed=11)
+    digits = digit_recognizer_flow('kaggle-data/digits', 'portfolio-workspace', seed=13)
 client = MlflowClient()
-print('REFERENCE_PARENT_STATUS=' + client.get_run(supervised['parent_run_id']).info.status)
 print('REFERENCE_TRAIN_STATUS=' + client.get_run(supervised['train_run_id']).info.status)
 print('REFERENCE_PREDICTIONS=' + str(len(supervised['prediction'])))
-print('SSL_PARENT_STATUS=' + client.get_run(ssl['parent_run_id']).info.status)
 print('SSL_TRAIN_STATUS=' + client.get_run(ssl['train_run_id']).info.status)
 print('SSL_PREDICTIONS=' + str(len(ssl['prediction'])))
+print('TITANIC_STATUS=' + client.get_run(titanic['train_run_id']).info.status)
+print('TITANIC_PREDICTIONS=' + str(len(titanic['prediction'])))
+print('BIKE_STATUS=' + client.get_run(bike['train_run_id']).info.status)
+print('BIKE_PREDICTIONS=' + str(len(bike['prediction'])))
+print('DIGITS_STATUS=' + client.get_run(digits['train_run_id']).info.status)
+print('DIGITS_PREDICTIONS=' + str(len(digits['prediction'])))
+print('PORTFOLIO_ISOLATED=True')
 """
     reference_result = subprocess.run(
         [str(python), "-B", "-c", reference_probe],
@@ -375,9 +532,14 @@ print('SSL_PREDICTIONS=' + str(len(ssl['prediction'])))
         text=True,
         capture_output=True,
     )
-    assert "REFERENCE_PARENT_STATUS=FINISHED" in reference_result.stdout
     assert "REFERENCE_TRAIN_STATUS=FINISHED" in reference_result.stdout
     assert "REFERENCE_PREDICTIONS=2" in reference_result.stdout
-    assert "SSL_PARENT_STATUS=FINISHED" in reference_result.stdout
     assert "SSL_TRAIN_STATUS=FINISHED" in reference_result.stdout
     assert "SSL_PREDICTIONS=2" in reference_result.stdout
+    assert "TITANIC_STATUS=FINISHED" in reference_result.stdout
+    assert "TITANIC_PREDICTIONS=4" in reference_result.stdout
+    assert "BIKE_STATUS=FINISHED" in reference_result.stdout
+    assert "BIKE_PREDICTIONS=4" in reference_result.stdout
+    assert "DIGITS_STATUS=FINISHED" in reference_result.stdout
+    assert "DIGITS_PREDICTIONS=4" in reference_result.stdout
+    assert "PORTFOLIO_ISOLATED=True" in reference_result.stdout

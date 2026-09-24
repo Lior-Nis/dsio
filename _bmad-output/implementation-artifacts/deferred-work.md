@@ -8,6 +8,10 @@
 
 ## Deferred from: canonical supervised reference cleanup (2026-09-23)
 
-- Build a small portfolio of Kaggle competition consumer projects that run end to end through DSIO, covering grouped classification, temporal regression, and self-supervised representation reuse. Keep competition-specific ingestion, components, and Prefect DAGs outside `src/dsio`; admit only independently reusable gaps through the governed experimental process.
 - Bind export inputs to the originating training evidence so a checkpoint cannot be paired with unrelated dataset or split metadata while producing plausible provenance. Treat this as cross-cutting lineage hardening for every project-owned export task, not a supervised-only check.
 - Define how project-owned export reconstructs versioned model and preprocessor components from checkpoint/run evidence instead of assuming the currently imported class still matches an older checkpoint.
+
+## Deferred from: Kaggle consumer portfolio (2026-09-24)
+
+- Correct the stable `purged_walk_forward` multi-fold semantics so every fold is strictly causal and admits no post-test training rows. The Bike Sharing consumer deliberately uses only the final single fold until that core split change is separately approved.
+- Extend DSIO execution provenance so consumer commit/dirty-patch identity, dependency-lock digest, package digest, relevant command, and environment are captured consistently by the shared spine rather than reimplemented by each project flow.

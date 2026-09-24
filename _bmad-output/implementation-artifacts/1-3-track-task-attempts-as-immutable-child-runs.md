@@ -6,6 +6,8 @@ baseline_commit: 033f9fad40b5919956f7a03c1d348fd8c7d09c80
 
 Status: done
 
+> Historical implementation record. ADR-0020 supersedes child Runs; Attempts are now visible top-level Runs as defined by the current Story 1.3 in `epics.md`.
+
 ## Story
 
 As an experiment author,
