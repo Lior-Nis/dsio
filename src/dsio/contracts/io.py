@@ -1,7 +1,7 @@
 """Durable file writes.
 
-Used by a run's local provenance files (``dsio.runs.record``), the data store and the
-splits store. A partially-written provenance file or manifest is worse than a missing one,
+Used by recorded evidence, the data store and the splits store. A partially-written
+provenance file or manifest is worse than a missing one,
 because it looks complete. Model artifacts go through the MLflow client instead.
 """
 

@@ -9,16 +9,11 @@ from dsio.experimental.admission.syntax.imports import expression_name
 _REGISTRATION_CALLABLES = frozenset(
     {
         "dsio.eval.metrics.metric",
-        "dsio.train.runner.preflight",
-        "dsio.train.runner.runner",
     }
 )
 _REGISTRIES = frozenset(
     {
-        "dsio.config.schema.TASKS",
         "dsio.eval.metrics.METRICS",
-        "dsio.train.runner.PREFLIGHTS",
-        "dsio.train.runner.RUNNERS",
     }
 )
 

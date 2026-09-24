@@ -33,10 +33,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Decision 6 (fold-as-process): the artifact one run writes for its one fold. `dsio.train`
-# imports this name rather than defining its own copy, so a pooling reader (`dsio.eval.pool`)
-# and the writer (`dsio.train.torch_task._write_predictions`) can never drift apart on the
-# filename they agree on.
+# Historical fold-pooling artifacts use this shared filename.
 PREDICTIONS_FILE = "predictions.npz"
 
 

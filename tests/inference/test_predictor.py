@@ -25,8 +25,8 @@ from dsio.inference import (
 )
 from dsio.model.module import DsioModule
 from dsio.tracking import record_provenance
+from dsio.tracking.client import resolve_tracking_uri
 from dsio.train.artifacts import ArtifactRef, load_artifact, save_artifact
-from dsio.train.tracking import resolve_tracking_uri
 
 
 class AddOne(nn.Module):

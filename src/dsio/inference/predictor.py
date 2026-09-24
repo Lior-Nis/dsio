@@ -17,8 +17,8 @@ from torch import Tensor, nn
 
 from dsio.config.components import ComponentError, require_importable_component
 from dsio.model.module import DsioModule
+from dsio.tracking.client import resolve_tracking_uri
 from dsio.train.artifacts import ArtifactIntegrityError, ArtifactRef, load_artifact
-from dsio.train.tracking import resolve_tracking_uri
 
 type Prediction = dict[str, Any]
 type Validator = Callable[[Mapping[str, Any]], None]
