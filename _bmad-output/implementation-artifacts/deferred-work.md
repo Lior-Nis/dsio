@@ -13,5 +13,4 @@
 
 ## Deferred from: Kaggle consumer portfolio (2026-09-24)
 
-- Correct the stable `purged_walk_forward` multi-fold semantics so every fold is strictly causal and admits no post-test training rows. The Bike Sharing consumer deliberately uses only the final single fold until that core split change is separately approved.
 - Extend DSIO execution provenance so consumer commit/dirty-patch identity, dependency-lock digest, package digest, relevant command, and environment are captured consistently by the shared spine rather than reimplemented by each project flow.

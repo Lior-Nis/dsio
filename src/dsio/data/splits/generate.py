@@ -20,6 +20,7 @@ from dsio.data.splits.temporal import TemporalBounds, TemporalSpec, apply, walk_
 from dsio.data.splits.validation import validate
 
 ALGORITHM_VERSION = "1"
+TEMPORAL_ALGORITHM_VERSION = "2"
 _SKLEARN_ALGORITHMS = {
     "group_kfold",
     "group_shuffle",
@@ -88,7 +89,11 @@ def generate(
             examples_derivation=source.derivation,
             name=name,
             algorithm=algorithm,
-            algorithm_version=ALGORITHM_VERSION,
+            algorithm_version=(
+                TEMPORAL_ALGORITHM_VERSION
+                if algorithm == "purged_walk_forward"
+                else ALGORITHM_VERSION
+            ),
             parameters=normalized,
             seed=seed,
             dependencies=dependencies,

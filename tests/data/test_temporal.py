@@ -202,6 +202,39 @@ def test_walk_forward_marches_test_forward(market: SignalStore, index) -> None:
     assert len(set(origins)) == 4
 
 
+@pytest.mark.parametrize("mode", ["expanding", "rolling"])
+def test_walk_forward_never_trains_on_the_future(market: SignalStore, index, mode: str) -> None:
+    t_start, t_end = window_times(market, index, unit="row")
+    folds = walk_forward(
+        t_start,
+        t_end,
+        TemporalSpec(
+            n_splits=4,
+            test_fraction=0.15,
+            label_horizon=25,
+            mode=mode,
+        ),
+    )
+
+    for bounds in folds:
+        train = apply(bounds, t_start, t_end, part="train")
+        test = apply(bounds, t_start, t_end, part="test")
+        assert train.any() and test.any()
+        assert np.max(t_end[train] + bounds.label_horizon) <= np.min(t_start[test])
+
+
+def test_rolling_walk_forward_keeps_a_fixed_training_span(market: SignalStore, index) -> None:
+    t_start, t_end = window_times(market, index, unit="row")
+    folds = walk_forward(
+        t_start,
+        t_end,
+        TemporalSpec(n_splits=4, test_fraction=0.15, mode="rolling"),
+    )
+
+    widths = [bounds.spans["train"][0].end - bounds.spans["train"][0].start for bounds in folds]
+    assert widths == pytest.approx([widths[0]] * len(widths))
+
+
 def test_walk_forward_rejects_an_oversized_test_fraction(market: SignalStore, index) -> None:
     t_start, t_end = window_times(market, index, unit="row")
     with pytest.raises(TemporalError, match="too large"):

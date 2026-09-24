@@ -118,6 +118,22 @@ def validate(examples: Examples, manifest: SplitFile) -> None:
                     f"split {manifest.name!r} fold {fold.index} temporal span roles must "
                     f"be exactly {sorted(required_roles)}, got {sorted(temporal_roles)}"
                 )
+            train_role, evaluation_role = manifest.required_roles
+            empty_temporal_roles = [
+                role for role in manifest.required_roles if not fold.temporal.spans[role]
+            ]
+            if empty_temporal_roles:
+                raise SplitError(
+                    f"split {manifest.name!r} fold {fold.index} role "
+                    f"{empty_temporal_roles[0]!r} has no temporal spans"
+                )
+            evaluation_start = min(span.start for span in fold.temporal.spans[evaluation_role])
+            if any(span.end > evaluation_start for span in fold.temporal.spans[train_role]):
+                raise SplitError(
+                    f"split {manifest.name!r} fold {fold.index} is not causal; "
+                    f"role {train_role!r} extends beyond the start of "
+                    f"{evaluation_role!r}"
+                )
         owners: dict[str, str] = {}
         role_groups: dict[str, set[str]] = {}
         for role, assignments in fold.assignments.items():
