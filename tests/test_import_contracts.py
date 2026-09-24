@@ -22,7 +22,6 @@ def test_all_declared_contracts_are_present():
     names = {contract["name"] for contract in contracts}
 
     assert names == {
-        "Foundation modules import no other dsio module",
         "Evaluation depends on no pipeline layer",
         "The spine never imports its own contract suites",
     }

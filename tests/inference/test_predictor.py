@@ -274,7 +274,7 @@ def test_checkpoint_lineage_returns_recorded_component_constructors() -> None:
 def test_checkpoint_components_require_the_recorded_execution_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from dsio.tracking._execution import capture_execution
+    from dsio.tracking.execution import capture_execution
 
     client = MlflowClient(resolve_tracking_uri())
     experiment_id = client.create_experiment("predictor-versioned-components")

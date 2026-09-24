@@ -1,4 +1,4 @@
-"""Capture process, consumer-repository, dependency, and DSIO package identity."""
+"""Compose process, repository, environment, and installed-package identity."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Any
 
-from dsio.runs.provenance import capture_env, capture_git, working_tree_patch
+from dsio.tracking.execution.environment import capture_environment
+from dsio.tracking.execution.git import capture_git, working_tree_patch
 
 _GIT_TIMEOUT_SECONDS = 15
 _REDACTED = "<redacted>"
@@ -18,11 +19,9 @@ _REDACTED = "<redacted>"
 def capture_execution(*, secrets: Collection[str] = ()) -> tuple[dict[str, Any], bytes | None]:
     """Return identity-bearing execution facts and an optional reconstructible patch."""
     cwd = Path.cwd()
-    repo_root = _repository_root(cwd)
-    project_root = repo_root or cwd
+    project_root = _repository_root(cwd) or cwd
     git = capture_git(cwd=project_root)
-    lock = project_root / "uv.lock"
-    environment = capture_env(lock_path=lock)
+    environment = capture_environment(lock_path=project_root / "uv.lock")
     patch = working_tree_patch(cwd=project_root) if git.dirty else None
     return (
         {
@@ -47,18 +46,15 @@ def _repository_root(cwd: Path) -> Path | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if completed.returncode != 0:
-        return None
     rendered = completed.stdout.strip()
-    return Path(rendered) if rendered else None
+    return Path(rendered) if completed.returncode == 0 and rendered else None
 
 
 def _package_digest() -> str:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     digest = hashlib.sha256()
     for path in sorted(root.rglob("*.py")):
-        relative = path.relative_to(root).as_posix().encode("utf-8")
-        digest.update(relative)
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
@@ -77,11 +73,8 @@ def _redact_command(command: Sequence[str], secrets: Collection[str]) -> list[st
         if token.startswith("--"):
             option, separator, _ = token[2:].partition("=")
             if option in names:
-                if separator:
-                    redacted.append(f"--{option}={_REDACTED}")
-                else:
-                    redacted.append(token)
-                    hide_next = True
+                redacted.append(f"--{option}={_REDACTED}" if separator else token)
+                hide_next = not separator
                 continue
         redacted.append(token)
     return redacted

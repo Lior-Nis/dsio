@@ -15,9 +15,9 @@ from dsio.batches import (
     WindowBatch,
     WindowItem,
 )
+from dsio.data.loading.loaders import dataloader_kwargs
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex, assert_index_matches_store
-from dsio.runs.seeding import dataloader_kwargs
 
 _TargetDataset = NewType("_TargetDataset", Dataset[TrainingItem])
 

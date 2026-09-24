@@ -3,7 +3,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from dsio.runs.provenance import capture_env, capture_git, working_tree_patch
+from dsio.tracking.execution.environment import capture_environment
+from dsio.tracking.execution.git import capture_git, working_tree_patch
 
 
 def test_clean_and_dirty_git_identity(git_repo: Path) -> None:
@@ -68,6 +69,6 @@ def test_missing_git_yields_unknown_identity(tmp_path: Path) -> None:
 
 
 def test_environment_capture_hashes_the_lockfile() -> None:
-    environment = capture_env(lock_path=Path("uv.lock"))
+    environment = capture_environment(lock_path=Path("uv.lock"))
     assert environment.python
     assert environment.lock_sha256 is not None
