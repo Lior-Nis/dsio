@@ -16,6 +16,7 @@ from dsio.data.splits import generate
 from dsio.data.splits.models import SplitError, SplitFile
 from dsio.tracking import (
     TrackingError,
+    canonical_dataset_digest,
     evidence_uri,
     load_split_evidence,
     record_provenance,
@@ -113,11 +114,13 @@ def test_split_evidence_round_trips_as_native_mlflow_lineage(tmp_path: Path) -> 
     assert source_input.dataset.name == examples.name
     assert source_input.dataset.digest == examples.digest
     assert _tags(source_input) == {
+        "dsio.dataset.digest": examples.digest,
         "dsio.split.manifest_digest": manifest.digest,
         "dsio.split.manifest_uri": uri,
         "mlflow.data.context": "split",
     }
     assert _tags(consumer_input) == {
+        "dsio.dataset.digest": examples.digest,
         "dsio.split.manifest_digest": manifest.digest,
         "dsio.split.manifest_uri": uri,
         "dsio.split.source_run_id": source_run_id,
@@ -129,6 +132,28 @@ def test_split_evidence_round_trips_as_native_mlflow_lineage(tmp_path: Path) -> 
         "split-evidence",
     ]
     assert mlflow.active_run() is None
+
+
+def test_split_evidence_preserves_a_digest_longer_than_mlflow_accepts(tmp_path: Path) -> None:
+    client = MlflowClient()
+    experiment_id = _experiment(client)
+    source_run_id = _run(client, experiment_id, "split")
+    examples = _examples(digest="a" * 64)
+    manifest = _manifest(examples)
+
+    uri = record_split_evidence(
+        source_run_id,
+        examples,
+        manifest,
+        source=tmp_path / "cohort.store",
+    )
+    client.set_terminated(source_run_id, "FINISHED")
+    consumer_run_id = _run(client, experiment_id, "train")
+
+    assert load_split_evidence(uri, examples, consumer_run_id=consumer_run_id) == manifest
+    source_input = client.get_run(source_run_id).inputs.dataset_inputs[0]
+    assert source_input.dataset.digest == "a" * 36
+    assert canonical_dataset_digest(source_input) == examples.digest
 
 
 def test_exact_record_and_reuse_retries_are_idempotent(tmp_path: Path) -> None:
@@ -214,6 +239,7 @@ def test_recording_rejects_a_manifest_uri_bound_to_another_dataset(tmp_path: Pat
                 Dataset("other", "other", "local", '{"uri": "other.store"}'),
                 [
                     InputTag("mlflow.data.context", "split"),
+                    InputTag("dsio.dataset.digest", examples.digest),
                     InputTag("dsio.split.manifest_uri", uri),
                     InputTag("dsio.split.manifest_digest", manifest.digest),
                 ],
@@ -378,6 +404,7 @@ def test_reuse_rejects_mismatched_native_dataset_lineage(
                 dataset,
                 [
                     InputTag("mlflow.data.context", "split"),
+                    InputTag("dsio.dataset.digest", examples.digest),
                     InputTag("dsio.split.manifest_uri", uri),
                     InputTag(
                         "dsio.split.manifest_digest",

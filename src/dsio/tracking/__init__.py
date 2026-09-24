@@ -4,6 +4,7 @@ from dsio.tracking._lifecycle import TrackingError
 from dsio.tracking.attempt import attempt
 from dsio.tracking.cache import prefect_cache_key
 from dsio.tracking.evidence import (
+    canonical_dataset_digest,
     evidence_uri,
     load_split_evidence,
     record_split_evidence,
@@ -16,6 +17,7 @@ from dsio.tracking.provenance import execution_identity, normalize, record_prove
 __all__ = [
     "TrackingError",
     "attempt",
+    "canonical_dataset_digest",
     "evidence_uri",
     "execution_identity",
     "experiment",

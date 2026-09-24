@@ -14,7 +14,7 @@ from mlflow import MlflowClient
 
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
-from dsio.tracking import TrackingError, experiment
+from dsio.tracking import TrackingError, canonical_dataset_digest, experiment
 
 
 def test_training_and_inference_share_channel_first_signal_layout(
@@ -191,7 +191,9 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
 
         training = client.get_run(result["train_run_id"])
         assert len(training.inputs.dataset_inputs) == 1
-        assert training.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
+        assert canonical_dataset_digest(training.inputs.dataset_inputs[0]) == result[
+            "dataset_digest"
+        ]
         provenance_path = client.download_artifacts(
             result["train_run_id"], "provenance.json", str(tmp_path / result["train_run_id"])
         )
@@ -293,7 +295,9 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         }
 
         inference = client.get_run(result["inference_run_id"])
-        assert inference.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
+        assert canonical_dataset_digest(inference.inputs.dataset_inputs[0]) == result[
+            "dataset_digest"
+        ]
         assert [item.model_id for item in inference.inputs.model_inputs] == [
             result["model_uri"].removeprefix("models:/")
         ]

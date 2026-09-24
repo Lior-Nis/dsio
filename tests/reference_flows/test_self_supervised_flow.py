@@ -15,6 +15,7 @@ from mlflow import MlflowClient
 
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
+from dsio.tracking import canonical_dataset_digest
 from dsio.train.augmentation import TwoView
 
 
@@ -278,7 +279,9 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
             assert run.data.tags["dsio.execution_identity"] == result["identities"][role]
 
         training = client.get_run(result["train_run_id"])
-        assert training.inputs.dataset_inputs[0].dataset.digest == result["dataset_digest"]
+        assert canonical_dataset_digest(training.inputs.dataset_inputs[0]) == result[
+            "dataset_digest"
+        ]
         split_provenance_path = client.download_artifacts(
             result["split_run_id"], "provenance.json", str(tmp_path / result["split_run_id"])
         )

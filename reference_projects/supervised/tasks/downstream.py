@@ -12,7 +12,12 @@ from prefect import task
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.inference import predict
-from dsio.tracking import attempt, record_provenance, require_evidence
+from dsio.tracking import (
+    attempt,
+    canonical_dataset_digest,
+    record_provenance,
+    require_evidence,
+)
 from reference_projects.supervised.components import evaluation_arrays
 
 
@@ -31,7 +36,7 @@ def _sources(
 
     dataset_run = require_evidence(dataset_run_id)
     dataset_inputs = [] if dataset_run.inputs is None else dataset_run.inputs.dataset_inputs
-    if len(dataset_inputs) != 1 or dataset_inputs[0].dataset.digest != dataset_digest:
+    if len(dataset_inputs) != 1 or canonical_dataset_digest(dataset_inputs[0]) != dataset_digest:
         raise ValueError("dataset evidence does not match the consumed store")
 
     prefix = "models:/"
