@@ -12,6 +12,7 @@ from lightning.pytorch.loggers import MLFlowLogger
 from mlflow import MlflowClient
 from prefect import task
 
+from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.model.module import DsioModule
@@ -47,6 +48,11 @@ FOLD = 0
 BATCH_SIZE = 4
 NUM_WORKERS = 0
 OPTIMIZER_PARAMETERS = {"lr": 0.02}
+MODEL: ComponentConfig = {
+    "reference": "reference_projects.kaggle.titanic.components:PassengerClassifier",
+    "parameters": {},
+}
+PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters": {}}
 
 
 @task(persist_result=False)
@@ -75,7 +81,7 @@ def train(
             drop_last=DROP_LAST,
         )
         module = DsioModule(
-            model=PassengerClassifier(),
+            model=resolve_component(MODEL, expected=PassengerClassifier),
             objective=PassengerObjective(),
             optimizer_factory=torch.optim.SGD,
             optimizer_parameters=OPTIMIZER_PARAMETERS,
@@ -116,9 +122,10 @@ def train(
                 "dataset_factory": (
                     "reference_projects.kaggle.titanic.components:passenger_samples"
                 ),
-                "model": "reference_projects.kaggle.titanic.components:PassengerClassifier",
+                "model": MODEL,
                 "objective": "reference_projects.kaggle.titanic.components:PassengerObjective",
                 "optimizer": "torch.optim:SGD",
+                "preprocessor": PREPROCESSOR,
             },
         )
         log_capabilities(logger, capabilities)

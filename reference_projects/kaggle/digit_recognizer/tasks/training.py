@@ -13,6 +13,7 @@ from lightning.pytorch.loggers import MLFlowLogger
 from mlflow import MlflowClient
 from prefect import task
 
+from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
@@ -53,6 +54,14 @@ BATCH_SIZE = 4
 NUM_WORKERS = 0
 PRETRAIN_OPTIMIZER_PARAMETERS = {"lr": 0.001}
 CLASSIFIER_OPTIMIZER_PARAMETERS = {"lr": 0.002}
+CLASSIFIER: ComponentConfig = {
+    "reference": ("reference_projects.kaggle.digit_recognizer.components:FrozenDigitClassifier"),
+    "parameters": {},
+}
+PREPROCESSOR: ComponentConfig = {
+    "reference": "reference_projects.kaggle.digit_recognizer.components:ScalePixels",
+    "parameters": {},
+}
 
 
 def _data_module(
@@ -225,7 +234,7 @@ def train_classifier(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         seed_everything(seed, workers=True, verbose=False)
-        model = FrozenDigitClassifier()
+        model = resolve_component(CLASSIFIER, expected=FrozenDigitClassifier)
         model.encoder.load_state_dict(state)
         model.freeze_encoder()
         data_module = _data_module(store, manifest, seed, labelled_digit_samples)
@@ -262,13 +271,12 @@ def train_classifier(
                 "dataset_factory": (
                     "reference_projects.kaggle.digit_recognizer.components:labelled_digit_samples"
                 ),
-                "model": (
-                    "reference_projects.kaggle.digit_recognizer.components:FrozenDigitClassifier"
-                ),
+                "model": CLASSIFIER,
                 "objective": (
                     "reference_projects.kaggle.digit_recognizer.components:ClassificationObjective"
                 ),
                 "optimizer": "torch.optim:Adam",
+                "preprocessor": PREPROCESSOR,
             },
         )
         log_capabilities(trainer.logger, execution)

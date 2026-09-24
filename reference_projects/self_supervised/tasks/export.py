@@ -7,13 +7,12 @@ from typing import Any
 import torch
 from prefect import task
 
-from dsio.config.components import ComponentConfig, resolve_component
+from dsio.config.components import resolve_component
 from dsio.inference import build_predictor, log_predictor, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef
 from reference_projects.self_supervised.components import (
     EmbeddingNorm,
-    TinyEmbedding,
     validate_embedding_norm,
 )
 from reference_projects.supervised.components import evaluation_arrays
@@ -29,35 +28,30 @@ def export_model(
     with attempt(experiment_id) as run:
         inputs, _ = evaluation_arrays(data["store_path"], split["assignments"]["test"])
         reference = ArtifactRef.model_validate(training["checkpoint"])
-        require_checkpoint_lineage(
+        components = require_checkpoint_lineage(
             reference,
             training_run_id=training["train_run_id"],
             training_identity=training["identity"],
             dataset_digest=data["dataset_digest"],
             split_digest=split["split_digest"],
+            components=("model", "preprocessor"),
         )
-        preprocessor_config: ComponentConfig = {
-            "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
-            "parameters": {
-                "channels": TinyEmbedding.input_shape[0],
-                "time": TinyEmbedding.input_shape[1],
-            },
-        }
-        preprocessor = resolve_component(preprocessor_config, expected=torch.nn.Module)
+        model = resolve_component(components["model"], expected=torch.nn.Module)
+        preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         identity = record_provenance(
             run.info.run_id,
             {
                 "checkpoint_digest": reference.digest,
                 "dataset_digest": data["dataset_digest"],
                 "export_form": "pyfunc",
-                "preprocessor": preprocessor_config,
+                "preprocessor": components["preprocessor"],
                 "split_digest": split["split_digest"],
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
-                "model": "reference_projects.self_supervised.components:TinyEmbedding",
+                "model": components["model"],
                 "normalizer": "reference_projects.self_supervised.components:EmbeddingNorm",
-                "preprocessor": preprocessor_config["reference"],
+                "preprocessor": components["preprocessor"],
                 "validator": (
                     "reference_projects.self_supervised.components:validate_embedding_norm"
                 ),
@@ -69,7 +63,7 @@ def export_model(
         }
         predictor = build_predictor(
             reference,
-            model=TinyEmbedding(),
+            model=model,
             preprocessor=preprocessor,
             normalizer=EmbeddingNorm(),
             validator=validate_embedding_norm,
