@@ -653,10 +653,9 @@ def build_index(
     Such a recording cannot be windowed — that much is arithmetic — but it also vanishes
     without trace: the index names only entities it holds windows for, so a store whose
     every short session was silently omitted produces a perfectly consistent index over a
-    corpus that is not the one on disk. Refusing by default is the same stance
-    :mod:`dsio.eval.pool` takes toward a fold that never ran. ``"drop"`` is the explicit
-    opt-out, because deciding that short recordings do not belong in a view is a legitimate
-    choice — it just has to be a choice.
+    corpus that is not the one on disk. ``"drop"`` is the explicit opt-out, because deciding
+    that short recordings do not belong in a view is a legitimate choice — it just has to
+    be a choice.
 
     A trailing remainder truncated by ``drop_last_partial`` is *not* refused: a partial
     window is meaningless on a waveform, and discarding one is what the flag is for. It is

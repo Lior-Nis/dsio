@@ -8,10 +8,8 @@ redo the experiment without reading that ADR first.
 
 Two reasons these are not simply re-exported from scikit-learn.
 
-**Dependency.** sklearn is an optional extra. If the metric path needed it, the fixed
-artifact contract — the thing every runner writes and every comparison reads — would be
-untestable in a bare install, and a torch-only or forecast-only project would drag in
-sklearn to compute an RMSE.
+**Dependency.** sklearn is an optional extra. Requiring it here would make a torch-only or
+forecast-only project install sklearn just to compute an RMSE.
 
 **Control over the one that matters.** Average precision is dsio's headline metric for
 imbalanced problems, and it is the metric people most often compute wrongly: the trapezoid
@@ -21,7 +19,7 @@ scikit-learn to 1e-12 so "we wrote our own" never becomes "ours is subtly differ
 
 A metric takes ``(y_true, y_pred, y_score)`` and returns one float. ``y_score`` is the
 continuous output — probability of the positive class, or the regression value — and is
-``None`` when the runner produced only hard predictions. A metric that needs it says so
+``None`` when inference produced only hard predictions. A metric that needs it says so
 rather than silently scoring the thresholded labels.
 """
 
@@ -39,7 +37,7 @@ METRICS: Registry[MetricFn] = Registry("metric")
 
 
 class MetricError(ValueError):
-    """Raised when a metric cannot be computed from what the runner produced."""
+    """Raised when a metric cannot be computed from the supplied predictions."""
 
 
 def metric(name: str) -> Callable[[MetricFn], MetricFn]:
@@ -65,7 +63,7 @@ def compute(
 def _require_score(y_score: np.ndarray | None, name: str) -> np.ndarray:
     if y_score is None:
         raise MetricError(
-            f"{name} needs continuous scores, but the runner produced only hard "
+            f"{name} needs continuous scores, but inference produced only hard "
             f"predictions; provide y_score in the prediction artifact or drop {name} "
             "from metrics"
         )
