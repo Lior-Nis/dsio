@@ -14,7 +14,7 @@ from prefect import task
 
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
-from dsio.inference import build_predictor, log_predictor, predict
+from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.digit_recognizer.components import (
@@ -39,6 +39,13 @@ def export(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         reference = ArtifactRef.model_validate(training["checkpoint"])
+        require_checkpoint_lineage(
+            reference,
+            training_run_id=training["train_run_id"],
+            training_identity=training["identity"],
+            dataset_digest=data["dataset_digest"],
+            split_digest=split["split_digest"],
+        )
         inputs = _arrays(data["store_path"], list(split["assignments"]["validate"]))
         identity = record_provenance(
             run.info.run_id,

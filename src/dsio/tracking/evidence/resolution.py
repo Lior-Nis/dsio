@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Any, NoReturn
@@ -15,6 +15,7 @@ from mlflow.entities import Experiment, Run, ViewType
 from dsio.contracts import NonCanonicalValueError, sha256_of
 from dsio.tracking._lifecycle import TrackingError, is_cancellation
 from dsio.tracking.evidence.references import artifact_paths, require_run_id
+from dsio.tracking.provenance import normalize
 
 _IDENTITY = re.compile(r"[0-9a-f]{64}")
 _IDENTITY_KEY = "dsio.execution_identity"
@@ -57,7 +58,7 @@ def resolve_evidence(
     for run in ordered:
         try:
             current = _get_run(client, run.info.run_id)
-            return _validate_run(client, current, identity, artifacts)
+            return _validate_run(client, current, identity, artifacts, {})
         except _UnusableEvidence:
             continue
     return None
@@ -68,16 +69,21 @@ def require_evidence(
     *,
     identity: str | None = None,
     required_artifacts: Collection[str] = (),
+    expected_configuration: Mapping[str, Any] | None = None,
 ) -> Run:
     """Validate and return one exact immutable MLflow Run reference."""
     require_run_id(run_id)
     if identity is not None:
         _require_identity(identity)
     artifacts = artifact_paths(required_artifacts)
+    try:
+        expected = normalize(expected_configuration or {})
+    except NonCanonicalValueError as error:
+        raise TrackingError(f"Expected evidence configuration is invalid: {error}") from error
     client = _client()
     run = _get_run(client, run_id)
     try:
-        return _validate_run(client, run, identity, artifacts)
+        return _validate_run(client, run, identity, artifacts, expected)
     except _UnusableEvidence as error:
         raise TrackingError(f"MLflow Run {run_id!r} is not reusable: {error}") from error
 
@@ -87,6 +93,7 @@ def _validate_run(
     run: Run,
     identity: str | None,
     required_artifacts: tuple[str, ...],
+    expected_configuration: Mapping[str, Any],
 ) -> Run:
     run_id = run.info.run_id
     parameter_identity = _validate_metadata(run, identity)
@@ -109,8 +116,14 @@ def _validate_run(
     dsio_version = provenance.get("dsio_version")
     if not isinstance(dsio_version, str) or not dsio_version:
         raise _UnusableEvidence("provenance DSio version is missing")
-    if not isinstance(provenance.get("configuration"), dict):
+    configuration = provenance.get("configuration")
+    if not isinstance(configuration, dict):
         raise _UnusableEvidence("provenance configuration is missing")
+    for name, expected in expected_configuration.items():
+        if name not in configuration or configuration[name] != expected:
+            raise _UnusableEvidence(
+                f"provenance configuration field {name!r} does not match the expected value"
+            )
     components = provenance.get("components")
     if not isinstance(components, dict):
         raise _UnusableEvidence("provenance component references are missing")
