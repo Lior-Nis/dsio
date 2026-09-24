@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import pickle
+import random
 from collections.abc import Sized
 from typing import Any, cast
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.sampler import RandomSampler
 
 from dsio.data.loading.collation import Collate, IdentityCollator
 from dsio.data.loading.datasets import LoadingError
-from dsio.runs.seeding import dataloader_kwargs
 
 _MAX_SEED = 2**32 - 1
 
@@ -65,6 +66,18 @@ def validate_loader_options(*, batch_size: object, num_workers: object, seed: ob
     _nonnegative_integer("num_workers", num_workers)
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= _MAX_SEED:
         raise LoadingError(f"seed must be an integer in [0, {_MAX_SEED}], got {seed!r}")
+
+
+def dataloader_kwargs(seed: int) -> dict[str, object]:
+    """Return deterministic generator and worker seeding arguments for a DataLoader."""
+    generator = torch.Generator().manual_seed(seed)
+    return {"generator": generator, "worker_init_fn": _seed_worker}
+
+
+def _seed_worker(_worker_id: int) -> None:
+    worker_seed = torch.initial_seed() % (2**32)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
 
 
 def _require_picklable(value: object, name: str) -> None:

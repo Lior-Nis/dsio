@@ -8,8 +8,8 @@ from typing import Any
 from dsio.config.components import ComponentConfig, ComponentError, validate_component_config
 from dsio.inference.predictor import PredictorError
 from dsio.tracking import TrackingError
-from dsio.tracking._execution import capture_execution
 from dsio.tracking.evidence.resolution import require_provenance
+from dsio.tracking.execution import capture_execution
 from dsio.train.artifacts import ArtifactRef
 
 

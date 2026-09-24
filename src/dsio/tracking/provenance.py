@@ -13,8 +13,8 @@ from mlflow import MlflowClient
 
 from dsio.config.components import ComponentError, validate_component_config
 from dsio.contracts import NonCanonicalValueError, canonical_json, sha256_of
-from dsio.tracking._execution import capture_execution
 from dsio.tracking._lifecycle import TrackingError, is_cancellation, require_writable_run
+from dsio.tracking.execution import capture_execution
 
 _SCHEMA_VERSION = 2
 _SET_MARKER = "$dsio.set"
