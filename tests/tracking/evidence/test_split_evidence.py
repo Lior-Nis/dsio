@@ -126,8 +126,16 @@ def test_split_evidence_round_trips_as_native_mlflow_lineage(tmp_path: Path) -> 
         "dsio.split.source_run_id": source_run_id,
         "mlflow.data.context": "split_reuse",
     }
-    assert [entry.path for entry in client.list_artifacts(consumer_run_id)] == ["provenance.json"]
-    assert sorted(entry.path for entry in client.list_artifacts(source_run_id)) == [
+    assert [
+        entry.path
+        for entry in client.list_artifacts(consumer_run_id)
+        if entry.path != "git.patch"
+    ] == ["provenance.json"]
+    assert sorted(
+        entry.path
+        for entry in client.list_artifacts(source_run_id)
+        if entry.path != "git.patch"
+    ) == [
         "provenance.json",
         "split-evidence",
     ]
@@ -196,7 +204,9 @@ def test_recording_validates_before_writing_mlflow_evidence(tmp_path: Path) -> N
 
     run = client.get_run(run_id)
     assert run.inputs.dataset_inputs == []
-    assert [entry.path for entry in client.list_artifacts(run_id)] == ["provenance.json"]
+    assert [
+        entry.path for entry in client.list_artifacts(run_id) if entry.path != "git.patch"
+    ] == ["provenance.json"]
 
 
 def test_recording_rejects_mlflow_dataset_input_deduplication(tmp_path: Path) -> None:
@@ -256,7 +266,9 @@ def test_recording_rejects_a_manifest_uri_bound_to_another_dataset(tmp_path: Pat
         )
 
     assert len(client.get_run(run_id).inputs.dataset_inputs) == 1
-    assert [entry.path for entry in client.list_artifacts(run_id)] == ["provenance.json"]
+    assert [
+        entry.path for entry in client.list_artifacts(run_id) if entry.path != "git.patch"
+    ] == ["provenance.json"]
 
 
 def test_recording_normalizes_dataset_source_serialization_failures(tmp_path: Path) -> None:
@@ -277,7 +289,9 @@ def test_recording_normalizes_dataset_source_serialization_failures(tmp_path: Pa
         )
 
     assert client.get_run(run_id).inputs.dataset_inputs == []
-    assert [entry.path for entry in client.list_artifacts(run_id)] == ["provenance.json"]
+    assert [
+        entry.path for entry in client.list_artifacts(run_id) if entry.path != "git.patch"
+    ] == ["provenance.json"]
 
 
 @pytest.mark.parametrize("status", ["RUNNING", "FAILED", "KILLED"])
@@ -586,7 +600,11 @@ def test_partial_mlflow_write_fails_and_cannot_masquerade_as_complete_evidence(
 
     current = real_client.get_run(run_id)
     assert current.inputs.dataset_inputs == []
-    assert sorted(entry.path for entry in real_client.list_artifacts(run_id)) == [
+    assert sorted(
+        entry.path
+        for entry in real_client.list_artifacts(run_id)
+        if entry.path != "git.patch"
+    ) == [
         "provenance.json",
         "split-evidence",
     ]

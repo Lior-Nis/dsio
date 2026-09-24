@@ -199,6 +199,29 @@ def test_dsio_version_changes_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     assert execution_identity({"seed": 7}) != first
 
 
+def test_captured_execution_changes_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dsio.tracking import execution_identity
+
+    provenance = importlib.import_module("dsio.tracking.provenance")
+
+    def captured(code_hash: str) -> tuple[dict[str, object], None]:
+        return (
+            {
+                "command": ["python", "train.py"],
+                "environment": {"lock_sha256": "lock"},
+                "git": {"code_hash": code_hash},
+                "package_sha256": "package",
+            },
+            None,
+        )
+
+    monkeypatch.setattr(provenance, "capture_execution", lambda **_: captured("code-a"))
+    first = execution_identity({"seed": 7})
+    monkeypatch.setattr(provenance, "capture_execution", lambda **_: captured("code-b"))
+
+    assert execution_identity({"seed": 7}) != first
+
+
 def test_identity_is_independent_of_process_hash_scheduling() -> None:
     probe = """
 from dsio.tracking import execution_identity

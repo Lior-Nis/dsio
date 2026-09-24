@@ -335,6 +335,7 @@ def test_patch_file_is_written_for_dirty_runs(git_repo: Path, config: RunConfig)
 
 
 def test_reproduce_script_pins_the_commit(git_repo: Path, config: RunConfig) -> None:
+    (git_repo / "uv.lock").write_text("version = 1\n")
     run = _start(config, repo_root=git_repo, command=("python", "train.py"))
     script = (run.dir / REPRODUCE_FILE).read_text()
     sha = subprocess.run(
@@ -348,10 +349,48 @@ def test_reproduce_script_pins_the_commit(git_repo: Path, config: RunConfig) -> 
 def test_reproduce_script_syncs_the_required_dependency_set(
     git_repo: Path, config: RunConfig
 ) -> None:
+    (git_repo / "uv.lock").write_text("version = 1\n")
     run = _start(config, repo_root=git_repo, command=("python", "train.py"))
     script = (run.dir / REPRODUCE_FILE).read_text()
     assert "\nuv sync --locked\n" in script
     assert "--extra" not in script
+
+
+def test_reproduce_script_supports_projects_without_uv_lock(
+    git_repo: Path, config: RunConfig
+) -> None:
+    run = _start(config, repo_root=git_repo, command=("python", "train.py"))
+    script = (run.dir / REPRODUCE_FILE).read_text()
+    assert "\nuv sync\n" in script
+    assert "--locked" not in script
+
+
+def test_reproduce_script_quotes_shell_metacharacters(
+    git_repo: Path, config: RunConfig
+) -> None:
+    run = _start(
+        config,
+        repo_root=git_repo,
+        command=("python", "train job.py", "--name", "it's $important"),
+    )
+    script = (run.dir / REPRODUCE_FILE).read_text()
+    assert "python 'train job.py' --name 'it'\"'\"'s $important'" in script
+
+
+def test_start_run_hashes_lock_relative_to_repository_root(
+    git_repo: Path, config: RunConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dsio.contracts import sha256_of_file
+
+    lock = git_repo / "uv.lock"
+    lock.write_text("version = 1\n")
+    elsewhere = git_repo / "nested"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    run = _start(config, repo_root=git_repo)
+
+    assert run.record.env.lock_sha256 == sha256_of_file(str(lock))
 
 
 def test_env_capture_records_the_lockfile() -> None:
