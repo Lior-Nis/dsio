@@ -1,8 +1,5 @@
-"""Typed run schemas and plain named-component configuration.
+"""Plain importable component configuration without orchestration schemas."""
 
-Structure lives in Python. YAML is a recorded output, never an authored input.
-"""
+from dsio.config.components import ComponentConfig, ComponentError, resolve_component
 
-from dsio.config.schema import RunConfig
-
-__all__ = ["RunConfig"]
+__all__ = ["ComponentConfig", "ComponentError", "resolve_component"]

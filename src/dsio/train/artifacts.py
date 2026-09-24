@@ -42,10 +42,10 @@ from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
 from dsio.contracts import DsioModel, sha256_of_bytes
-from dsio.train.tracking import DEFAULT_TRACKING_URI as DEFAULT_TRACKING_URI
-from dsio.train.tracking import TRACKING_URI_ENV as TRACKING_URI_ENV
-from dsio.train.tracking import resolve_tracking_uri as resolve_tracking_uri
-from dsio.train.tracking import temporary_mlflow_environment
+from dsio.tracking.client import DEFAULT_TRACKING_URI as DEFAULT_TRACKING_URI
+from dsio.tracking.client import TRACKING_URI_ENV as TRACKING_URI_ENV
+from dsio.tracking.client import resolve_tracking_uri as resolve_tracking_uri
+from dsio.tracking.client import temporary_mlflow_environment
 
 ARTIFACT_FILE = "artifact.bin"
 _ARTIFACT_PREFIX = "dsio-artifacts"

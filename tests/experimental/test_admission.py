@@ -215,7 +215,6 @@ def test_project_identity_only_fails_when_it_controls_execution(tmp_path: Path) 
     "source",
     [
         "from dsio.eval.metrics import metric\n@metric('x')\ndef score(): pass\n",
-        "from dsio.train.runner import runner as register\n@register('x')\ndef run(): pass\n",
         "from dsio.eval.metrics import METRICS\n"
         "register = METRICS.register\nregister('x')(score)\n",
     ],
@@ -276,7 +275,6 @@ mutate(METRICS)
 
 def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path) -> None:
     for source in (
-        "from dsio.train.torch_task import TASKS\n",
         "REGISTRY = {}\nREGISTRY['x'] = component\n",
         "COMPONENTS = {}\ndef register(name):\n    COMPONENTS[name] = component\n",
         "HANDLERS = {}\ndef enroll(name):\n    HANDLERS[name] = component\n",
@@ -758,7 +756,7 @@ def test_registry_owner_module_imports_are_safe_until_dispatcher_access(
         )
         == ()
     )
-    assert _audit(tmp_path, "import dsio.config.schema as schema\nvalue: schema.RunConfig\n") == ()
+    assert _audit(tmp_path, "import dsio.config.components as config\nvalue = config\n") == ()
 
 
 def test_policy_namespace_does_not_exempt_candidate_modules(tmp_path: Path) -> None:

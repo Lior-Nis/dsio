@@ -180,59 +180,11 @@ def test_pooling_nothing_is_an_error(tmp_path: Path) -> None:
         pool_folds([], metrics=("accuracy",))
 
 
-def _write_via_the_real_writer(
-    directory: Path,
-    fold_index: int,
-    rows: list[int],
-    *,
-    y_score: np.ndarray | None,
-) -> Path:
-    """Build one fold's `predictions.npz` through the actual writer, not a hand-rolled
-    `np.savez_compressed` -- `write_fold` above stands in for the writer in every other test
-    here, which is the right isolation for testing `pool_folds`' own guards, but it means no
-    test in this file proves the writer and this reader agree on the npz shape, or that the
-    writer's own `if result.y_score is not None` branch (both sides of it) is ever taken in
-    anything but the writer's own unreachable-in-production else path (findings 5 and 6:
-    `_assemble` always sets a score, so this branch never sees `None` via `run_torch`)."""
-    from dsio.eval.contract import Fold, FoldPrediction
-    from dsio.train.torch_task import _write_predictions
-
-    fold = Fold(index=fold_index, train=np.array([100 + fold_index]), test=np.asarray(rows))
-    result = FoldPrediction(
-        y_true=np.asarray([r % 2 for r in rows], dtype=np.int64),
-        y_pred=np.asarray([r % 2 for r in rows], dtype=np.int64),
-        y_score=y_score,
-    )
-    _write_predictions(
-        directory,
-        fold=fold,
-        result=result,
-        split="fam",
-        split_digest=DIGEST,
-        window_digest=WINDOW_DIGEST,
-        config_identity=CONFIG_IDENTITY,
-    )
-    return directory
-
-
 def test_scores_survive_pooling_exactly_not_approximately(tmp_path: Path) -> None:
-    """A threshold sweep on rounded scores finds the wrong one.
-
-    Moved here from the deleted `test_loop.py`, which proved the same property of
-    `OutOfFold.save`/`.load` directly. Under fold-as-process the npz round trip happens in
-    two places instead of one -- the writer in `torch_task._write_predictions` and the
-    reader here in `pool_folds` -- so this is where it is re-proven now that both exist.
-
-    Goes through `_write_predictions` itself (finding 6): a prior version of this test built
-    its npz with a bare `np.savez_compressed`, which proved `pool_folds` preserves whatever
-    dtype it is handed but never proved the writer hands it float64 in the first place. A
-    writer that narrowed `y_score` to float32 before scoring -- exactly the precision loss
-    this test exists to catch -- passed every assertion here until the writer was actually
-    exercised.
-    """
+    """A threshold sweep on rounded scores finds the wrong one."""
     rng = np.random.default_rng(0)
     scores = rng.random(50)
-    a = _write_via_the_real_writer(tmp_path / "a", 0, list(range(50)), y_score=scores)
+    a = write_fold(tmp_path / "a", 0, list(range(50)), y_score=scores.tolist())
     pooled = pool_folds([a], metrics=("accuracy",))
     assert pooled.y_score is not None
     assert pooled.y_score.dtype == np.float64
@@ -242,16 +194,7 @@ def test_scores_survive_pooling_exactly_not_approximately(tmp_path: Path) -> Non
 def test_pooling_a_writer_produced_mixture_of_scored_and_unscored_folds_is_rejected(
     tmp_path: Path,
 ) -> None:
-    """Finding 5. Guard 3's `y_score is None` branch never fires via `run_torch` in
-    production (`_assemble` always returns a score), so nothing proved the writer's own
-    `if result.y_score is not None:` actually omits the key on the untaken branch, rather
-    than e.g. writing zeros -- the reviewer's mutation (`arrays["y_score"] =
-    np.zeros_like(...)`) left every other test in this file green. This builds both files
-    through `_write_predictions` itself, one with a score and one without, and proves the
-    guard still fires."""
-    scored = _write_via_the_real_writer(
-        tmp_path / "a", 0, [0, 1], y_score=np.asarray([0.9, 0.1])
-    )
-    unscored = _write_via_the_real_writer(tmp_path / "b", 1, [2, 3], y_score=None)
+    scored = write_fold(tmp_path / "a", 0, [0, 1], y_score=[0.9, 0.1])
+    unscored = write_fold(tmp_path / "b", 1, [2, 3])
     with pytest.raises(EvalError, match="mixture of"):
         pool_folds([scored, unscored], metrics=("accuracy",))
