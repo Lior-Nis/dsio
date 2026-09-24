@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pickle
 import random
-from collections.abc import Sized
+from collections.abc import Mapping, Sized
 from typing import Any, cast
 
 import numpy as np
@@ -18,8 +18,8 @@ from dsio.data.loading.datasets import LoadingError
 _MAX_SEED = 2**32 - 1
 
 
-def build_loader(
-    dataset: Dataset[dict[str, Any]],
+def build_loader[Item: Mapping[str, Any]](
+    dataset: Dataset[Item],
     *,
     batch_size: int = 32,
     shuffle: bool = False,
@@ -49,7 +49,7 @@ def build_loader(
         sampler_generator = torch.Generator().manual_seed(seed)
         sampler = RandomSampler(cast("Sized", dataset), generator=sampler_generator)
     return DataLoader(
-        dataset,
+        cast("Dataset[dict[str, Any]]", dataset),
         batch_size=batch_size,
         shuffle=False,
         sampler=sampler,

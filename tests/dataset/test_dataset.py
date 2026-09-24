@@ -10,16 +10,11 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
+from dsio.data.loading import WindowDataset, build_loader  # noqa: E402
 from dsio.data.splits.folds import folds_from_splits  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
-from dsio.dataset.dataset import (  # noqa: E402
-    WindowDataset,
-    make_loader,
-    train_dataset,
-    val_dataset,
-)
 
 
 @pytest.fixture
@@ -155,19 +150,9 @@ def test_an_integer_payload_dtype_survives_to_the_item(
 
 def test_an_integer_payload_survives_a_loader(token_store: SignalStore, token_index) -> None:  # type: ignore[no-untyped-def]
     dataset = WindowDataset(token_store, token_index, payload_dtype=torch.long)
-    batch = next(iter(make_loader(dataset, batch_size=4)))
+    batch = next(iter(build_loader(dataset, batch_size=4)))
     assert batch["x"].dtype is torch.int64
     assert batch["x"].shape == (4, 1, 32)
-
-
-def test_the_builders_pass_the_payload_dtype_through(
-    token_store: SignalStore,
-    token_index,  # type: ignore[no-untyped-def]
-) -> None:
-    train = train_dataset(token_store, token_index, payload_dtype=torch.long)
-    val = val_dataset(token_store, token_index, payload_dtype=torch.long)
-    assert train[0]["x"].dtype is torch.int64
-    assert val[0]["x"].dtype is torch.int64
 
 
 def test_loader_result_does_not_depend_on_worker_count(store: SignalStore, index) -> None:  # type: ignore[no-untyped-def]
@@ -175,7 +160,7 @@ def test_loader_result_does_not_depend_on_worker_count(store: SignalStore, index
 
     def load(workers: int) -> tuple[list[str], torch.Tensor, torch.Tensor]:
         batches = list(
-            make_loader(
+            build_loader(
                 WindowDataset(store, index, positions),
                 batch_size=7,
                 shuffle=True,
@@ -197,19 +182,21 @@ def test_loader_result_does_not_depend_on_worker_count(store: SignalStore, index
 
 def test_the_seed_changes_shuffle_order(store: SignalStore, index) -> None:  # type: ignore[no-untyped-def]
     dataset = WindowDataset(store, index, np.arange(30))
-    first = torch.cat([batch["row"] for batch in make_loader(dataset, shuffle=True, seed=1)])
-    second = torch.cat([batch["row"] for batch in make_loader(dataset, shuffle=True, seed=2)])
+    first = torch.cat([batch["row"] for batch in build_loader(dataset, shuffle=True, seed=1)])
+    second = torch.cat([batch["row"] for batch in build_loader(dataset, shuffle=True, seed=2)])
     assert not torch.equal(first, second)
 
 
 def test_an_unshuffled_loader_covers_every_position_once(store: SignalStore, index) -> None:  # type: ignore[no-untyped-def]
     positions = np.array([7, 2, 11, 4, 19])
     rows = torch.cat(
-        [batch["row"] for batch in make_loader(WindowDataset(store, index, positions))]
+        [batch["row"] for batch in build_loader(WindowDataset(store, index, positions))]
     )
     assert rows.tolist() == positions.tolist()
 
 
 def test_workers_read_the_store_independently(store: SignalStore, index) -> None:  # type: ignore[no-untyped-def]
-    loader = make_loader(WindowDataset(store, index, np.arange(20)), batch_size=4, num_workers=2)
+    loader = build_loader(
+        WindowDataset(store, index, np.arange(20)), batch_size=4, num_workers=2
+    )
     assert sum(batch["x"].shape[0] for batch in loader) == 20

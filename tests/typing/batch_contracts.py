@@ -2,27 +2,22 @@
 
 from __future__ import annotations
 
-from typing import assert_type
+from typing import Any, assert_type, cast
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 from dsio.batches import (
     BatchLoader,
     LoaderBatch,
     PredictionBatch,
     TrainingBatch,
-    WindowBatch,
     WindowItem,
 )
+from dsio.data.loading import WindowDataset, build_loader
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex
-from dsio.dataset.dataset import (
-    WindowDataset,
-    labelled_dataset,
-    make_loader,
-    make_target_loader,
-)
 from dsio.model.module import DsioModule
 
 
@@ -43,9 +38,7 @@ def check_batch_contracts(
     for batch in loader:
         assert_type(batch, LoaderBatch)
     assert_type(module.predict_step(training_batch, 0), PredictionBatch)
-    window_loader = make_loader(WindowDataset(store, index))
-    assert_type(window_loader, BatchLoader[WindowBatch])
-    labelled_loader = make_target_loader(labelled_dataset(store, index, labels=labels))
-    assert_type(labelled_loader, BatchLoader[TrainingBatch])
-    for batch in labelled_loader:
-        assert_type(module.training_step(batch, 0), torch.Tensor)
+    window_loader = build_loader(WindowDataset(store, index, labels=labels))
+    assert_type(window_loader, DataLoader[dict[str, Any]])
+    for batch in window_loader:
+        assert_type(module.training_step(cast(TrainingBatch, batch), 0), torch.Tensor)

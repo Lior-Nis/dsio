@@ -102,7 +102,7 @@ class EmbeddingEncoder(nn.Module):
     retrain for every change to a view, which is the coupling the index layer removed.
 
     A float payload is accepted as well as an integer one, because
-    :class:`~dsio.dataset.dataset.WindowDataset`'s float path is the default and a caller
+    :class:`~dsio.data.loading.windows.WindowDataset`'s float path is the default and a caller
     who has not set ``payload_dtype=torch.long`` should get a working model rather than a
     dtype error. The cast back is lossless only up to 2**24 (16,777,216) — the largest
     integer float32 represents without gaps — so above that vocabulary size two adjacent
@@ -181,7 +181,7 @@ def mae_decoder_head(in_dim: int, channels: int, length: int, hidden_mult: int =
     ``torch_task.py`` resolves a classification head, which is
     what let the pretext objective stop being a separate kind of thing that builds its own
     head. Its output only makes sense paired with :class:`MaskedMSE` and a masked
-    :class:`~dsio.dataset.dataset.WindowDataset` target, which is why
+    :class:`~dsio.data.loading.windows.WindowDataset` target, which is why
     :func:`~dsio.model.module.export_encoder` never ships it with the encoder.
     """
     return nn.Sequential(
@@ -264,7 +264,8 @@ def mse_loss() -> nn.Module:
 class MaskedMSE(nn.Module):
     """Reconstruction loss for a target that carries NaN outside masked positions.
 
-    NaN is the continuous analogue of MLM's ``-100``: :class:`~dsio.dataset.dataset.WindowDataset`
+    NaN is the continuous analogue of MLM's ``-100``:
+    :class:`~dsio.data.loading.windows.WindowDataset`
     writes the original value at every position its mask hid and NaN everywhere the model
     was allowed to see the input, so this is the whole mechanism that keeps a masked
     autoencoder from winning by copying — a reconstruction that only matches the visible

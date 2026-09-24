@@ -128,7 +128,6 @@ type = "forbidden"
 source_modules = ["dsio.eval"]
 forbidden_modules = [
     "dsio.data",
-    "dsio.dataset",
     "dsio.model",
     "dsio.train",
     "dsio.tracking",
@@ -145,7 +144,6 @@ source_modules = [
     "dsio.config",
     "dsio.contracts",
     "dsio.data",
-    "dsio.dataset",
     "dsio.eval",
     "dsio.model",
     "dsio.train",

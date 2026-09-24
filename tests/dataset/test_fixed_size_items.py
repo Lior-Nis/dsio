@@ -31,11 +31,11 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
+from dsio.data.loading import WindowDataset, build_loader  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.splits.resolve import assert_no_row_overlap, resolve  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
-from dsio.dataset.dataset import WindowDataset, make_loader  # noqa: E402
 
 HEIGHT = 8
 WIDTH = 8
@@ -140,7 +140,7 @@ def test_a_loader_batch_reshapes_to_b_c_h_w(store: SignalStore, index, images: n
     images that position names rather than against loader order — the same identity
     discipline predictions are realigned by.
     """
-    loader = make_loader(WindowDataset(store, index), batch_size=4, shuffle=False)
+    loader = build_loader(WindowDataset(store, index), batch_size=4, shuffle=False)
     seen = 0
     for batch in loader:
         x = batch["x"]

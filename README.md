@@ -302,6 +302,10 @@ image. There is no separate item-store concept to add, because an item *is* a wi
 exactly entity length.
 
 ```python
+from dsio.data.loading import WindowDataset, build_loader
+from dsio.data.store import SignalStore
+from dsio.data.views import WindowSpec, build_index
+
 with SignalStore.builder("stores/scans", channels=3, dtype="uint8") as builder:
     for name, image, patient in scans():          # image is (8, 8, 3)
         builder.add(name, image.reshape(64, 3), group=patient)
@@ -309,7 +313,7 @@ with SignalStore.builder("stores/scans", channels=3, dtype="uint8") as builder:
 store = SignalStore("stores/scans")
 index = build_index(store, WindowSpec(length=64, stride=64),
                     one_window_per_entity=True)                 # 16 images -> 16 windows
-batch = next(iter(make_loader(WindowDataset(store, index), batch_size=4)))
+batch = next(iter(build_loader(WindowDataset(store, index), batch_size=4)))
 batch["x"].reshape(4, 3, 8, 8)                                  # (B, C, H*W) -> (B, C, H, W)
 ```
 
