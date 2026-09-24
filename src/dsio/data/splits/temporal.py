@@ -130,7 +130,11 @@ def walk_forward(
     t_end: np.ndarray,
     spec: TemporalSpec,
 ) -> list[TemporalBounds]:
-    """Build one :class:`TemporalBounds` per fold, marching test forward through time."""
+    """Build strictly causal folds whose test span marches forward through time.
+
+    Expanding folds retain all available history. Rolling folds retain one test-span's
+    worth of history. Neither mode can train on observations at or after its test span.
+    """
     if t_start.size == 0:
         raise TemporalError("cannot build a temporal split over zero windows")
 
@@ -172,11 +176,8 @@ def walk_forward(
     folds: list[TemporalBounds] = []
     for origin in origins:
         test = TimeSpan(start=float(origin), end=float(origin + test_len))
-        if spec.mode == "expanding":
-            train_spans = [TimeSpan(start=lo, end=hi)]
-        else:
-            window = max(test_len, float(origin) - lo)
-            train_spans = [TimeSpan(start=max(lo, float(origin) - window), end=hi)]
+        train_start = lo if spec.mode == "expanding" else max(lo, float(origin) - test_len)
+        train_spans = [TimeSpan(start=train_start, end=float(origin))]
         folds.append(
             TemporalBounds(
                 time_unit=spec.time_unit,

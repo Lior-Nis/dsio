@@ -11,6 +11,7 @@ from dsio.data.splits import generate, validate
 from dsio.data.splits.folds import folds_from_splits
 from dsio.data.splits.models import SplitError, SplitFile
 from dsio.data.splits.resolve import resolve_masks
+from dsio.data.splits.temporal import TimeSpan
 
 
 def _examples(order: np.ndarray | None = None) -> TableExamples:
@@ -378,9 +379,18 @@ def test_purged_walk_forward_uses_the_same_dispatcher_and_records_discards() -> 
     )
 
     assert manifest.dependencies == {}
+    assert manifest.algorithm_version == "2"
     assert manifest.coverage == "partial"
     assert len(manifest.folds) == 2
     assert all(fold.counts["discarded"] > 0 for fold in manifest.folds)
+    for fold in manifest.folds:
+        train_times = [
+            int(sample_id.removeprefix("tick-")) for sample_id in fold.assignments["train"]
+        ]
+        test_times = [
+            int(sample_id.removeprefix("tick-")) for sample_id in fold.assignments["test"]
+        ]
+        assert max(train_times) < min(test_times)
     validate(examples, manifest)
     first = resolve_masks(examples, manifest, manifest.folds[0])
     assert set(examples.sample_ids[first["test"]].tolist()) == set(
@@ -537,6 +547,45 @@ def test_temporal_validation_rejects_extra_assignment_roles() -> None:
     extra_span = fold.model_copy(update={"temporal": extra_bounds})
     with pytest.raises(SplitError, match="temporal span roles must be exactly"):
         validate(examples, manifest.model_copy(update={"folds": [extra_span]}))
+
+
+def test_temporal_validation_rejects_post_test_training_bounds() -> None:
+    size = 30
+    examples = TableExamples(
+        name="timeline",
+        sample_ids=[f"tick-{index:02d}" for index in range(size)],
+        groups=["market"] * size,
+        times=(np.arange(size, dtype=float), np.arange(1, size + 1, dtype=float)),
+        digest="timeline-noncausal",
+    )
+    manifest = generate(
+        examples,
+        "purged_walk_forward",
+        name="causal",
+        seed=0,
+        parameters={"n_splits": 1, "test_fraction": 0.2},
+    )
+    fold = manifest.folds[0]
+    assert fold.temporal is not None
+    unsafe_bounds = fold.temporal.model_copy(
+        update={
+            "spans": {
+                "train": [TimeSpan(start=0, end=float(size))],
+                "test": fold.temporal.spans["test"],
+            }
+        }
+    )
+    unsafe_fold = fold.model_copy(update={"temporal": unsafe_bounds})
+
+    with pytest.raises(SplitError, match="is not causal"):
+        validate(examples, manifest.model_copy(update={"folds": [unsafe_fold]}))
+
+    empty_bounds = fold.temporal.model_copy(
+        update={"spans": {"train": [], "test": fold.temporal.spans["test"]}}
+    )
+    empty_fold = fold.model_copy(update={"temporal": empty_bounds})
+    with pytest.raises(SplitError, match="has no temporal spans"):
+        validate(examples, manifest.model_copy(update={"folds": [empty_fold]}))
 
 
 def test_resolution_rejects_a_fold_not_stored_in_the_manifest() -> None:
