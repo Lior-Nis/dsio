@@ -117,7 +117,7 @@ def resolve_masks(
     """Boolean mask per part, over the dataset's examples, for one fold of ``split``.
 
     The mask form is what :func:`dsio.data.splits.folds.folds_from_splits` turns into a
-    :class:`~dsio.eval.contract.Fold`'s integer positions; a subset has forgotten where
+    :class:`~dsio.data.splits.folds.Fold`'s integer positions; a subset has forgotten where
     its examples came from, so the mask is kept as the intermediate form.
     :func:`resolve` is this plus one ``subset`` call, so both views apply exactly the same
     validation and there is no second code path to keep in step.

@@ -26,7 +26,7 @@ class WindowDataset(Dataset[WindowItem]):
     """Windows of one store, restricted to a set of index positions.
 
     ``positions`` are offsets into ``index``, which is what a
-    :class:`~dsio.eval.contract.Fold` carries. Each item reports the position it came from
+    :class:`~dsio.data.splits.folds.Fold` carries. Each item reports the position it came from
     so predictions can be realigned by identity rather than by trusting loader ordering.
 
     ``payload_dtype`` is what lets a token-id corpus reach a model as ids rather than as

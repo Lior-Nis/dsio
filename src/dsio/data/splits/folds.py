@@ -1,8 +1,7 @@
-"""Turn governed split manifests into folds the loop can run.
+"""Turn governed split manifests into validated row-position folds.
 
-This is the seam that joins the two halves of dsio: a dataset and its committed split
-files on one side, the fold loop and the artifact contract on the other. Neither side knows
-what modality it is handling.
+This is the seam between a dataset and its committed split files. Neither side knows what
+modality it is handling.
 
 A fold is integer positions into an :class:`~dsio.data.examples.Examples`, so nothing is
 copied: cross-validating a large corpus costs one position array per part, not one dataset
@@ -12,6 +11,7 @@ per fold.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -20,11 +20,65 @@ from dsio.data.examples import Examples
 from dsio.data.splits.models import SplitError, SplitFile, SplitFold
 from dsio.data.splits.resolve import _resolve_validated_masks
 from dsio.data.splits.validation import validate
-from dsio.eval.contract import Fold
 
 TRAIN_PART = "train"
 TEST_PART = "test"
 VAL_PART = "val"
+
+
+@dataclass(frozen=True)
+class Fold:
+    """One validated train/test division as integer example positions.
+
+    ``evaluation_only`` permits an empty train part for evaluating an already-trained
+    model without inventing a fake training set.
+    """
+
+    index: int
+    train: np.ndarray
+    test: np.ndarray
+    val: np.ndarray | None = None
+    name: str = ""
+    evaluation_only: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "train", np.asarray(self.train, dtype=np.int64))
+        object.__setattr__(self, "test", np.asarray(self.test, dtype=np.int64))
+        if self.val is not None:
+            object.__setattr__(self, "val", np.asarray(self.val, dtype=np.int64))
+        if not self.name:
+            object.__setattr__(self, "name", f"fold{self.index}")
+
+        parts = {"train": self.train, "test": self.test}
+        if self.val is not None:
+            parts["val"] = self.val
+        _validate_unique_positions(self.name, parts)
+        _validate_disjoint_positions(self.name, parts)
+        if self.test.size == 0:
+            raise SplitError(f"{self.name}: test is empty; there is nothing to score")
+        if self.train.size == 0 and not self.evaluation_only:
+            raise SplitError(
+                f"{self.name}: train is empty; there is nothing to fit. If this is an "
+                "evaluation of something already trained, set evaluation_only=True."
+            )
+
+
+def _validate_unique_positions(name: str, parts: dict[str, np.ndarray]) -> None:
+    for label, positions in parts.items():
+        if positions.size and np.unique(positions).size != positions.size:
+            raise SplitError(f"{name}: {label} lists the same row more than once")
+
+
+def _validate_disjoint_positions(name: str, parts: dict[str, np.ndarray]) -> None:
+    names = sorted(parts)
+    for index, left in enumerate(names):
+        for right in names[index + 1 :]:
+            shared = np.intersect1d(parts[left], parts[right])
+            if shared.size:
+                raise SplitError(
+                    f"{name}: {shared.size} row(s) appear in both {left} and "
+                    f"{right}, first at position {int(shared[0])}"
+                )
 
 
 def folds_from_splits(
@@ -36,7 +90,7 @@ def folds_from_splits(
     val_part: str | None = VAL_PART,
     require_total: bool = True,
 ) -> list[Fold]:
-    """Build one :class:`~dsio.eval.contract.Fold` per fold across the given split files.
+    """Build one validated :class:`Fold` per fold across the given split files.
 
     One committed split file holds a whole family's worth of folds (``SplitFile.folds``);
     this flattens every fold from every ``SplitFile`` given, in order — the callers below
@@ -129,10 +183,8 @@ def _assert_test_parts_are_disjoint(folds: Sequence[Fold]) -> None:
     """No window may be tested by two folds.
 
     Within a fold, disjointness is checked by ``Fold`` itself. Across folds it is a
-    different property, and the one that corrupts a pooled out-of-fold metric: an example
-    tested twice is counted twice, which quietly reweights the score toward whichever ones
-    were duplicated. The loop would catch this too, but catching it here means it fails
-    before anything is fitted rather than after the last fold.
+    different property: an example tested twice quietly reweights any aggregate score.
+    Catching it here means it fails before anything is fitted.
     """
     positions = (
         np.concatenate([fold.test for fold in folds]) if folds else np.empty(0, dtype=np.int64)

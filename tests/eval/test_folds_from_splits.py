@@ -15,6 +15,7 @@ import pytest
 
 from dsio.data.adapters import SignalExamples, entity_examples
 from dsio.data.splits.folds import (
+    Fold,
     _assert_test_parts_are_disjoint,
     folds_from_splits,
     load_folds,
@@ -25,7 +26,6 @@ from dsio.data.splits.models import SplitError, SplitFile, SplitFold
 from dsio.data.splits.temporal import TemporalSpec, describe, walk_forward
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowSpec, build_index
-from dsio.eval.contract import Fold
 
 
 @pytest.fixture
@@ -357,7 +357,7 @@ def test_disjoint_test_parts_pass() -> None:
     _assert_test_parts_are_disjoint([a, b])
 
 
-# NOTE: `Fold.__post_init__` (eval/contract.py) already rejects a fold whose own
+# NOTE: `Fold.__post_init__` already rejects a fold whose own
 # train and test overlap. Every fold constructed here must be internally valid, or
 # the test fails in the constructor and never reaches the function under test.
 
