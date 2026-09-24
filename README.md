@@ -2,8 +2,7 @@
 
 A reusable ML/DL experimentation library.
 
-`dsio` currently ships generic data, split, training, and evaluation components. The accepted
-architecture extends that spine with generic tracking and inference components.
+`dsio` ships generic data, split, training, tracking, evaluation, and inference components.
 Consumer projects own their workflows as ordinary Prefect flows; DSio does not provide a
 second DAG model, CLI, scheduler, or deployment layer. PyTorch and Lightning are the single
 training path, and MLflow is the evidence store.
