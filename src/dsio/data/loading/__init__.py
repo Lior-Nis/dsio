@@ -10,6 +10,7 @@ from dsio.data.loading.datasets import (
 )
 from dsio.data.loading.loaders import build_loader
 from dsio.data.loading.module import DsioDataModule
+from dsio.data.loading.windows import WindowDataset
 
 __all__ = [
     "DatasetFactory",
@@ -18,6 +19,7 @@ __all__ = [
     "IdentityDataset",
     "LoadingError",
     "StoredSamples",
+    "WindowDataset",
     "build_loader",
     "collate_items",
     "stored_samples",

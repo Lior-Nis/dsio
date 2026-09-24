@@ -777,7 +777,7 @@ def test_empty_window_starts_return_float32_without_reading_labels() -> None:
 
 
 # WindowView (a numpy-only, framework-free window reader over store + index) was merged
-# into dsio.dataset.dataset.WindowDataset — the torch Dataset already took the same
+# into dsio.data.loading.WindowDataset — the torch Dataset already took the same
 # constructor arguments and was the only consumer of what WindowView read. Its
 # read-matches-the-store property lives on there now:
 # tests/dataset/test_dataset.py::test_the_window_matches_a_direct_store_read.

@@ -33,12 +33,12 @@ lightning = pytest.importorskip("lightning")
 from torch import nn  # noqa: E402
 
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
+from dsio.data.loading import WindowDataset, build_loader  # noqa: E402
 from dsio.data.splits.folds import folds_from_splits  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.splits.resolve import assert_no_row_overlap, resolve  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
-from dsio.dataset.dataset import make_loader, train_dataset, val_dataset  # noqa: E402
 from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
 from dsio.model.components import CrossEntropy, EmbeddingEncoder, linear_head  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
@@ -117,7 +117,7 @@ def test_the_float_default_is_what_blocked_an_embedding(corpus: SignalStore, ind
     The default payload is float32 — correct for signal, and the reason token ids could not
     reach ``nn.Embedding`` at all before ``payload_dtype`` existed.
     """
-    batch = next(iter(make_loader(val_dataset(corpus, index), batch_size=4)))
+    batch = next(iter(build_loader(WindowDataset(corpus, index), batch_size=4)))
     assert batch["x"].dtype is torch.float32
     with pytest.raises(RuntimeError, match="Long, Int"):
         nn.Embedding(VOCAB, 8)(batch["x"])
@@ -126,8 +126,8 @@ def test_the_float_default_is_what_blocked_an_embedding(corpus: SignalStore, ind
 def test_the_gradient_reaches_the_embedding_table(corpus: SignalStore, index) -> None:
     """embedding -> head -> loss, through the shared step every other paradigm uses."""
     torch.manual_seed(0)
-    dataset = train_dataset(corpus, index, labels=_labels(index), payload_dtype=torch.long)
-    batch = next(iter(make_loader(dataset, batch_size=8)))
+    dataset = WindowDataset(corpus, index, labels=_labels(index), payload_dtype=torch.long)
+    batch = next(iter(build_loader(dataset, batch_size=8)))
     backbone = EmbeddingEncoder(vocab_size=VOCAB, embed_dim=8, out_dim=DIM)
     module = DsioModule(
         model=ComponentChain(backbone=backbone, head=linear_head(DIM, 2)),
@@ -149,13 +149,13 @@ def test_a_token_corpus_trains_through_lightning(
     torch.manual_seed(0)
     labels = _labels(index)
     fold = folds_from_splits(SignalExamples(corpus, index), [split])[0]
-    train_loader = make_loader(
-        train_dataset(corpus, index, fold.train, labels=labels, payload_dtype=torch.long),
+    train_loader = build_loader(
+        WindowDataset(corpus, index, fold.train, labels=labels, payload_dtype=torch.long),
         batch_size=8,
         shuffle=True,
     )
-    val_loader = make_loader(
-        val_dataset(corpus, index, fold.val, labels=labels, payload_dtype=torch.long),
+    val_loader = build_loader(
+        WindowDataset(corpus, index, fold.val, labels=labels, payload_dtype=torch.long),
         batch_size=8,
     )
     backbone = EmbeddingEncoder(vocab_size=VOCAB, embed_dim=8, out_dim=DIM)
