@@ -12,6 +12,7 @@ from dsio.inference import (
     TensorOutput,
     build_predictor,
     log_predictor,
+    require_checkpoint_lineage,
     validate_tensor_prediction,
 )
 from dsio.tracking import attempt, record_provenance
@@ -32,6 +33,13 @@ def export_model(
     with attempt(experiment_id) as run:
         inputs, _ = evaluation_arrays(data["store_path"], split["assignments"]["test"])
         reference = ArtifactRef.model_validate(training["checkpoint"])
+        require_checkpoint_lineage(
+            reference,
+            training_run_id=training["train_run_id"],
+            training_identity=training["identity"],
+            dataset_digest=data["dataset_digest"],
+            split_digest=split["split_digest"],
+        )
         preprocessor_config: ComponentConfig = {
             "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
             "parameters": {

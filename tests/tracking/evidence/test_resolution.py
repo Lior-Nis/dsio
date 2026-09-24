@@ -96,6 +96,36 @@ def test_require_evidence_rejects_identity_or_provenance_disagreement(
     assert payload["execution_identity"] == identity
 
 
+def test_require_evidence_matches_selected_configuration_fields() -> None:
+    from dsio.tracking import TrackingError, require_evidence
+
+    run, identity = _evidence_run("expected-configuration")
+
+    require_evidence(
+        run.info.run_id,
+        identity=identity,
+        expected_configuration={"seed": 7},
+    )
+    with pytest.raises(TrackingError, match="configuration field 'seed'"):
+        require_evidence(
+            run.info.run_id,
+            identity=identity,
+            expected_configuration={"seed": 8},
+        )
+    with pytest.raises(TrackingError, match="configuration field 'dataset_digest'"):
+        require_evidence(
+            run.info.run_id,
+            identity=identity,
+            expected_configuration={"dataset_digest": "missing"},
+        )
+    with pytest.raises(TrackingError, match="configuration field 'missing'"):
+        require_evidence(
+            run.info.run_id,
+            identity=identity,
+            expected_configuration={"missing": None},
+        )
+
+
 def test_require_evidence_rejects_provenance_content_changed_after_recording() -> None:
     from mlflow import MlflowClient
 

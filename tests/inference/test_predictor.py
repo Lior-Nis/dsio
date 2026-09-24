@@ -20,9 +20,11 @@ from dsio.inference import (
     PredictorError,
     TensorOutput,
     build_predictor,
+    require_checkpoint_lineage,
     validate_tensor_prediction,
 )
 from dsio.model.module import DsioModule
+from dsio.tracking import record_provenance
 from dsio.train.artifacts import ArtifactRef, load_artifact, save_artifact
 from dsio.train.tracking import resolve_tracking_uri
 
@@ -200,6 +202,42 @@ def test_non_serializable_component_fails_during_construction(tmp_path: Path) ->
 def test_checkpoint_must_belong_to_a_successful_run(tmp_path: Path) -> None:
     with pytest.raises(PredictorError, match="RUNNING.*FINISHED"):
         _build(_checkpoint(tmp_path, status="RUNNING"))
+
+
+def test_checkpoint_lineage_must_match_the_training_inputs() -> None:
+    client = MlflowClient(resolve_tracking_uri())
+    experiment_id = client.create_experiment("predictor-lineage")
+    run_id = client.create_run(experiment_id).info.run_id
+    identity = record_provenance(
+        run_id,
+        {"dataset_digest": "dataset", "split_digest": "split"},
+    )
+    reference = save_artifact(b"checkpoint", run_id=run_id, name="checkpoint")
+    client.set_terminated(run_id, "FINISHED")
+
+    require_checkpoint_lineage(
+        reference,
+        training_run_id=run_id,
+        training_identity=identity,
+        dataset_digest="dataset",
+        split_digest="split",
+    )
+    with pytest.raises(PredictorError, match="dataset_digest"):
+        require_checkpoint_lineage(
+            reference,
+            training_run_id=run_id,
+            training_identity=identity,
+            dataset_digest="other",
+            split_digest="split",
+        )
+    with pytest.raises(PredictorError, match="different training run"):
+        require_checkpoint_lineage(
+            reference,
+            training_run_id="other-run",
+            training_identity=identity,
+            dataset_digest="dataset",
+            split_digest="split",
+        )
 
 
 def test_checkpoint_must_belong_to_an_active_run(tmp_path: Path) -> None:

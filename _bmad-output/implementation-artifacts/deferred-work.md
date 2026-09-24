@@ -8,7 +8,6 @@
 
 ## Deferred from: canonical supervised reference cleanup (2026-09-23)
 
-- Bind export inputs to the originating training evidence so a checkpoint cannot be paired with unrelated dataset or split metadata while producing plausible provenance. Treat this as cross-cutting lineage hardening for every project-owned export task, not a supervised-only check.
 - Define how project-owned export reconstructs versioned model and preprocessor components from checkpoint/run evidence instead of assuming the currently imported class still matches an older checkpoint.
 
 ## Deferred from: Kaggle consumer portfolio (2026-09-24)

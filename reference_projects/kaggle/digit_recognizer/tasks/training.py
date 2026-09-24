@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import json
 from pathlib import Path
 from typing import Any
 
@@ -171,15 +170,16 @@ def _verified_encoder(
     split_digest: str,
 ) -> tuple[ArtifactRef, dict[str, Any]]:
     reference = ArtifactRef.model_validate(payload)
-    require_evidence(reference.run_id, identity=identity, required_artifacts={reference.path})
-    provenance_path = MlflowClient().download_artifacts(reference.run_id, "provenance.json")
-    configuration = json.loads(Path(provenance_path).read_text())["configuration"]
-    if configuration.get("dataset_digest") != dataset_digest:
-        raise ValueError("encoder evidence belongs to a different dataset")
-    if configuration.get("split_digest") != split_digest:
-        raise ValueError("encoder evidence belongs to a different split")
-    if configuration.get("label_fields_consumed") != []:
-        raise ValueError("encoder evidence is label-tainted and cannot be reused")
+    require_evidence(
+        reference.run_id,
+        identity=identity,
+        required_artifacts={reference.path},
+        expected_configuration={
+            "dataset_digest": dataset_digest,
+            "split_digest": split_digest,
+            "label_fields_consumed": [],
+        },
+    )
     payload_bytes = load_artifact(reference)
     try:
         state = torch.load(io.BytesIO(payload_bytes), map_location="cpu", weights_only=True)
