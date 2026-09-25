@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import os
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import mlflow
@@ -136,6 +137,50 @@ def bike_csvs(tmp_path: Path) -> Path:
             for index in range(4)
         ],
     )
+    return root
+
+
+@pytest.fixture
+def store_sales_csvs(tmp_path: Path) -> Path:
+    root = tmp_path / "store-sales"
+    train_fields = ["id", "date", "store_nbr", "family", "sales", "onpromotion"]
+    test_fields = ["id", "date", "store_nbr", "family", "onpromotion"]
+    families = ("BEVERAGES", "PRODUCE")
+    start = date(2020, 1, 1)
+    train: list[dict[str, object]] = []
+    test: list[dict[str, object]] = []
+    row_id = 0
+    for offset in range(110):
+        day = start + timedelta(days=offset)
+        for store in (1, 2):
+            for family_index, family in enumerate(families):
+                train.append(
+                    {
+                        "id": row_id,
+                        "date": day.isoformat(),
+                        "store_nbr": store,
+                        "family": family,
+                        "sales": float(10 * store + family_index + offset % 7),
+                        "onpromotion": (offset + family_index) % 4,
+                    }
+                )
+                row_id += 1
+    for offset in range(110, 126):
+        day = start + timedelta(days=offset)
+        for store in (1, 2):
+            for family_index, family in enumerate(families):
+                test.append(
+                    {
+                        "id": row_id,
+                        "date": day.isoformat(),
+                        "store_nbr": store,
+                        "family": family,
+                        "onpromotion": (offset + family_index) % 4,
+                    }
+                )
+                row_id += 1
+    write_csv(root / "train.csv", train_fields, train)
+    write_csv(root / "test.csv", test_fields, test)
     return root
 
 

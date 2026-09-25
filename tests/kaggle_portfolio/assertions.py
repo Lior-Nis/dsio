@@ -14,6 +14,9 @@ def assert_execution_evidence(
     *,
     optimizer: str,
     optimizer_parameters: dict[str, float],
+    fold: int = 0,
+    batch_size: int = 4,
+    num_workers: int = 0,
 ) -> None:
     client = MlflowClient()
     run = client.get_run(run_id)
@@ -30,9 +33,9 @@ def assert_execution_evidence(
     assert execution["resolved_precision"] == "32-true"
     for key, value in execution.items():
         assert run.data.params[f"execution.{key}"] == value
-    assert configuration["fold"] == 0
-    assert configuration["batch_size"] == 4
-    assert configuration["num_workers"] == 0
+    assert configuration["fold"] == fold
+    assert configuration["batch_size"] == batch_size
+    assert configuration["num_workers"] == num_workers
     assert configuration["optimizer_parameters"] == optimizer_parameters
     assert provenance["components"]["optimizer"] == optimizer
 

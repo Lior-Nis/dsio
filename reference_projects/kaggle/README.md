@@ -1,6 +1,6 @@
 # Kaggle consumer portfolio
 
-These are three independent, unshipped consumer projects. They exercise public DSIO APIs;
+These are independent, unshipped consumer projects. They exercise public DSIO APIs;
 they are not DSIO modes, templates, or leaderboard claims.
 
 | Project | Official competition slug | Expected local files |
@@ -8,6 +8,7 @@ they are not DSIO modes, templates, or leaderboard claims.
 | Titanic | `titanic` | `train.csv`, `test.csv` |
 | Bike Sharing Demand | `bike-sharing-demand` | `train.csv`, `test.csv` |
 | Digit Recognizer | `digit-recognizer` | `train.csv`, `test.csv` |
+| Store Sales — Time Series Forecasting | `store-sales-time-series-forecasting` | `train.csv`, `test.csv` |
 
 Accept each competition's rules and configure Kaggle credentials yourself. Downloads are
 deliberately opt-in and outside every flow:
@@ -16,6 +17,7 @@ deliberately opt-in and outside every flow:
 kaggle competitions download -c titanic -p data/titanic
 kaggle competitions download -c bike-sharing-demand -p data/bike-sharing
 kaggle competitions download -c digit-recognizer -p data/digit-recognizer
+kaggle competitions download -c store-sales-time-series-forecasting -p data/store-sales
 ```
 
 Unzip each archive, then call the project-owned flows directly:
@@ -24,11 +26,17 @@ Unzip each archive, then call the project-owned flows directly:
 from reference_projects.kaggle.titanic.flow import titanic_flow
 from reference_projects.kaggle.bike_sharing.flow import bike_sharing_flow
 from reference_projects.kaggle.digit_recognizer.flow import digit_recognizer_flow
+from reference_projects.kaggle.store_sales.flow import store_sales_flow
 
 titanic_flow("data/titanic", "work/titanic", seed=19)
 bike_sharing_flow("data/bike-sharing", "work/bike-sharing", seed=19)
 digit_recognizer_flow("data/digit-recognizer", "work/digit-recognizer", seed=19)
+store_sales_flow("data/store-sales", "work/store-sales", seed=19)
 ```
+
+The Store Sales reference keeps the last 110 training days per store-family series, creates
+five 30-day-context rolling origins, and predicts the 16 dates present in the official test
+file. This is a bounded representative experiment, not a full-history leaderboard model.
 
 The checked-in tests generate tiny deterministic CSVs with the official schemas. Their
 metrics prove only plumbing, leakage controls, replay, evidence, and submission shape. They
