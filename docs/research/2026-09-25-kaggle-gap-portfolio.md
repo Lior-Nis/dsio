@@ -15,8 +15,8 @@ second.
    ordinal prediction, and a nontrivial metric.
 3. **ROGII Wellbore Geology Prediction** (1.33 GB, executed): exercise multi-source
    variable-length sequences and hidden-tail regression by well.
-4. **Parkinson's Freezing of Gait Prediction** (70.59 GB, download verified): use a bounded
-   subset first, then make it the first full-scale ragged/windowed sequence and mask test.
+4. **Parkinson's Freezing of Gait Prediction** (70.59 GB, bounded subset executed): make the
+   eventual full bundle the first full-scale ragged/windowed sequence and mask test.
 
 The account is already entered in Parkinson, ROGII, and Essay Scoring; authenticated downloads
 were verified. Store Sales access and download were subsequently verified as well.
@@ -100,9 +100,33 @@ consumer-local in this PR; masked dense evaluation is only a first use. Although
 the entire extracted source, it did not log peak memory or throughput and therefore does not
 claim the formal scale tier.
 
+Parkinson's Freezing of Gait then completed its bounded representative gate:
+
+- 30 official training recordings (1,201,946 rows) spanning defog and tdcsfog plus both
+  official test recordings were downloaded; the training recording belonging to an official
+  test subject was excluded, leaving 29 eligible recordings;
+- signal ingestion held at most 512 source rows at once, staged 1,713 variable-length windows, and
+  discarded 1,200 defog windows with no scoreable points;
+- the subject-disjoint validation fold contained 344 windows from ten recordings/subjects and
+  167,933 scoreable points; 663,045 ignored points affected neither loss nor metrics;
+- a real two-worker Lightning convolutional model trained, exported through MLflow, and scored
+  **0.2208 mean Average Precision**, above the **0.2015** constant-score prevalence baseline;
+- the per-class AP/prevalence pairs were 0.0624/0.0506 for StartHesitation, 0.4097/0.3950 for
+  Turn, and 0.1903/0.1590 for Walking;
+- inference restored all **286,370** official test row IDs and three probabilities in exact
+  submission order;
+- the final evaluation [is visible in MLflow](https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/cadde18c61b645638d12e23b6e37b0dc).
+
+The official data exposed a stronger leakage boundary than recording ID: subjects can own
+multiple recordings, and a labelled train recording shares the official test subject. The
+consumer therefore excludes all test subjects before generating a governed group split.
+This is the second unrelated masked dense-evaluation use after ROGII, so mask-aware evaluation
+has now crossed the evidence threshold for a separate DSIO component-admission PR. This pass
+is intentionally not the 70.59 GB scale tier and makes no full-corpus throughput claim.
+
 ## Ready-now competitions
 
-### Parkinson's Freezing of Gait Prediction
+### Parkinson's Freezing of Gait Prediction (bounded subset executed)
 
 Source: [official competition](https://www.kaggle.com/competitions/tlvmc-parkinsons-freezing-gait-prediction).
 
@@ -143,8 +167,8 @@ Source: [official competition](https://www.kaggle.com/competitions/learning-agen
 | Gap | First proof | Independent/stress proof |
 |---|---|---|
 | Forecasting and rolling-origin splits | Store Sales | ROGII hidden-tail regression |
-| Variable-length input and masking | Essay Scoring / ROGII | Parkinson; ASL only if needed |
-| Dense sequence output | Parkinson | Ventilator only if needed |
+| Variable-length input and masking | Essay Scoring / ROGII | Parkinson (bounded); ASL only if needed |
+| Dense sequence output | Parkinson (bounded) | Ventilator only if needed |
 | Multimodal and missing modalities | CMI | HMS |
 | Ordinal, soft, and ranked targets | Essay Scoring / CMI | HMS / OTTO |
 | Bounded-memory loading at scale | Parkinson | OTTO / HMS |
@@ -334,8 +358,9 @@ external feedback, not a substitute for these checks.
 
 ## Immediate next action
 
-Run Parkinson's Freezing of Gait as a bounded representative subset before touching its full
-70.59 GB bundle. Use it to test dense multi-target outputs, ignored-timestep masks,
-subject-disjoint splits, and bounded file iteration. Separately submit the now twice-proven
-padding/masking seam to DSIO's component-admission process; do not mix that API decision into
-the Parkinson consumer PR.
+Submit the now twice-proven mask-aware dense-evaluation seam to DSIO's component-admission
+process in a separate PR. Keep padding generic and small: one collator helper should preserve
+named tensors and emit an explicit mask, without introducing a batch dataclass or task model.
+After that API decision, either accept CMI's rules for the multimodal lane or proceed with a
+bounded full-directory Parkinson benchmark that logs peak memory and throughput; do not call
+the current 134 MB source selection a scale result.

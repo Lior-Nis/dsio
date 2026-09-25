@@ -291,6 +291,105 @@ def rogii_csvs(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def parkinsons_fog_csvs(tmp_path: Path) -> Path:
+    root = tmp_path / "parkinsons-fog"
+    train_defog = [(f"defog{index}", f"subject{index}", 17 + index) for index in range(4)]
+    train_tdcs = [
+        ("shared", "test-subject", 16),
+        ("same-subject", "test-subject", 18),
+        ("tdcs5", "subject5", 19),
+        ("tdcs6", "subject6", 21),
+    ]
+    test = [("shared", "test-subject", 9), ("test-defog", "held-out-subject", 11)]
+
+    def signal_rows(length: int, *, labelled: bool, defog: bool) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for index in range(length):
+            row: dict[str, object] = {
+                "Time": index,
+                "AccV": -1.0 + index / 100,
+                "AccML": 0.1 + index / 200,
+                "AccAP": -0.2 + index / 300,
+            }
+            if labelled:
+                row.update(
+                    {
+                        "StartHesitation": int(index in (4, 5)),
+                        "Turn": int(index in (7, 8, 9)),
+                        "Walking": int(index in (11, 12)),
+                    }
+                )
+                if defog:
+                    row.update(
+                        {
+                            "Valid": str(index >= 2).lower(),
+                            "Task": str(index < length - 2).lower(),
+                        }
+                    )
+            rows.append(row)
+        return rows
+
+    base = ["Time", "AccV", "AccML", "AccAP"]
+    targets = ["StartHesitation", "Turn", "Walking"]
+    for recording, _, length in train_defog:
+        write_csv(
+            root / "train" / "defog" / f"{recording}.csv",
+            [*base, *targets, "Valid", "Task"],
+            signal_rows(length, labelled=True, defog=True),
+        )
+    for recording, _, length in train_tdcs:
+        write_csv(
+            root / "train" / "tdcsfog" / f"{recording}.csv",
+            [*base, *targets],
+            signal_rows(length, labelled=True, defog=False),
+        )
+    for recording, _, length in test:
+        kind = "tdcsfog" if recording == "shared" else "defog"
+        write_csv(
+            root / "test" / kind / f"{recording}.csv",
+            base,
+            signal_rows(length, labelled=False, defog=kind == "defog"),
+        )
+    write_csv(
+        root / "defog_metadata.csv",
+        ["Id", "Subject", "Visit", "Medication"],
+        [
+            {"Id": recording, "Subject": subject, "Visit": 1, "Medication": "on"}
+            for recording, subject, _ in [*train_defog, test[1]]
+        ],
+    )
+    write_csv(
+        root / "tdcsfog_metadata.csv",
+        ["Id", "Subject", "Visit", "Test", "Medication"],
+        [
+            {
+                "Id": recording,
+                "Subject": subject,
+                "Visit": 1,
+                "Test": 1,
+                "Medication": "on",
+            }
+            for recording, subject, _ in train_tdcs
+        ],
+    )
+    submission = [
+        {"Id": f"shared_{index}", "StartHesitation": 0, "Turn": 0, "Walking": 0}
+        for index in range(9)
+    ]
+    submission.extend(
+        {
+            "Id": f"test-defog_{index}",
+            "StartHesitation": 0,
+            "Turn": 0,
+            "Walking": 0,
+        }
+        for index in range(11)
+    )
+    write_csv(root / "sample_submission.csv", ["Id", *targets], submission)
+    return root
+
+
+@pytest.fixture
 def digit_csvs(tmp_path: Path) -> Path:
     root = tmp_path / "digits"
     pixels = [f"pixel{index}" for index in range(784)]
