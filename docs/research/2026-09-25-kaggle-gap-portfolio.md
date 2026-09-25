@@ -13,7 +13,7 @@ second.
    multi-series forecasting contract. Access is already verified.
 2. **Automated Essay Scoring 2.0** (36.2 MB, executed): cheaply prove variable-length text,
    ordinal prediction, and a nontrivial metric.
-3. **ROGII Wellbore Geology Prediction** (1.33 GB, download verified): exercise multi-source
+3. **ROGII Wellbore Geology Prediction** (1.33 GB, executed): exercise multi-source
    variable-length sequences and hidden-tail regression by well.
 4. **Parkinson's Freezing of Gait Prediction** (70.59 GB, download verified): use a bounded
    subset first, then make it the first full-scale ragged/windowed sequence and mask test.
@@ -79,6 +79,27 @@ before an unrelated second use. The two-worker run did expose one generic defect
 workers were unsafe inside Prefect's multithreaded process. DSIO loaders now use a spawn context
 when workers are enabled, and both the focused regression and official flow pass with it.
 
+ROGII Wellbore Geology Prediction then completed its full-source representative gate:
+
+- all 773 paired training wells and three paired test wells were parsed from the official
+  bundle; the three test well IDs also occur in train and were excluded from learning;
+- 770 eligible wells were staged as variable-length entities with hidden tails ranging from
+  407 to 10,052 points, then split by well with no identity overlap;
+- a real Lightning dense-regression model trained with dynamic padding, explicit masks, and
+  two loader workers, then exported through the standard MLflow Predictor path;
+- its held-out RMSE was **16.4913**, narrowly better than the **16.5338** last-value baseline;
+- inference reconstructed all **14,151** official submission rows in their original order;
+- the final evaluation [is visible in MLflow](https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/dff7a22b78ce402082a9532af6a22717).
+
+The first unconstrained neural model produced an RMSE of 539.8331. That failure was useful:
+the accepted model is now a zero-initialized, bounded residual around the explicit baseline,
+and both synthetic and official acceptance tests require it not to regress the baseline.
+ROGII is also the second unrelated variable-length use after Essay Scoring, so padding and
+masking now have enough usage evidence for a separate component-admission review. They remain
+consumer-local in this PR; masked dense evaluation is only a first use. Although this pass read
+the entire extracted source, it did not log peak memory or throughput and therefore does not
+claim the formal scale tier.
+
 ## Ready-now competitions
 
 ### Parkinson's Freezing of Gait Prediction
@@ -94,7 +115,7 @@ Source: [official competition](https://www.kaggle.com/competitions/tlvmc-parkins
   neither loss nor metric; full-data iteration has bounded memory; export restores every
   series/timestep identity.
 
-### ROGII Wellbore Geology Prediction
+### ROGII Wellbore Geology Prediction (executed)
 
 Source: [official competition](https://www.kaggle.com/competitions/rogii-wellbore-geology-prediction).
 
@@ -313,8 +334,8 @@ external feedback, not a substitute for these checks.
 
 ## Immediate next action
 
-Build the ROGII Wellbore Geology consumer against DSIO `v0.2.0`. Use it as the unrelated
-variable-length sequence test for the padding/masking seam, while keeping well joins,
-geological features, hidden-tail model, and depth-indexed submission packaging consumer-local.
-Only propose a DSIO component if the real flow demonstrates the same invariant with a second
-task family.
+Run Parkinson's Freezing of Gait as a bounded representative subset before touching its full
+70.59 GB bundle. Use it to test dense multi-target outputs, ignored-timestep masks,
+subject-disjoint splits, and bounded file iteration. Separately submit the now twice-proven
+padding/masking seam to DSIO's component-admission process; do not mix that API decision into
+the Parkinson consumer PR.
