@@ -224,6 +224,73 @@ def essay_scoring_csvs(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def rogii_csvs(tmp_path: Path) -> Path:
+    root = tmp_path / "rogii"
+    train_horizontal = [
+        "MD",
+        "X",
+        "Y",
+        "Z",
+        "ANCC",
+        "ASTNU",
+        "ASTNL",
+        "EGFDU",
+        "EGFDL",
+        "BUDA",
+        "TVT",
+        "GR",
+        "TVT_input",
+    ]
+    test_horizontal = ["MD", "X", "Y", "Z", "GR", "TVT_input"]
+    submission: list[dict[str, object]] = []
+    for well_index in range(8):
+        well = f"well{well_index:02d}"
+        prefix = 5 + well_index % 3
+        tail = 4 + well_index % 4
+        rows: list[dict[str, object]] = []
+        for index in range(prefix + tail):
+            tvt = 1000 + well_index * 100 + index * 2
+            rows.append(
+                {
+                    "MD": 10000 + index,
+                    "X": 3_000_000 + well_index * 10 + index,
+                    "Y": 1_000_000 + well_index * 5 + index * 0.5,
+                    "Z": -9000 - index,
+                    "ANCC": "",
+                    "ASTNU": "",
+                    "ASTNL": "",
+                    "EGFDU": "",
+                    "EGFDL": "",
+                    "BUDA": "",
+                    "TVT": tvt,
+                    "GR": "" if index % 5 == 0 else 80 + index,
+                    "TVT_input": tvt if index < prefix else "",
+                }
+            )
+        typewell = [
+            {"TVT": 900 + offset * 5, "GR": 70 + offset, "Geology": "layer"} for offset in range(12)
+        ]
+        write_csv(root / "train" / f"{well}__horizontal_well.csv", train_horizontal, rows)
+        write_csv(root / "train" / f"{well}__typewell.csv", ["TVT", "GR", "Geology"], typewell)
+        if well_index < 2:
+            write_csv(
+                root / "test" / f"{well}__horizontal_well.csv",
+                test_horizontal,
+                [{key: row[key] for key in test_horizontal} for row in rows],
+            )
+            write_csv(
+                root / "test" / f"{well}__typewell.csv",
+                ["TVT", "GR"],
+                [{"TVT": row["TVT"], "GR": row["GR"]} for row in typewell],
+            )
+            submission.extend(
+                {"id": f"{well}_{index}", "tvt": 0.0} for index in range(prefix, prefix + tail)
+            )
+    write_csv(root / "sample_submission.csv", ["id", "tvt"], submission)
+    return root
+
+
+@pytest.fixture
 def digit_csvs(tmp_path: Path) -> Path:
     root = tmp_path / "digits"
     pixels = [f"pixel{index}" for index in range(784)]
