@@ -14,6 +14,7 @@ from prefect import task
 
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
+from dsio.eval import evaluate
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
@@ -30,8 +31,30 @@ def _arrays(store_path: str, sample_ids: list[str], width: int) -> dict[str, np.
     values = np.zeros((len(sample_ids), width, FEATURES), dtype=np.float32)
     for index, sample_id in enumerate(sample_ids):
         sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
+        _require_width(sample_id, sample, width)
         values[index, : len(sample)] = sample[:, :FEATURES]
     return {"sample_id": np.asarray(sample_ids, dtype=np.str_), "x": values}
+
+
+def _targets_and_mask(
+    store_path: str, sample_ids: list[str], width: int
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    store = SignalStore(store_path)
+    targets = np.zeros((len(sample_ids), width), dtype=np.float32)
+    mask = np.zeros((len(sample_ids), width), dtype=bool)
+    for index, sample_id in enumerate(sample_ids):
+        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
+        _require_width(sample_id, sample, width)
+        targets[index, : len(sample)] = sample[:, FEATURES] * TARGET_SCALE
+        mask[index, : len(sample)] = True
+    return targets, mask
+
+
+def _require_width(sample_id: str, sample: np.ndarray[Any, Any], width: int) -> None:
+    if len(sample) > width:
+        raise ValueError(
+            f"ROGII sample {sample_id!r} has {len(sample)} points; evaluation width is {width}"
+        )
 
 
 @task(persist_result=False)
@@ -102,18 +125,14 @@ def evaluate_model(
     with attempt(experiment_id) as run:
         sample_ids = list(split["assignments"]["validate"])
         inputs = _arrays(data["store_path"], sample_ids, data["max_tail_points"])
-        outputs = predict(exported["model_uri"], inputs)
-        prediction = np.asarray(outputs["prediction"], dtype=np.float64)
+        targets, mask = _targets_and_mask(data["store_path"], sample_ids, data["max_tail_points"])
         store = SignalStore(data["store_path"])
-        residuals = []
         baseline_residuals = []
         for index, sample_id in enumerate(sample_ids):
             sample = store.read_sample(sample_id)
-            target = np.asarray(sample["data"][:, FEATURES], dtype=np.float64) * TARGET_SCALE
-            residuals.extend((prediction[index, : len(target)] - target).tolist())
+            target = targets[index, mask[index]].astype(np.float64)
             baseline = float(sample["attrs"]["last_known_tvt"])
             baseline_residuals.extend((baseline - target).tolist())
-        rmse = float(np.sqrt(np.mean(np.square(residuals))))
         last_value_rmse = float(np.sqrt(np.mean(np.square(baseline_residuals))))
         identity = record_provenance(
             run.info.run_id,
@@ -122,24 +141,26 @@ def evaluate_model(
                 "checkpoint_digest": exported["checkpoint_digest"],
                 "export_identity": exported["identity"],
                 "metrics": ["rmse", "last_value_rmse"],
+                "baseline": "last-known-TVT",
                 "sample_ids": sample_ids,
             },
-            components={
-                "evaluation": "reference_projects.kaggle.rogii.tasks.downstream:evaluate_model"
-            },
+            components={"evaluation": "dsio.eval.execution:evaluate"},
+        )
+        metrics = evaluate(
+            run_id=run.info.run_id,
+            model_uri=exported["model_uri"],
+            dataset_run_id=split["split_run_id"],
+            inputs=inputs,
+            targets=targets,
+            metrics=("rmse",),
+            mask=mask,
         )
         client = MlflowClient()
-        client.log_metric(run.info.run_id, "rmse", rmse)
         client.log_metric(run.info.run_id, "last_value_rmse", last_value_rmse)
-        with io.BytesIO() as buffer:
-            np.savez_compressed(buffer, prediction=prediction)
-            artifact = save_artifact(buffer.getvalue(), run_id=run.info.run_id, name="predictions")
-        client.log_dict(
-            run.info.run_id, artifact.model_dump(mode="json"), "outputs/predictions.json"
-        )
+        metrics["last_value_rmse"] = last_value_rmse
         return {
             "evaluation_run_id": run.info.run_id,
-            "metrics": {"rmse": rmse, "last_value_rmse": last_value_rmse},
+            "metrics": metrics,
             "identity": identity,
         }
 

@@ -14,7 +14,7 @@ from prefect import task
 
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
-from dsio.eval.metrics import compute
+from dsio.eval import evaluate
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
@@ -33,8 +33,36 @@ def _arrays(store_path: str, sample_ids: list[str]) -> dict[str, np.ndarray[Any,
     values = np.zeros((len(sample_ids), WINDOW_SIZE, FEATURE_COUNT), dtype=np.float32)
     for index, sample_id in enumerate(sample_ids):
         sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
+        _require_window_size(sample_id, sample)
         values[index, : len(sample)] = normalize_signal(sample[:, :FEATURE_COUNT])
     return {"sample_id": np.asarray(sample_ids, dtype=np.str_), "x": values}
+
+
+def _targets_and_mask(
+    store_path: str, sample_ids: list[str]
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    store = SignalStore(store_path)
+    targets = np.zeros((len(sample_ids), WINDOW_SIZE, TARGET_COUNT), dtype=np.int64)
+    mask = np.zeros((len(sample_ids), WINDOW_SIZE), dtype=bool)
+    for index, sample_id in enumerate(sample_ids):
+        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
+        _require_window_size(sample_id, sample)
+        labels = sample[:, FEATURE_COUNT : FEATURE_COUNT + TARGET_COUNT]
+        valid = sample[:, -1]
+        if not bool(np.isfinite(labels).all()) or not bool(((labels == 0) | (labels == 1)).all()):
+            raise ValueError(f"FoG sample {sample_id!r} labels must be finite binary values")
+        if not bool(np.isfinite(valid).all()) or not bool(((valid == 0) | (valid == 1)).all()):
+            raise ValueError(f"FoG sample {sample_id!r} mask must contain only zero or one")
+        targets[index, : len(sample)] = labels.astype(np.int64)
+        mask[index, : len(sample)] = valid.astype(bool)
+    return targets, mask
+
+
+def _require_window_size(sample_id: str, sample: np.ndarray[Any, Any]) -> None:
+    if len(sample) > WINDOW_SIZE:
+        raise ValueError(
+            f"FoG sample {sample_id!r} has {len(sample)} points; maximum is {WINDOW_SIZE}"
+        )
 
 
 @task(persist_result=False)
@@ -106,57 +134,30 @@ def evaluate_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         sample_ids = list(split["assignments"]["validate"])
-        outputs = predict(exported["model_uri"], _arrays(data["store_path"], sample_ids))
-        probability = np.asarray(outputs["probability"], dtype=np.float64)
-        store = SignalStore(data["store_path"])
-        targets: list[np.ndarray[Any, Any]] = []
-        scores: list[np.ndarray[Any, Any]] = []
-        for index, sample_id in enumerate(sample_ids):
-            sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float64)
-            mask = sample[:, -1].astype(bool)
-            targets.append(sample[mask, FEATURE_COUNT : FEATURE_COUNT + TARGET_COUNT])
-            scores.append(probability[index, : len(sample)][mask])
-        y_true = np.concatenate(targets)
-        y_score = np.concatenate(scores)
-        average_precision = {
-            f"{target}_average_precision": compute(
-                ("average_precision",),
-                y_true[:, index],
-                y_score[:, index] >= 0.5,
-                y_score[:, index],
-            )["average_precision"]
-            for index, target in enumerate(TARGETS)
-        }
-        positive_rate = {
-            f"{target}_positive_rate": float(y_true[:, index].mean())
-            for index, target in enumerate(TARGETS)
-        }
-        metrics = {
-            **average_precision,
-            "mean_average_precision": float(np.mean(list(average_precision.values()))),
-            **positive_rate,
-            "mean_positive_rate": float(np.mean(list(positive_rate.values()))),
-        }
+        inputs = _arrays(data["store_path"], sample_ids)
+        targets, mask = _targets_and_mask(data["store_path"], sample_ids)
         identity = record_provenance(
             run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "checkpoint_digest": exported["checkpoint_digest"],
                 "export_identity": exported["identity"],
-                "metrics": list(metrics),
+                "metrics": ["average_precision", "positive_rate"],
                 "sample_ids": sample_ids,
-                "masked_points": int(sum(len(value) for value in targets)),
+                "scoreable_points": int(mask.sum()),
             },
-            components={"metric": "dsio.eval.metrics:average_precision"},
+            components={"evaluation": "dsio.eval.execution:evaluate"},
         )
-        client = MlflowClient()
-        for name, value in metrics.items():
-            client.log_metric(run.info.run_id, name, value)
-        with io.BytesIO() as buffer:
-            np.savez_compressed(buffer, probability=probability)
-            artifact = save_artifact(buffer.getvalue(), run_id=run.info.run_id, name="predictions")
-        client.log_dict(
-            run.info.run_id, artifact.model_dump(mode="json"), "outputs/predictions.json"
+        metrics = evaluate(
+            run_id=run.info.run_id,
+            model_uri=exported["model_uri"],
+            dataset_run_id=split["split_run_id"],
+            inputs=inputs,
+            targets=targets,
+            metrics=("average_precision", "positive_rate"),
+            score_field="probability",
+            mask=mask,
+            target_names=TARGETS,
         )
         return {"evaluation_run_id": run.info.run_id, "metrics": metrics, "identity": identity}
 

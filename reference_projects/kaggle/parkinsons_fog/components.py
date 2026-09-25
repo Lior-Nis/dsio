@@ -105,16 +105,24 @@ class FogObjective(nn.Module):
 
 class FogOutput(nn.Module):
     def forward(self, logits: Tensor) -> Mapping[str, Tensor]:
-        return {"probability": torch.sigmoid(logits)}
+        probability = torch.sigmoid(logits)
+        return {"prediction": (probability >= 0.5).long(), "probability": probability}
 
 
 def validate_fog_prediction(output: Mapping[str, Any]) -> None:
+    prediction = output.get("prediction")
     probability = output.get("probability")
+    if not isinstance(prediction, Tensor) or prediction.ndim != 3:
+        raise ValueError("FoG prediction must have shape [batch, points, classes]")
     if not isinstance(probability, Tensor) or probability.ndim != 3:
         raise ValueError("FoG probability must have shape [batch, points, classes]")
-    if probability.shape[2] != TARGET_COUNT:
+    if prediction.shape != probability.shape or probability.shape[2] != TARGET_COUNT:
         raise ValueError(f"FoG probability must have {TARGET_COUNT} classes")
+    if not bool(((prediction == 0) | (prediction == 1)).all()):
+        raise ValueError("FoG prediction must be binary")
     if not bool(torch.isfinite(probability).all()):
         raise ValueError("FoG probability must be finite")
     if not bool(((probability >= 0) & (probability <= 1)).all()):
         raise ValueError("FoG probability must be between zero and one")
+    if not torch.equal(prediction, (probability >= 0.5).long()):
+        raise ValueError("FoG prediction must equal probability thresholded at 0.5")
