@@ -54,6 +54,24 @@ def test_rogii_boundary_joins_wells_and_reconstructs_hidden_tail(rogii_csvs: Pat
         load_competition_data(rogii_csvs)
 
 
+def test_rogii_evaluation_rejects_samples_wider_than_the_declared_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import reference_projects.kaggle.rogii.tasks.downstream as downstream
+
+    class FakeStore:
+        def __init__(self, path: str) -> None:
+            del path
+
+        def read_sample(self, sample_id: str) -> dict[str, object]:
+            del sample_id
+            return {"data": np.zeros((3, 14), dtype=np.float32)}
+
+    monkeypatch.setattr(downstream, "SignalStore", FakeStore)
+    with pytest.raises(ValueError, match="evaluation width is 2"):
+        downstream._targets_and_mask("unused", ["too-long"], 2)
+
+
 def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
     rogii_csvs: Path,
     tmp_path: Path,
@@ -121,6 +139,7 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
     assert run.data.metrics["last_value_rmse"] == pytest.approx(
         result["metrics"]["last_value_rmse"]
     )
+    assert run.data.params["evaluation.masked"] == "true"
     assert_execution_evidence(
         result["train_run_id"],
         tmp_path / "rogii-provenance",

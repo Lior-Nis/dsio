@@ -343,6 +343,31 @@ image. Claim it and a store that stops being uniform — one 12×12 scan among t
 refused by name, on the cache-hit path too, rather than quietly training on strips. Then resize
 at ingest, or give each size its own store.
 
+## Masked dense evaluation
+
+`dsio.eval.evaluate(...)` accepts an optional boolean NumPy-array `mask`. Ignored positions
+are removed before metrics run, while the original targets, predictions, mask, and target names
+remain in the MLflow evaluation artifact. For multi-target outputs, pass `target_names`; DSIO
+scores every metric independently along the final axis and logs a mean as `metric.mean`:
+
+```python
+evaluate(
+    run_id=run.info.run_id,
+    model_uri=model_uri,
+    dataset_run_id=split_run_id,
+    inputs=inputs,
+    targets=targets,                    # [batch, time, 3]
+    metrics=("average_precision",),
+    score_field="probability",
+    mask=valid,                         # [batch, time]
+    target_names=("start", "turn", "walking"),
+)
+```
+
+Without `target_names`, the mask must match the whole target shape. With names, it must match
+every axis except the named final axis. Empty masks, implicit broadcasting, unsafe names, and
+shape mismatches fail before evaluation evidence is written.
+
 ## Developing
 
 ```bash

@@ -26,6 +26,10 @@ from dsio.eval.metrics import compute
 from dsio.inference.loading import InferenceError, predict
 
 _LOGGED_MODEL_URI = re.compile(r"models:/(m-[0-9a-f]{32})")
+_TARGET_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+_MLFLOW_MAX_KEY_LENGTH = 250
+_MLFLOW_MAX_PARAM_VALUE_LENGTH = 6_000
+_MLFLOW_MAX_METRICS_PER_BATCH = 1_000
 _ATTEMPT_TAGS = (
     "dsio.prefect.flow_run_id",
     "dsio.prefect.task_key",
@@ -49,8 +53,16 @@ def evaluate(
     metrics: Sequence[str],
     prediction_field: str = "prediction",
     score_field: str | None = None,
+    mask: np.ndarray[Any, Any] | None = None,
+    target_names: Sequence[str] | None = None,
 ) -> dict[str, float]:
-    """Compute and record evaluation evidence on one caller-owned attempt Run."""
+    """Compute and record evaluation evidence on one caller-owned attempt Run.
+
+    ``mask`` selects scoreable positions before metrics run. With ``target_names``, the
+    final target axis is scored independently and each metric returns one value per name
+    plus its arithmetic mean. The mask then matches every target axis except that named
+    final axis. Without names it matches the complete target shape.
+    """
     client = MlflowClient()
     evaluation_run = _attempt_run(client, run_id)
     _require_clean_attempt(client, evaluation_run)
@@ -66,6 +78,8 @@ def evaluate(
         )
     if targets.ndim == 0 or targets.shape[0] == 0:
         raise EvaluationError("evaluation targets must contain at least one row")
+    resolved_target_names = _target_names(target_names, targets, names)
+    resolved_mask = _mask(mask, targets, resolved_target_names)
 
     try:
         outputs = predict(model_uri, inputs)
@@ -78,9 +92,36 @@ def evaluate(
             f"{prediction_field!r} shape {predicted.shape}"
         )
     score = None if score_field is None else _output(outputs, score_field, "score")
-    _validate_metric_arrays(targets, predicted, score, score_field)
+    metric_targets, metric_predicted, metric_score = _metric_arrays(
+        targets,
+        predicted,
+        score,
+        resolved_mask,
+        resolved_target_names,
+        score_field,
+    )
+    if metric_targets.size == 0:
+        raise EvaluationError("evaluation targets must contain at least one scoreable value")
+    if resolved_target_names is None:
+        _validate_metric_arrays(metric_targets, metric_predicted, metric_score, score_field)
+    else:
+        for index in range(len(resolved_target_names)):
+            _validate_metric_arrays(
+                metric_targets[:, index],
+                metric_predicted[:, index],
+                None if metric_score is None else metric_score[:, index],
+                score_field,
+            )
     try:
-        values = compute(names, targets, predicted, score)
+        values = _compute_metrics(
+            names,
+            metric_targets,
+            metric_predicted,
+            metric_score,
+            resolved_target_names,
+        )
+    except EvaluationError:
+        raise
     except Exception as error:
         raise EvaluationError(
             f"metric inputs or configuration are incompatible: {error}"
@@ -95,13 +136,17 @@ def evaluate(
     try:
         with TemporaryDirectory(prefix="dsio-evaluation-") as directory:
             artifact = Path(directory) / "predictions.npz"
-            np.savez_compressed(
-                artifact,
-                target=targets,
-                # NumPy accepts arbitrary named arrays; its stub mistakes the third one
-                # for the reserved allow_pickle keyword.
-                **{f"prediction__{name}": value for name, value in outputs.items()},  # type: ignore[arg-type]
-            )
+            evidence = {
+                "target": targets,
+                **{f"prediction__{name}": value for name, value in outputs.items()},
+            }
+            if resolved_mask is not None:
+                evidence["mask"] = resolved_mask
+            if resolved_target_names is not None:
+                evidence["target_names"] = np.asarray(resolved_target_names, dtype=np.str_)
+            # NumPy accepts arbitrary named arrays; its stub mistakes one for the
+            # reserved allow_pickle keyword.
+            np.savez_compressed(artifact, **evidence)  # type: ignore[arg-type]
             client.log_artifact(run_id, str(artifact), artifact_path="evaluation")
         client.log_inputs(
             run_id,
@@ -112,6 +157,9 @@ def evaluate(
         client.set_tag(run_id, "dsio.evaluation.dataset_source_run_id", dataset_run_id)
         client.log_param(run_id, "evaluation.metrics", json.dumps(names))
         client.log_param(run_id, "evaluation.prediction_field", prediction_field)
+        client.log_param(run_id, "evaluation.masked", json.dumps(resolved_mask is not None))
+        if resolved_target_names is not None:
+            client.log_param(run_id, "evaluation.target_names", json.dumps(resolved_target_names))
         if score_field is not None:
             client.log_param(run_id, "evaluation.score_field", score_field)
         _attempt_run(client, run_id)
@@ -255,6 +303,133 @@ def _metric_names(metrics: Sequence[str]) -> tuple[str, ...]:
 def _field_name(name: str, role: str) -> None:
     if not isinstance(name, str) or not name or name == "sample_id":
         raise EvaluationError(f"evaluation {role} field must be a non-empty non-identity string")
+
+
+def _target_names(
+    names: Sequence[str] | None,
+    targets: np.ndarray[Any, Any],
+    metric_names: tuple[str, ...],
+) -> tuple[str, ...] | None:
+    if names is None:
+        return None
+    if isinstance(names, str) or not isinstance(names, Sequence) or not names:
+        raise EvaluationError("evaluation target_names must be a non-empty sequence")
+    resolved = tuple(names)
+    if any(
+        not isinstance(name, str) or not _TARGET_NAME.fullmatch(name) or name == "mean"
+        for name in resolved
+    ):
+        raise EvaluationError(
+            "evaluation target_names must start with a letter, contain only letters, "
+            "numbers, underscores, or hyphens, and cannot use 'mean'"
+        )
+    if len(set(resolved)) != len(resolved):
+        raise EvaluationError("evaluation target_names must be unique")
+    if targets.ndim < 2 or targets.shape[-1] != len(resolved):
+        raise EvaluationError(
+            f"evaluation target_names has {len(resolved)} names but target last axis "
+            f"has shape {targets.shape}"
+        )
+    generated_names = [
+        f"{metric_name}.{target_name}"
+        for metric_name in metric_names
+        for target_name in (*resolved, "mean")
+    ]
+    if any(len(name) > _MLFLOW_MAX_KEY_LENGTH for name in generated_names):
+        raise EvaluationError(
+            f"evaluation target_names generate an MLflow metric name longer than "
+            f"{_MLFLOW_MAX_KEY_LENGTH} characters"
+        )
+    if len(generated_names) > _MLFLOW_MAX_METRICS_PER_BATCH:
+        raise EvaluationError(
+            f"evaluation target_names generate more than {_MLFLOW_MAX_METRICS_PER_BATCH} "
+            "MLflow metrics"
+        )
+    if len(json.dumps(resolved)) > _MLFLOW_MAX_PARAM_VALUE_LENGTH:
+        raise EvaluationError(
+            f"evaluation target_names exceed MLflow's {_MLFLOW_MAX_PARAM_VALUE_LENGTH}-character "
+            "parameter limit"
+        )
+    return resolved
+
+
+def _mask(
+    mask: np.ndarray[Any, Any] | None,
+    targets: np.ndarray[Any, Any],
+    target_names: tuple[str, ...] | None,
+) -> np.ndarray[Any, Any] | None:
+    if mask is None:
+        return None
+    if not isinstance(mask, np.ndarray) or mask.dtype.kind != "b":
+        raise EvaluationError("evaluation mask must be a boolean NumPy array")
+    expected = targets.shape[:-1] if target_names is not None else targets.shape
+    if mask.shape != expected:
+        raise EvaluationError(
+            f"evaluation mask shape {mask.shape} does not match expected shape {expected}"
+        )
+    if not bool(mask.any()):
+        raise EvaluationError("evaluation mask must select at least one target")
+    return mask
+
+
+def _metric_arrays(
+    targets: np.ndarray[Any, Any],
+    predicted: np.ndarray[Any, Any],
+    score: np.ndarray[Any, Any] | None,
+    mask: np.ndarray[Any, Any] | None,
+    target_names: tuple[str, ...] | None,
+    score_field: str | None,
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], np.ndarray[Any, Any] | None]:
+    if target_names is not None and score is not None and score.shape != targets.shape:
+        raise EvaluationError(
+            f"evaluation score field {score_field!r} shape {score.shape} must match "
+            f"named target shape {targets.shape}"
+        )
+    if mask is not None and score is not None and score.shape[: mask.ndim] != mask.shape:
+        raise EvaluationError(
+            f"evaluation score field {score_field!r} shape {score.shape} cannot use "
+            f"mask shape {mask.shape}"
+        )
+    if mask is not None:
+        return targets[mask], predicted[mask], None if score is None else score[mask]
+    if target_names is not None:
+        width = targets.shape[-1]
+        return (
+            targets.reshape(-1, width),
+            predicted.reshape(-1, width),
+            None if score is None else score.reshape(-1, width),
+        )
+    return targets, predicted, score
+
+
+def _compute_metrics(
+    names: tuple[str, ...],
+    targets: np.ndarray[Any, Any],
+    predicted: np.ndarray[Any, Any],
+    score: np.ndarray[Any, Any] | None,
+    target_names: tuple[str, ...] | None,
+) -> dict[str, float]:
+    if target_names is None:
+        return compute(names, targets, predicted, score)
+    values: dict[str, float] = {}
+    for metric_name in names:
+        per_target = []
+        for index, target_name in enumerate(target_names):
+            try:
+                value = compute(
+                    (metric_name,),
+                    targets[:, index],
+                    predicted[:, index],
+                    None if score is None else score[:, index],
+                )[metric_name]
+            except Exception as error:
+                raise EvaluationError(
+                    f"evaluation metric {metric_name!r} failed for target {target_name!r}: {error}"
+                ) from error
+            values[f"{metric_name}.{target_name}"] = value
+            per_target.append(value)
+        values[f"{metric_name}.mean"] = float(np.mean(per_target))
+    return values
 
 
 def _output(

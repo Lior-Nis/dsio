@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 from mlflow import MlflowClient
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
@@ -40,6 +41,45 @@ def test_parkinsons_boundary_streams_windows_and_excludes_test_subjects(
     (parkinsons_fog_csvs / "tdcsfog_metadata.csv").unlink()
     with pytest.raises(ValueError, match="metadata"):
         load_competition_data(parkinsons_fog_csvs)
+
+
+def test_parkinsons_evaluation_rejects_malformed_dense_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import reference_projects.kaggle.parkinsons_fog.tasks.downstream as downstream
+    from reference_projects.kaggle.parkinsons_fog.components import validate_fog_prediction
+    from reference_projects.kaggle.parkinsons_fog.data import WINDOW_SIZE
+
+    probability = torch.tensor([[[0.7, 0.2, 0.8]]])
+    with pytest.raises(ValueError, match="thresholded"):
+        validate_fog_prediction(
+            {"prediction": torch.zeros_like(probability), "probability": probability}
+        )
+
+    class FakeStore:
+        sample = np.zeros((1, 7), dtype=np.float32)
+
+        def __init__(self, path: str) -> None:
+            del path
+
+        def read_sample(self, sample_id: str) -> dict[str, object]:
+            del sample_id
+            return {"data": self.sample}
+
+    monkeypatch.setattr(downstream, "SignalStore", FakeStore)
+    FakeStore.sample = np.zeros((1, 7), dtype=np.float32)
+    FakeStore.sample[0, 3] = np.nan
+    with pytest.raises(ValueError, match="labels.*finite binary"):
+        downstream._targets_and_mask("unused", ["bad-label"])
+
+    FakeStore.sample = np.zeros((1, 7), dtype=np.float32)
+    FakeStore.sample[0, -1] = np.nan
+    with pytest.raises(ValueError, match="mask.*zero or one"):
+        downstream._targets_and_mask("unused", ["bad-mask"])
+
+    FakeStore.sample = np.zeros((WINDOW_SIZE + 1, 7), dtype=np.float32)
+    with pytest.raises(ValueError, match="maximum"):
+        downstream._targets_and_mask("unused", ["too-long"])
 
 
 def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
@@ -84,17 +124,17 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
     assert np.isfinite(result["prediction"]).all()
     assert all(0 <= value <= 1 for row in result["prediction"] for value in row)
     assert set(result["metrics"]) == {
-        "StartHesitation_average_precision",
-        "Turn_average_precision",
-        "Walking_average_precision",
-        "mean_average_precision",
-        "StartHesitation_positive_rate",
-        "Turn_positive_rate",
-        "Walking_positive_rate",
-        "mean_positive_rate",
+        "average_precision.StartHesitation",
+        "average_precision.Turn",
+        "average_precision.Walking",
+        "average_precision.mean",
+        "positive_rate.StartHesitation",
+        "positive_rate.Turn",
+        "positive_rate.Walking",
+        "positive_rate.mean",
     }
     assert all(np.isfinite(value) for value in result["metrics"].values())
-    assert result["metrics"]["mean_average_precision"] >= result["metrics"]["mean_positive_rate"]
+    assert result["metrics"]["average_precision.mean"] >= result["metrics"]["positive_rate.mean"]
     assert result["ignored_points"] > 0
     assert_replay_run_ids_differ(result, replay)
     assert result["split_digest"] == replay["split_digest"]
@@ -112,6 +152,8 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
     run = MlflowClient().get_run(result["evaluation_run_id"])
     for name, value in result["metrics"].items():
         assert run.data.metrics[name] == pytest.approx(value)
+    assert run.data.params["evaluation.masked"] == "true"
+    assert run.data.params["evaluation.target_names"] == ('["StartHesitation", "Turn", "Walking"]')
     assert_execution_evidence(
         result["train_run_id"],
         tmp_path / "parkinsons-provenance",

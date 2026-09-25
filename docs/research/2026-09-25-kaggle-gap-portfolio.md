@@ -89,7 +89,7 @@ ROGII Wellbore Geology Prediction then completed its full-source representative 
   two loader workers, then exported through the standard MLflow Predictor path;
 - its held-out RMSE was **16.4913**, narrowly better than the **16.5338** last-value baseline;
 - inference reconstructed all **14,151** official submission rows in their original order;
-- the final evaluation [is visible in MLflow](https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/dff7a22b78ce402082a9532af6a22717).
+- the final evaluation [is visible in MLflow](https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/75a1d3543c2e40e8a42cdd4c9d861515).
 
 The first unconstrained neural model produced an RMSE of 539.8331. That failure was useful:
 the accepted model is now a zero-initialized, bounded residual around the explicit baseline,
@@ -115,7 +115,7 @@ Parkinson's Freezing of Gait then completed its bounded representative gate:
   Turn, and 0.1903/0.1590 for Walking;
 - inference restored all **286,370** official test row IDs and three probabilities in exact
   submission order;
-- the final evaluation [is visible in MLflow](https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/cadde18c61b645638d12e23b6e37b0dc).
+- the final evaluation [is visible in MLflow](https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/0220b7cca80b48bf9fb329e4c7effe04).
 
 The official data exposed a stronger leakage boundary than recording ID: subjects can own
 multiple recordings, and a labelled train recording shares the official test subject. The
@@ -123,6 +123,12 @@ consumer therefore excludes all test subjects before generating a governed group
 This is the second unrelated masked dense-evaluation use after ROGII, so mask-aware evaluation
 has now crossed the evidence threshold for a separate DSIO component-admission PR. This pass
 is intentionally not the 70.59 GB scale tier and makes no full-corpus throughput claim.
+
+The follow-up admission added `mask` and `target_names` directly to DSIO's existing evaluation
+interface. ROGII now uses the same path for masked scalar RMSE, while Parkinson uses it for
+per-target Average Precision and positive-rate baselines plus their means. The mask, original
+targets, and model outputs are retained as native MLflow evidence. No evaluation-result model,
+batch class, registry, or parallel metric protocol was added.
 
 ## Ready-now competitions
 
@@ -358,9 +364,8 @@ external feedback, not a substitute for these checks.
 
 ## Immediate next action
 
-Submit the now twice-proven mask-aware dense-evaluation seam to DSIO's component-admission
-process in a separate PR. Keep padding generic and small: one collator helper should preserve
-named tensors and emit an explicit mask, without introducing a batch dataclass or task model.
-After that API decision, either accept CMI's rules for the multimodal lane or proceed with a
-bounded full-directory Parkinson benchmark that logs peak memory and throughput; do not call
-the current 134 MB source selection a scale result.
+Do not generalize the three project collators yet: their field and padding semantics differ
+enough that a configurable helper would expose nearly as much interface as implementation.
+Next, either accept CMI's rules for the multimodal lane or proceed with a full-directory
+Parkinson benchmark that logs peak memory and throughput; do not call the current 134 MB source
+selection a scale result.

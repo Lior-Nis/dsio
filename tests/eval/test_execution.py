@@ -407,3 +407,272 @@ def test_evaluation_requires_a_clean_dedicated_attempt() -> None:
         )
 
     assert client.list_artifacts(child_run_id, "evaluation") == []
+
+
+def test_masked_named_targets_are_scored_per_target_and_persisted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.eval.execution as execution
+
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("masked-named-evaluation")
+    run_id = _evaluation_attempt(client, experiment_id)
+    targets = np.asarray(
+        [
+            [[1, 0], [0, 1], [1, 1]],
+            [[0, 0], [1, 0], [0, 1]],
+        ],
+        dtype=np.int64,
+    )
+    mask = np.asarray([[True, False, True], [True, True, False]])
+    score = np.asarray(
+        [
+            [[0.9, 0.1], [0.1, 0.8], [0.8, 0.9]],
+            [[0.2, 0.2], [0.7, 0.3], [0.1, 0.8]],
+        ],
+        dtype=np.float32,
+    )
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {
+            "sample_id": np.asarray(["a", "b"]),
+            "prediction": (score >= 0.5).astype(np.int64),
+            "score": score,
+        },
+    )
+
+    values = evaluate(
+        run_id=run_id,
+        model_uri=model_uri,
+        dataset_run_id=dataset_run_id,
+        inputs=_inputs(),
+        targets=targets,
+        metrics=("average_precision", "positive_rate"),
+        score_field="score",
+        mask=mask,
+        target_names=("freeze", "turn"),
+    )
+
+    assert values == {
+        "average_precision.freeze": 1.0,
+        "average_precision.turn": 1.0,
+        "average_precision.mean": 1.0,
+        "positive_rate.freeze": 0.75,
+        "positive_rate.turn": 0.25,
+        "positive_rate.mean": 0.5,
+    }
+    run = client.get_run(run_id)
+    assert run.data.params["evaluation.masked"] == "true"
+    assert json.loads(run.data.params["evaluation.target_names"]) == ["freeze", "turn"]
+    artifact = client.download_artifacts(run_id, "evaluation/predictions.npz", str(tmp_path))
+    with np.load(artifact) as evidence:
+        assert np.array_equal(evidence["target"], targets)
+        assert np.array_equal(evidence["mask"], mask)
+        assert evidence["target_names"].tolist() == ["freeze", "turn"]
+
+
+@pytest.mark.parametrize(
+    ("mask", "target_names", "message"),
+    [
+        (np.ones((2, 3), dtype=np.int64), ("freeze", "turn"), "mask.*boolean"),
+        (np.ones((2, 2), dtype=bool), ("freeze", "turn"), "mask.*shape"),
+        (np.ones((2, 3), dtype=bool), ("freeze",), "target_names.*last axis"),
+        (np.zeros((2, 3), dtype=bool), ("freeze", "turn"), "mask.*at least one"),
+        (np.ones((2, 3), dtype=bool), ("freeze", "freeze"), "target_names.*unique"),
+        (np.ones((2, 3), dtype=bool), ("mean", "turn"), "cannot use 'mean'"),
+        (np.ones((2, 3), dtype=bool), ("freeze.now", "turn"), "start with a letter"),
+        (np.ones((2, 3), dtype=bool), ("a" * 245, "turn"), "longer than 250"),
+    ],
+)
+def test_invalid_masked_target_configuration_fails_before_writes(
+    mask: np.ndarray[Any, Any],
+    target_names: tuple[str, ...],
+    message: str,
+) -> None:
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("invalid-masked-evaluation")
+    run_id = _evaluation_attempt(client, experiment_id)
+
+    with pytest.raises(EvaluationError, match=message):
+        evaluate(
+            run_id=run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=np.ones((2, 3, 2), dtype=np.int64),
+            metrics=("accuracy",),
+            mask=mask,
+            target_names=target_names,
+        )
+
+    run = client.get_run(run_id)
+    assert run.data.metrics == {}
+    assert run.inputs.dataset_inputs == []
+    assert run.inputs.model_inputs == []
+    assert client.list_artifacts(run_id, "evaluation") == []
+
+
+def test_target_names_respect_mlflow_parameter_and_batch_limits() -> None:
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("bounded-target-names")
+    long_names = tuple(f"Target{index}_{'a' * 210}" for index in range(30))
+    too_many_names = tuple(f"Target{index}" for index in range(100))
+    metric_names = (
+        "accuracy",
+        "balanced_accuracy",
+        "f1_macro",
+        "f1",
+        "precision",
+        "recall",
+        "average_precision",
+        "roc_auc",
+        "log_loss",
+        "positive_rate",
+    )
+
+    for names, metrics, message in (
+        (long_names, ("accuracy",), "parameter limit"),
+        (too_many_names, metric_names, "more than 1000"),
+    ):
+        run_id = _evaluation_attempt(client, experiment_id)
+        with pytest.raises(EvaluationError, match=message):
+            evaluate(
+                run_id=run_id,
+                model_uri=model_uri,
+                dataset_run_id=dataset_run_id,
+                inputs=_inputs(),
+                targets=np.ones((2, 1, len(names)), dtype=np.int64),
+                metrics=metrics,
+                mask=np.ones((2, 1), dtype=bool),
+                target_names=names,
+            )
+        assert client.list_artifacts(run_id, "evaluation") == []
+
+
+def test_unnamed_mask_and_unmasked_named_targets_are_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.eval.execution as execution
+
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("evaluation-mask-shapes")
+    values = np.asarray([[1, 0], [0, 1]], dtype=np.int64)
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {"sample_id": np.asarray(["a", "b"]), "prediction": values},
+    )
+
+    masked_run_id = _evaluation_attempt(client, experiment_id)
+    assert evaluate(
+        run_id=masked_run_id,
+        model_uri=model_uri,
+        dataset_run_id=dataset_run_id,
+        inputs=_inputs(),
+        targets=values,
+        metrics=("accuracy",),
+        mask=np.asarray([[True, False], [True, True]]),
+    ) == {"accuracy": 1.0}
+
+    named_run_id = _evaluation_attempt(client, experiment_id)
+    assert evaluate(
+        run_id=named_run_id,
+        model_uri=model_uri,
+        dataset_run_id=dataset_run_id,
+        inputs=_inputs(),
+        targets=values,
+        metrics=("accuracy",),
+        target_names=("left", "right"),
+    ) == {"accuracy.left": 1.0, "accuracy.right": 1.0, "accuracy.mean": 1.0}
+
+
+def test_named_evaluation_rejects_empty_values_and_mismatched_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dsio.eval.execution as execution
+
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("invalid-named-arrays")
+
+    empty = np.empty((2, 0, 2), dtype=np.int64)
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {"sample_id": np.asarray(["a", "b"]), "prediction": empty},
+    )
+    empty_run_id = _evaluation_attempt(client, experiment_id)
+    with pytest.raises(EvaluationError, match="scoreable value"):
+        evaluate(
+            run_id=empty_run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=empty,
+            metrics=("accuracy",),
+            target_names=("left", "right"),
+        )
+
+    targets = np.ones((2, 3, 2), dtype=np.int64)
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {
+            "sample_id": np.asarray(["a", "b"]),
+            "prediction": targets,
+            "score": np.ones((2, 3, 1), dtype=np.float32),
+        },
+    )
+    score_run_id = _evaluation_attempt(client, experiment_id)
+    with pytest.raises(EvaluationError, match="score.*must match named target"):
+        evaluate(
+            run_id=score_run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=targets,
+            metrics=("average_precision",),
+            score_field="score",
+            mask=np.ones((2, 3), dtype=bool),
+            target_names=("left", "right"),
+        )
+
+
+def test_named_metric_failure_identifies_the_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dsio.eval.execution as execution
+
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("named-metric-failure")
+    run_id = _evaluation_attempt(client, experiment_id)
+    targets = np.asarray([[1, 0], [0, 0]], dtype=np.int64)
+    scores = np.asarray([[0.9, 0.2], [0.1, 0.1]], dtype=np.float32)
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {
+            "sample_id": np.asarray(["a", "b"]),
+            "prediction": (scores >= 0.5).astype(np.int64),
+            "score": scores,
+        },
+    )
+
+    with pytest.raises(EvaluationError, match="average_precision.*target 'absent'"):
+        evaluate(
+            run_id=run_id,
+            model_uri=model_uri,
+            dataset_run_id=dataset_run_id,
+            inputs=_inputs(),
+            targets=targets,
+            metrics=("average_precision",),
+            score_field="score",
+            target_names=("present", "absent"),
+        )
+
+    assert client.list_artifacts(run_id, "evaluation") == []
