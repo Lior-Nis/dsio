@@ -11,8 +11,8 @@ second.
 
 1. **Store Sales — Time Series Forecasting** (124.76 MB): establish the first explicit
    multi-series forecasting contract. Access is already verified.
-2. **Automated Essay Scoring 2.0** (36.2 MB, download verified): cheaply prove
-   variable-length text, ordinal prediction, and a nontrivial metric.
+2. **Automated Essay Scoring 2.0** (36.2 MB, executed): cheaply prove variable-length text,
+   ordinal prediction, and a nontrivial metric.
 3. **ROGII Wellbore Geology Prediction** (1.33 GB, download verified): exercise multi-source
    variable-length sequences and hidden-tail regression by well.
 4. **Parkinson's Freezing of Gait Prediction** (70.59 GB, download verified): use a bounded
@@ -61,6 +61,24 @@ The run corrected the planning assumption from a 15-step to a 16-step horizon an
 unbounded list of all training row IDs from the streaming CSV reader. Neither finding required
 a DSIO-core abstraction change.
 
+Automated Essay Scoring 2.0 then completed its representative-data gate:
+
+- 17,307 official training essays were staged as variable-length token sequences, capped at
+  512 tokens for this bounded baseline;
+- dynamic batch padding and masked mean pooling trained through the canonical DataModule and
+  Lightning module with two loader workers;
+- held-out accuracy was **0.4493** and Quadratic Weighted Kappa was **0.4738**;
+- inference preserved Kaggle's three raw test IDs even though all three overlap training IDs;
+- the final evaluation [is visible in MLflow](https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/b79fc3fa38134dc59666bad9f98c1bed).
+
+The official data corrected two synthetic assumptions: essays may contain surrounding
+whitespace and train/test raw IDs need not be globally disjoint. Text is now normalized and
+internal sample identity is source-namespaced without changing submission identity. QWK and
+the collator stay consumer-local as first-use candidates; neither warrants a DSIO-core change
+before an unrelated second use. The two-worker run did expose one generic defect: Linux fork
+workers were unsafe inside Prefect's multithreaded process. DSIO loaders now use a spawn context
+when workers are enabled, and both the focused regression and official flow pass with it.
+
 ## Ready-now competitions
 
 ### Parkinson's Freezing of Gait Prediction
@@ -92,7 +110,7 @@ Source: [official competition](https://www.kaggle.com/competitions/rogii-wellbor
 
 Source: [official competition](https://www.kaggle.com/competitions/learning-agency-lab-automated-essay-scoring-2).
 
-- **Data:** 36.2 MB and roughly 24,000 variable-length essays.
+- **Data:** 36.2 MB and 17,307 labelled variable-length essays in the downloaded bundle.
 - **Target/metric:** ordinal scores 1–6; Quadratic Weighted Kappa.
 - **Why now:** the cheapest proof that variable-length text, ordinal schemas, and QWK fit the
   existing spine. It also provides an independent QWK use before CMI.
@@ -295,7 +313,8 @@ external feedback, not a substitute for these checks.
 
 ## Immediate next action
 
-Build the Automated Essay Scoring 2.0 consumer against DSIO `v0.2.0`. Keep tokenization,
-vocabulary choice, ordinal model, and submission packaging consumer-local. First prove a
-deterministic variable-length text batch and a fixture-verified Quadratic Weighted Kappa;
-extract a DSIO component only if an unrelated use confirms the same generic seam.
+Build the ROGII Wellbore Geology consumer against DSIO `v0.2.0`. Use it as the unrelated
+variable-length sequence test for the padding/masking seam, while keeping well joins,
+geological features, hidden-tail model, and depth-indexed submission packaging consumer-local.
+Only propose a DSIO component if the real flow demonstrates the same invariant with a second
+task family.
