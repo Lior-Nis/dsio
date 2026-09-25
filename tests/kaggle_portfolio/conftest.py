@@ -185,6 +185,45 @@ def store_sales_csvs(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def essay_scoring_csvs(tmp_path: Path) -> Path:
+    root = tmp_path / "essay-scoring"
+    train: list[dict[str, object]] = []
+    for index in range(36):
+        score = index % 6 + 1
+        train.append(
+            {
+                "essay_id": f"essay-{index:03d}",
+                "full_text": (
+                    "\n"
+                    + " ".join(
+                        ["argument"] * score
+                        + ["evidence"] * score
+                        + [f"topic{index % 3}"]
+                        + ["detail"] * (index % 5 + 1)
+                    )
+                    + "  "
+                ),
+                "score": score,
+            }
+        )
+    test = [
+        {
+            "essay_id": "essay-000" if index == 0 else f"test-{index:03d}",
+            "full_text": " ".join(["argument", "evidence"] * (index + 1)),
+        }
+        for index in range(5)
+    ]
+    write_csv(root / "train.csv", ["essay_id", "full_text", "score"], train)
+    write_csv(root / "test.csv", ["essay_id", "full_text"], test)
+    write_csv(
+        root / "sample_submission.csv",
+        ["essay_id", "score"],
+        [{"essay_id": row["essay_id"], "score": 3} for row in test],
+    )
+    return root
+
+
+@pytest.fixture
 def digit_csvs(tmp_path: Path) -> Path:
     root = tmp_path / "digits"
     pixels = [f"pixel{index}" for index in range(784)]

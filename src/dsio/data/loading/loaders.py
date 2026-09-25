@@ -28,7 +28,7 @@ def build_loader[Item: Mapping[str, Any]](
     seed: int = 42,
     collate_fn: Collate | None = None,
 ) -> DataLoader[dict[str, Any]]:
-    """Build one seeded loader after validating arguments and worker safety."""
+    """Build one seeded loader; workers use spawn so threaded orchestrators stay safe."""
     validate_loader_options(batch_size=batch_size, num_workers=num_workers, seed=seed)
     if not isinstance(shuffle, bool):
         raise LoadingError(f"shuffle must be bool, got {type(shuffle).__name__}")
@@ -43,7 +43,11 @@ def build_loader[Item: Mapping[str, Any]](
 
     kwargs: dict[str, Any] = dict(dataloader_kwargs(seed))
     if num_workers:
-        kwargs.update(persistent_workers=True, prefetch_factor=2)
+        kwargs.update(
+            persistent_workers=True,
+            prefetch_factor=2,
+            multiprocessing_context="spawn",
+        )
     sampler = None
     if shuffle:
         sampler_generator = torch.Generator().manual_seed(seed)

@@ -81,6 +81,16 @@ def test_build_loader_requires_boolean_drop_last() -> None:
         build_loader(Samples(), drop_last=1)  # type: ignore[arg-type]
 
 
+def test_worker_loaders_do_not_fork_threaded_orchestrators(tmp_path: Path) -> None:
+    store, examples, _ = _inputs(tmp_path / "samples")
+    dataset = stored_samples(store, examples, examples.sample_ids.tolist())
+
+    loader = build_loader(dataset, num_workers=1)
+
+    assert loader.multiprocessing_context is not None
+    assert loader.multiprocessing_context.get_start_method() == "spawn"
+
+
 def test_setup_maps_exact_split_roles_to_lightning_phases(tmp_path: Path) -> None:
     store, examples, split = _inputs(tmp_path / "samples")
     module = DsioDataModule(
