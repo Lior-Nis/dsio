@@ -1,4 +1,4 @@
-"""Essay scorer export, QWK evaluation, inference, and submission evidence."""
+"""CMI predictor export, modality-aware evaluation, and submission evidence."""
 
 from __future__ import annotations
 
@@ -19,19 +19,19 @@ from dsio.eval.metrics import quadratic_weighted_kappa
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
-from reference_projects.kaggle.essay_scoring.components import (
-    MAX_TOKENS,
-    OrdinalPrediction,
-    validate_ordinal_prediction,
+from reference_projects.kaggle.child_mind.components import (
+    CmiPrediction,
+    ablate_sensor,
+    validate_cmi_prediction,
 )
+from reference_projects.kaggle.child_mind.data import PACKED_FEATURES, SENSOR_PRESENT_INDEX
 
 
 def _arrays(store_path: str, sample_ids: list[str]) -> dict[str, np.ndarray[Any, Any]]:
     store = SignalStore(store_path)
-    values = np.zeros((len(sample_ids), MAX_TOKENS, 2), dtype=np.int64)
+    values = np.zeros((len(sample_ids), 1, PACKED_FEATURES), dtype=np.float32)
     for index, sample_id in enumerate(sample_ids):
-        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.int64)
-        values[index, : len(sample)] = sample
+        values[index] = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
     return {"sample_id": np.asarray(sample_ids, dtype=np.str_), "x": values}
 
 
@@ -51,13 +51,15 @@ def export(
         )
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
-        inputs = _arrays(data["store_path"], list(split["assignments"]["validate"]))
+        sample_id = next(iter(split["assignments"]["validate"]))
+        inputs = _arrays(data["store_path"], [sample_id])
         identity = record_provenance(
             run.info.run_id,
             {
                 "checkpoint_digest": reference.digest,
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
+                "mode": training["mode"],
                 "export_form": "pyfunc",
             },
             components={
@@ -65,10 +67,10 @@ def export(
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
                 "normalizer": (
-                    "reference_projects.kaggle.essay_scoring.components:OrdinalPrediction"
+                    "reference_projects.kaggle.child_mind.components:CmiPrediction"
                 ),
                 "validator": (
-                    "reference_projects.kaggle.essay_scoring.components:validate_ordinal_prediction"
+                    "reference_projects.kaggle.child_mind.components:validate_cmi_prediction"
                 ),
             },
         )
@@ -80,8 +82,8 @@ def export(
             reference,
             model=model,
             preprocessor=preprocessor,
-            normalizer=OrdinalPrediction(),
-            validator=validate_ordinal_prediction,
+            normalizer=CmiPrediction(),
+            validator=validate_cmi_prediction,
             input_example=example,
         )
         info = log_predictor(
@@ -89,12 +91,13 @@ def export(
             run_id=run.info.run_id,
             input_example=example,
             forms=("pyfunc",),
-            name="essay-scoring",
+            name=f"child-mind-{training['mode']}",
         )["pyfunc"]
         return {
             "export_run_id": run.info.run_id,
             "model_uri": info.model_uri,
             "checkpoint_digest": reference.digest,
+            "mode": training["mode"],
             "identity": identity,
         }
 
@@ -111,19 +114,29 @@ def evaluate_model(
             dtype=np.int64,
         )
         inputs = _arrays(data["store_path"], sample_ids)
+        present = inputs["x"][:, 0, SENSOR_PRESENT_INDEX].astype(bool)
+        present_ids = inputs["sample_id"][present].tolist()
+        missing_ids = inputs["sample_id"][~present].tolist()
+        if not present_ids or not missing_ids:
+            raise ValueError("CMI validation requires both present and missing sensor modalities")
         identity = record_provenance(
             run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "checkpoint_digest": exported["checkpoint_digest"],
                 "export_identity": exported["identity"],
+                "mode": exported["mode"],
                 "metrics": ["accuracy", "quadratic_weighted_kappa"],
                 "sample_ids": sample_ids,
+                "sensor_present_sample_ids": present_ids,
+                "sensor_missing_sample_ids": missing_ids,
+                "ablation_sample_ids": present_ids,
             },
             components={
                 "evaluation": "dsio.eval.execution:evaluate",
-                "qwk": (
-                    "dsio.eval.metrics:quadratic_weighted_kappa"
+                "qwk": "dsio.eval.metrics:quadratic_weighted_kappa",
+                "ablation": (
+                    "reference_projects.kaggle.child_mind.components:ablate_sensor"
                 ),
             },
         )
@@ -133,13 +146,41 @@ def evaluate_model(
             dataset_run_id=split["split_run_id"],
             inputs=inputs,
             targets=targets,
-            metrics=("accuracy",),
+            metrics=("accuracy", "quadratic_weighted_kappa"),
         )
         outputs = predict(exported["model_uri"], inputs)
-        qwk = quadratic_weighted_kappa(targets, np.asarray(outputs["prediction"]))
-        MlflowClient().log_metric(run.info.run_id, "quadratic_weighted_kappa", qwk)
-        metrics["quadratic_weighted_kappa"] = qwk
-        return {"evaluation_run_id": run.info.run_id, "metrics": metrics, "identity": identity}
+        predicted = np.asarray(outputs["prediction"], dtype=np.int64)
+        present_qwk = quadratic_weighted_kappa(targets[present], predicted[present])
+        missing_qwk = quadratic_weighted_kappa(targets[~present], predicted[~present])
+        present_inputs = {
+            "sample_id": inputs["sample_id"][present],
+            "x": inputs["x"][present],
+        }
+        ablated_inputs = {
+            "sample_id": present_inputs["sample_id"],
+            "x": ablate_sensor(torch.from_numpy(present_inputs["x"])).numpy(),
+        }
+        ablated = predict(exported["model_uri"], ablated_inputs)
+        ablated_qwk = quadratic_weighted_kappa(
+            targets[present], np.asarray(ablated["prediction"], dtype=np.int64)
+        )
+        extras = {
+            "qwk.sensor_present": present_qwk,
+            "qwk.sensor_missing": missing_qwk,
+            "qwk.sensor_ablated": ablated_qwk,
+            "qwk.sensor_ablation_delta": present_qwk - ablated_qwk,
+        }
+        client = MlflowClient()
+        for name, value in extras.items():
+            client.log_metric(run.info.run_id, name, value)
+        metrics.update(extras)
+        return {
+            "evaluation_run_id": run.info.run_id,
+            "metrics": metrics,
+            "sensor_present_sample_ids": present_ids,
+            "ablation_sample_ids": present_ids,
+            "identity": identity,
+        }
 
 
 @task(persist_result=False)
@@ -151,12 +192,15 @@ def infer_and_submit(
         test_sample_ids = list(data["test_sample_ids"])
         outputs = predict(exported["model_uri"], _arrays(data["store_path"], test_sample_ids))
         values = np.asarray(outputs["prediction"], dtype=np.int64).reshape(-1).tolist()
+        if any(value not in range(4) for value in values):
+            raise ValueError("CMI submission predictions must be integers in [0, 3]")
         identity = record_provenance(
             run.info.run_id,
             {
                 "dataset_digest": data["dataset_digest"],
                 "checkpoint_digest": exported["checkpoint_digest"],
                 "export_identity": exported["identity"],
+                "mode": exported["mode"],
                 "sample_ids": test_sample_ids,
                 "submission_ids": test_ids,
             },
@@ -164,10 +208,10 @@ def infer_and_submit(
         )
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer, lineterminator="\n")
-        writer.writerow(["essay_id", "score"])
+        writer.writerow(["id", "sii"])
         writer.writerows(zip(test_ids, values, strict=True))
         payload = buffer.getvalue().encode()
-        path = Path(workspace) / run.info.run_id / "submission.csv"
+        path = Path(workspace) / run.info.run_id / f"submission-{exported['mode']}.csv"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
         submission = save_artifact(payload, run_id=run.info.run_id, name="submission")
@@ -177,6 +221,7 @@ def infer_and_submit(
         return {
             "inference_run_id": run.info.run_id,
             "prediction": values,
+            "prediction_count": len(values),
             "submission_path": str(path),
             "submission_bytes": payload,
             "submission_digest": submission.digest,

@@ -47,25 +47,6 @@ def pad_essays(items: list[Mapping[str, Any]]) -> Mapping[str, Any]:
     return result
 
 
-def quadratic_weighted_kappa(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    truth = np.asarray(y_true)
-    predicted = np.asarray(y_pred)
-    if truth.ndim != 1 or predicted.shape != truth.shape or truth.size == 0:
-        raise ValueError("QWK requires equally shaped, non-empty one-dimensional arrays")
-    if truth.dtype.kind not in "iub" or predicted.dtype.kind not in "iub":
-        raise ValueError("QWK ratings must be integers")
-    if np.any((truth < 1) | (truth > 6)) or np.any((predicted < 1) | (predicted > 6)):
-        raise ValueError("QWK ratings must be in [1, 6]")
-    confusion = np.zeros((6, 6), dtype=np.float64)
-    np.add.at(confusion, (truth.astype(int) - 1, predicted.astype(int) - 1), 1)
-    weights = ((np.arange(6)[:, None] - np.arange(6)[None, :]) / 5.0) ** 2
-    expected = np.outer(confusion.sum(axis=1), confusion.sum(axis=0)) / truth.size
-    denominator = float(np.sum(weights * expected))
-    if denominator == 0:
-        raise ValueError("QWK is undefined when expected weighted disagreement is zero")
-    return 1.0 - float(np.sum(weights * confusion)) / denominator
-
-
 class EssaySamples(Dataset[Mapping[str, Any]]):
     def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
         self.store, self.sample_ids = store, tuple(sample_ids)

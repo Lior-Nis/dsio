@@ -96,6 +96,61 @@ def accuracy(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None 
     return float(np.mean(np.asarray(y_true) == np.asarray(y_pred)))
 
 
+@metric("quadratic_weighted_kappa")
+def quadratic_weighted_kappa(
+    y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None
+) -> float:
+    """Agreement between integer ratings, penalising distant errors quadratically."""
+    del y_score
+    truth = np.asarray(y_true)
+    predicted = np.asarray(y_pred)
+    if truth.ndim != 1 or predicted.ndim != 1:
+        raise MetricError("quadratic_weighted_kappa requires one-dimensional ratings")
+    if truth.shape != predicted.shape:
+        raise MetricError("quadratic_weighted_kappa ratings must have the same shape")
+    if truth.size == 0:
+        raise MetricError("quadratic_weighted_kappa requires non-empty ratings")
+    if truth.dtype.kind not in "iub" or predicted.dtype.kind not in "iub":
+        raise MetricError("quadratic_weighted_kappa requires integer ratings")
+
+    labels = sorted({int(value) for value in truth.tolist() + predicted.tolist()})
+    positions = {value: index for index, value in enumerate(labels)}
+    truth_positions = np.fromiter(
+        (positions[int(value)] for value in truth), dtype=np.intp, count=truth.size
+    )
+    predicted_positions = np.fromiter(
+        (positions[int(value)] for value in predicted),
+        dtype=np.intp,
+        count=predicted.size,
+    )
+    confusion = np.zeros((len(labels), len(labels)), dtype=np.float64)
+    np.add.at(
+        confusion,
+        (truth_positions, predicted_positions),
+        1.0,
+    )
+    rating_span = labels[-1] - labels[0]
+    if rating_span == 0:
+        raise MetricError(
+            "quadratic_weighted_kappa is undefined when expected weighted "
+            "disagreement is zero"
+        )
+    weights = np.asarray(
+        [
+            [((left - right) / rating_span) ** 2 for right in labels]
+            for left in labels
+        ],
+        dtype=np.float64,
+    )
+    expected = np.outer(confusion.sum(axis=1), confusion.sum(axis=0)) / truth.size
+    denominator = float(np.sum(weights * expected))
+    if denominator == 0.0:
+        raise MetricError(
+            "quadratic_weighted_kappa is undefined when expected weighted disagreement is zero"
+        )
+    return 1.0 - float(np.sum(weights * confusion)) / denominator
+
+
 @metric("balanced_accuracy")
 def balanced_accuracy(
     y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None
