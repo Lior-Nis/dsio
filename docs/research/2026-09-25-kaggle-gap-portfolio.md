@@ -15,8 +15,9 @@ second.
    ordinal prediction, and a nontrivial metric.
 3. **ROGII Wellbore Geology Prediction** (1.33 GB, executed): exercise multi-source
    variable-length sequences and hidden-tail regression by well.
-4. **Parkinson's Freezing of Gait Prediction** (70.59 GB, bounded subset executed): make the
-   eventual full bundle the first full-scale ragged/windowed sequence and mask test.
+4. **Parkinson's Freezing of Gait Prediction** (70.59 GB, scale evidence executed): the full
+   labelled corpus trained while every non-supervised source file was iterated in bounded
+   batches.
 
 The account is already entered in Parkinson, ROGII, and Essay Scoring; authenticated downloads
 were verified. Store Sales access and download were subsequently verified as well.
@@ -124,6 +125,45 @@ This is the second unrelated masked dense-evaluation use after ROGII, so mask-aw
 has now crossed the evidence threshold for a separate DSIO component-admission PR. This pass
 is intentionally not the 70.59 GB scale tier and makes no full-corpus throughput claim.
 
+The 2026-09-28 follow-up completed **full labelled training plus full-directory bounded
+iteration**. Official metadata resolved 91 defog and 833 tdcsfog labelled recordings, 46
+non-task CSVs, 65 daily Parquets, and both test files before measurement began. The inventory
+also identified and ignored 46 unrelated defog and 206 unrelated tdcsfog files. Its manifest
+identity is `ae5b027376f0ef3a84ef0d9dac4eaac44e01f54cdcaf1382b0f1a9dfafdbb0cf`. It covers lane,
+recording ID, size, and nanosecond mtime; it is not a content identity.
+
+The [scan run](https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181)
+read all 111 non-supervised files: 4,220,701,887 rows and 68,337,598,024 bytes from the daily
+Parquets plus 10,251,114 rows and 839,382,639 bytes from the non-task CSVs. Batches retained at
+most 65,536 rows. With uncontrolled OS page cache, the pass took 174.045 seconds at 397,466,549
+source bytes/s and peaked at 3,394,113,536 bytes of maximum sampled Linux process-tree RSS,
+below the 4 GiB budget. The 0.1-second sampler recursively followed child PIDs from every
+thread. The deterministic content checksum is
+`0065465932ace6be473bd579c5791c00ffeec2c399f5a2eee61c4fe43771e21e`.
+
+The labelled lane then followed the existing DSIO path. Ingestion resolved all 924 labelled
+recordings plus both tests, preserved the 18-recording test-subject exclusion, and staged
+12,228,916 points in 24,285 windows. The 23,724 eligible labelled windows trained for two
+completed epochs on one RTX 5070 Ti in 114.204 fit-only seconds; checkpoint and artifact I/O
+were outside that interval. Training telemetry recorded 7,925,714,944 bytes maximum sampled
+process-tree RSS, 2,485,248 bytes peak CUDA allocation, 4,194,304 bytes peak CUDA reserve, 10%
+peak utilization, and 0.084% mean utilization across 959 samples. CUDA evidence resolved the
+physical UUID `GPU-e498255a-65f9-b6ea-967a-89ce193dde50`. The low utilization is an observed
+property of this small, input-bound model, not a GPU-performance claim.
+
+The scale evaluation recorded 0.053587 mean Average Precision against a 0.046423 prevalence
+baseline. Inference restored all 286,370 official test rows; the 22,368,376-byte submission's
+SHA-256 is `25530255563a893726f5229007ed7a55a95b9341dc856bc16dd301896fbad77e`. The MLflow
+lineage is ingest `8cb303b863954fed98776d0f9cf0aef3`, split
+`152df4d3bffa4ba7a34a9eede6676c3a`, train `2171f2c90b9445cbb8e1ea254595a0cc`, export
+`d35b335bde6a4e9ebf06f4796247de10`, evaluation `fe92d87e688c44c88c9dedf64336e349`, and
+inference `9f848519c420479d8f90578f758e9ccc`.
+
+This is not a claim that the model trained on 70 GB: the 68.34 GB daily Parquet lane was read
+only for bounded-iteration evidence, while supervised training used labelled recordings. It
+also does not establish DDP, GPU saturation, leaderboard quality, production performance, or
+deployment readiness.
+
 The follow-up admission added `mask` and `target_names` directly to DSIO's existing evaluation
 interface. ROGII now uses the same path for masked scalar RMSE, while Parkinson uses it for
 per-target Average Precision and positive-rate baselines plus their means. The mask, original
@@ -132,7 +172,7 @@ batch class, registry, or parallel metric protocol was added.
 
 ## Ready-now competitions
 
-### Parkinson's Freezing of Gait Prediction (bounded subset executed)
+### Parkinson's Freezing of Gait Prediction (scale evidence executed)
 
 Source: [official competition](https://www.kaggle.com/competitions/tlvmc-parkinsons-freezing-gait-prediction).
 
@@ -173,8 +213,8 @@ Source: [official competition](https://www.kaggle.com/competitions/learning-agen
 | Gap | First proof | Independent/stress proof |
 |---|---|---|
 | Forecasting and rolling-origin splits | Store Sales | ROGII hidden-tail regression |
-| Variable-length input and masking | Essay Scoring / ROGII | Parkinson (bounded); ASL only if needed |
-| Dense sequence output | Parkinson (bounded) | Ventilator only if needed |
+| Variable-length input and masking | Essay Scoring / ROGII | Parkinson scale run; ASL only if needed |
+| Dense sequence output | Parkinson | Ventilator only if needed |
 | Multimodal and missing modalities | CMI | HMS |
 | Ordinal, soft, and ranked targets | Essay Scoring / CMI | HMS / OTTO |
 | Bounded-memory loading at scale | Parkinson | OTTO / HMS |
@@ -366,6 +406,6 @@ external feedback, not a substitute for these checks.
 
 Do not generalize the three project collators yet: their field and padding semantics differ
 enough that a configurable helper would expose nearly as much interface as implementation.
-Next, either accept CMI's rules for the multimodal lane or proceed with a full-directory
-Parkinson benchmark that logs peak memory and throughput; do not call the current 134 MB source
-selection a scale result.
+Parkinson's consumer-local scale seam now has one verified use, which is not enough to promote a
+generic scanner or telemetry framework into DSIO. Continue with the remaining accepted
+competition work; reserve DDP claims for the separate ASL/HMS evidence gate.

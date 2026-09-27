@@ -66,9 +66,51 @@ explicit baseline. The collator and masked RMSE remain consumer-local pending co
 The Parkinson's reference streams each signal CSV into at most 512-row windows, groups splits
 by subject, and excludes every training recording belonging to an official test subject. The
 defog `Valid AND Task` mask governs both loss and metric calculation; tdcsfog rows are fully
-valid. Inference restores all three probabilities to the official row IDs and ordering. The
-full competition download is about 70 GB, so use Kaggle's `-f` option for a bounded subset
-unless you explicitly intend to run the scale tier.
+valid. Inference restores all three probabilities to the official row IDs and ordering. Its
+default call above remains the small fixture/subset flow. An explicit scale call additionally
+accepts the centralized labelled and daily roots plus a CUDA `TrainerConfig`; it resolves the
+official inventory before timing or staging and refuses unavailable CUDA rather than falling
+back to CPU.
+
+## Official Parkinson scale evidence
+
+The 2026-09-28 run is recorded in tailnet-only [MLflow experiment
+57](https://pop.tailee691f.ts.net:8443/#/experiments/57). The verified claim is **full labelled
+training plus full-directory bounded iteration**:
+
+- inventory resolved 91 defog and 833 tdcsfog training recordings, 46 non-task CSVs, 65 daily
+  Parquets, and both test files. It ignored 46 unrelated defog and 206 unrelated tdcsfog files;
+- the [scan run](https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181)
+  read all 4,230,953,001 non-supervised rows and 69,176,980,663 source bytes in 65,536-row
+  batches. The daily lane alone contributed 4,220,701,887 rows and 68,337,598,024 bytes;
+- scanning took 174.045 seconds (397,466,549 source bytes/s) with uncontrolled OS page cache
+  and 3,394,113,536 bytes maximum sampled process-tree RSS, below the 4 GiB acceptance budget.
+  The sampler read Linux `VmRSS` at 0.1-second intervals and recursively followed every
+  thread's child PIDs;
+- ingestion resolved all 924 labelled sources, preserved the 18-recording test-subject
+  exclusion, and staged 12,228,916 points in 24,285 windows. The 23,724 eligible labelled
+  windows then trained for two epochs on one RTX 5070 Ti through `DsioDataModule` and
+  `DsioModule`;
+- the two completed fit epochs took 114.204 seconds; checkpoint and artifact I/O were outside
+  that interval. Training peaked at 7,925,714,944 maximum sampled process-tree RSS bytes,
+  2,485,248 CUDA-allocated bytes, 4,194,304 CUDA-reserved bytes, and 10% sampled GPU
+  utilization. Mean utilization across 959 samples was 0.084%, so this tiny convolution is not
+  evidence of GPU saturation. CUDA evidence resolved physical device
+  `GPU-e498255a-65f9-b6ea-967a-89ce193dde50`;
+- evaluation recorded 0.053587 mean Average Precision against a 0.046423 prevalence baseline,
+  and inference restored all 286,370 official rows. The 22,368,376-byte submission has SHA-256
+  `25530255563a893726f5229007ed7a55a95b9341dc856bc16dd301896fbad77e`.
+
+The inventory manifest identity is
+`ae5b027376f0ef3a84ef0d9dac4eaac44e01f54cdcaf1382b0f1a9dfafdbb0cf`; it covers lane,
+recording ID, size, and nanosecond mtime, rather than file content. The separate full-scan
+content checksum is `0065465932ace6be473bd579c5791c00ffeec2c399f5a2eee61c4fe43771e21e`.
+The lineage runs are ingest `8cb303b863954fed98776d0f9cf0aef3`, split
+`152df4d3bffa4ba7a34a9eede6676c3a`, train `2171f2c90b9445cbb8e1ea254595a0cc`, export
+`d35b335bde6a4e9ebf06f4796247de10`, evaluation `fe92d87e688c44c88c9dedf64336e349`, and
+inference `9f848519c420479d8f90578f758e9ccc`. This does not mean the model trained on the 68.34
+GB daily lane: supervised training used only the labelled recordings. It is not a DDP,
+leaderboard-quality, production-performance, or deployment claim.
 
 The Child Mind reference requires the optional `pyarrow` data dependency (`uv sync --extra
 data`). It reads every participant Parquet partition in bounded batches and stages only

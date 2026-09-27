@@ -31,6 +31,7 @@ from reference_projects.kaggle.parkinsons_fog.components import (
     fog_windows,
     pad_windows,
 )
+from reference_projects.kaggle.parkinsons_fog.scale import log_phase_evidence, measure_phase
 from reference_projects.kaggle.parkinsons_fog.tasks.data import labelled_examples
 
 TRAINER = TrainerConfig(
@@ -55,10 +56,15 @@ PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters":
 
 @task(persist_result=False)
 def train(
-    data: dict[str, Any], split: dict[str, Any], experiment_id: str, seed: int
+    data: dict[str, Any],
+    split: dict[str, Any],
+    experiment_id: str,
+    seed: int,
+    trainer_config: TrainerConfig | None = None,
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
-        check_requested_capabilities(TRAINER)
+        requested = trainer_config or TRAINER
+        check_requested_capabilities(requested)
         store = SignalStore(data["store_path"])
         examples = labelled_examples(store)
         manifest = load_split_evidence(
@@ -97,12 +103,12 @@ def train(
         )
         directory = Path(data["store_path"]).parent
         trainer = build_trainer(
-            TRAINER,
+            requested,
             directory,
             logger,
-            build_callbacks(TRAINER, directory, has_validation=True),
+            build_callbacks(requested, directory, has_validation=True),
         )
-        execution = resolve_training_capabilities(trainer, requested=TRAINER)
+        execution = resolve_training_capabilities(trainer, requested=requested)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -116,7 +122,7 @@ def train(
                 "roles": ROLES,
                 "shuffle": SHUFFLE,
                 "drop_last": DROP_LAST,
-                "trainer": TRAINER.model_dump(mode="json"),
+                "trainer": requested.model_dump(mode="json"),
                 "execution": execution,
             },
             components={
@@ -133,7 +139,20 @@ def train(
             },
         )
         log_capabilities(logger, execution)
-        trainer.fit(module, datamodule=data_module)
+        root_device = trainer.strategy.root_device
+        cuda_device = root_device.index if root_device.type == "cuda" else None
+        if requested.accelerator == "cuda" and cuda_device is None:
+            raise RuntimeError(
+                f"CUDA training resolved an invalid trainer root device: {root_device}"
+            )
+        telemetry_context = (
+            measure_phase("training", cuda_device=cuda_device)
+            if trainer_config is not None
+            else _unmeasured_phase()
+        )
+        with telemetry_context as telemetry:
+            trainer.fit(module, datamodule=data_module)
+        completed_epochs = int(trainer.current_epoch)
         checkpoint = directory / "parkinsons-fog.ckpt"
         trainer.save_checkpoint(checkpoint)
         reference = save_artifact(
@@ -142,8 +161,34 @@ def train(
         MlflowClient().log_dict(
             run.info.run_id, reference.model_dump(mode="json"), "outputs/checkpoint.json"
         )
+        if trainer_config is not None:
+            elapsed = float(telemetry["elapsed_seconds"])
+            labelled_windows = sum(
+                len(split["assignments"][role]) for role in ("train", "validate")
+            )
+            log_phase_evidence(
+                run.info.run_id,
+                "training",
+                telemetry,
+                {
+                    "epochs": completed_epochs,
+                    "requested_epochs": requested.max_epochs,
+                    "labelled_windows": labelled_windows,
+                    "store_rows": store.n_rows,
+                    "window_epochs_per_second": labelled_windows
+                    * completed_epochs
+                    / elapsed,
+                },
+            )
         return {
             "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
             "identity": identity,
+            "telemetry": telemetry or None,
         }
+
+
+def _unmeasured_phase() -> Any:
+    from contextlib import nullcontext
+
+    return nullcontext({})
