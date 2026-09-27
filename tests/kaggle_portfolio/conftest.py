@@ -390,6 +390,77 @@ def parkinsons_fog_csvs(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def child_mind_data(tmp_path: Path) -> Path:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from reference_projects.kaggle.child_mind.data import (
+        PCIAT_COLUMNS,
+        SAFE_COLUMNS,
+        SENSOR_COLUMNS,
+        TRAIN_COLUMNS,
+    )
+
+    root = tmp_path / "child-mind"
+    seasons = ("Spring", "Summer", "Fall", "Winter")
+
+    def safe_row(identifier: str, index: int) -> dict[str, object]:
+        row: dict[str, object] = {"id": identifier}
+        for offset, field in enumerate(SAFE_COLUMNS[1:]):
+            if field.endswith("Season"):
+                row[field] = "" if (index + offset) % 11 == 0 else seasons[(index + offset) % 4]
+            else:
+                row[field] = "" if (index + offset) % 13 == 0 else 1 + (index + offset) % 17
+        return row
+
+    train: list[dict[str, object]] = []
+    for index in range(52):
+        target = index % 4 if index < 48 else None
+        row = safe_row(f"train-{index:03d}", index)
+        for offset, field in enumerate(PCIAT_COLUMNS):
+            row[field] = seasons[index % 4] if field == "PCIAT-Season" else target or 0
+        row["sii"] = "" if target is None else target
+        train.append(row)
+    test = [safe_row(f"test-{index:03d}", 100 + index) for index in range(4)]
+    write_csv(root / "train.csv", list(TRAIN_COLUMNS), train)
+    write_csv(root / "test.csv", list(SAFE_COLUMNS), test)
+    write_csv(
+        root / "sample_submission.csv",
+        ["id", "sii"],
+        [{"id": row["id"], "sii": 0} for row in test],
+    )
+
+    def write_series(source: str, identifier: str, index: int) -> None:
+        rows = 5 + index % 3
+        values: dict[str, object] = {
+            "step": pa.array(range(rows), type=pa.uint32()),
+        }
+        for offset, field in enumerate(SENSOR_COLUMNS):
+            if field in {"weekday", "quarter"}:
+                values[field] = pa.array(
+                    [(index + row + offset) % 4 for row in range(rows)], type=pa.int8()
+                )
+            elif field == "time_of_day":
+                values[field] = pa.array(
+                    [1_000_000 * (row + 1) for row in range(rows)], type=pa.int64()
+                )
+            else:
+                values[field] = pa.array(
+                    [float(index + offset + row / 10) for row in range(rows)],
+                    type=pa.float32(),
+                )
+        path = root / f"series_{source}.parquet" / f"id={identifier}" / "part-0.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(pa.table(values), path)
+
+    for index in range(48):
+        if (index // 4) % 2 == 0:
+            write_series("train", f"train-{index:03d}", index)
+    for index in (0, 2):
+        write_series("test", f"test-{index:03d}", 100 + index)
+    return root
+
+
+@pytest.fixture
 def digit_csvs(tmp_path: Path) -> Path:
     root = tmp_path / "digits"
     pixels = [f"pixel{index}" for index in range(784)]

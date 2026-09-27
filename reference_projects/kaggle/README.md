@@ -12,6 +12,7 @@ they are not DSIO modes, templates, or leaderboard claims.
 | Automated Essay Scoring 2.0 | `learning-agency-lab-automated-essay-scoring-2` | `train.csv`, `test.csv`, `sample_submission.csv` |
 | ROGII Wellbore Geology Prediction | `rogii-wellbore-geology-prediction` | `train/`, `test/`, `sample_submission.csv` |
 | Parkinson's Freezing of Gait Prediction | `tlvmc-parkinsons-freezing-gait-prediction` | metadata CSVs, `train/{defog,tdcsfog}/`, `test/{defog,tdcsfog}/`, `sample_submission.csv` |
+| Child Mind Institute — Problematic Internet Use | `child-mind-institute-problematic-internet-use` | `train.csv`, `test.csv`, `sample_submission.csv`, `series_{train,test}.parquet/id=*/part-0.parquet` |
 
 Accept each competition's rules and configure Kaggle credentials yourself. Downloads are
 deliberately opt-in and outside every flow:
@@ -24,6 +25,7 @@ kaggle competitions download -c store-sales-time-series-forecasting -p data/stor
 kaggle competitions download -c learning-agency-lab-automated-essay-scoring-2 -p data/essay-scoring
 kaggle competitions download -c rogii-wellbore-geology-prediction -p data/rogii
 kaggle competitions download -c tlvmc-parkinsons-freezing-gait-prediction -p data/parkinsons-fog
+kaggle competitions download -c child-mind-institute-problematic-internet-use -p data/child-mind
 ```
 
 Unzip each archive, then call the project-owned flows directly:
@@ -36,6 +38,7 @@ from reference_projects.kaggle.store_sales.flow import store_sales_flow
 from reference_projects.kaggle.essay_scoring.flow import essay_scoring_flow
 from reference_projects.kaggle.rogii.flow import rogii_flow
 from reference_projects.kaggle.parkinsons_fog.flow import parkinsons_fog_flow
+from reference_projects.kaggle.child_mind.flow import child_mind_flow
 
 titanic_flow("data/titanic", "work/titanic", seed=19)
 bike_sharing_flow("data/bike-sharing", "work/bike-sharing", seed=19)
@@ -44,6 +47,7 @@ store_sales_flow("data/store-sales", "work/store-sales", seed=19)
 essay_scoring_flow("data/essay-scoring", "work/essay-scoring", seed=19)
 rogii_flow("data/rogii", "work/rogii", seed=19)
 parkinsons_fog_flow("data/parkinsons-fog", "work/parkinsons-fog", seed=19)
+child_mind_flow("data/child-mind", "work/child-mind", seed=19)
 ```
 
 The Store Sales reference keeps the last 110 training days per store-family series, creates
@@ -51,8 +55,8 @@ five 30-day-context rolling origins, and predicts the 16 dates present in the of
 file. This is a bounded representative experiment, not a full-history leaderboard model.
 
 The Essay Scoring reference hashes at most 512 tokens per essay, pads only at collation, and
-uses masked mean pooling for ordinal 1–6 predictions. QWK and the collator remain local to the
-consumer until an unrelated second project justifies admission to DSIO.
+uses masked mean pooling for ordinal 1–6 predictions. It shares DSIO's registered QWK metric
+with Child Mind; its task-specific collator remains consumer-local.
 
 The ROGII reference joins each horizontal well to its typewell, excludes train wells whose raw
 IDs also occur in the official test set, and pads hidden tails only at collation. Its learned
@@ -65,6 +69,38 @@ defog `Valid AND Task` mask governs both loss and metric calculation; tdcsfog ro
 valid. Inference restores all three probabilities to the official row IDs and ordering. The
 full competition download is about 70 GB, so use Kaggle's `-f` option for a bounded subset
 unless you explicitly intend to run the scale tier.
+
+The Child Mind reference requires the optional `pyarrow` data dependency (`uv sync --extra
+data`). It reads every participant Parquet partition in bounded batches and stages only
+deterministic summary features, never a second copy of the raw sensor corpus. One shared
+stratified participant split feeds both a tabular-only model and a fused model. Missing values
+and absent sensor partitions remain explicit in the packed input; preprocessing statistics are
+fit from the training partition only. Evaluation records overall QWK, QWK by sensor
+availability, and a same-participant sensor ablation before emitting `id,sii` submissions.
+
+## Official Child Mind evidence
+
+The 2026-09-27 full-corpus replay is recorded in tailnet-only [MLflow experiment
+58](https://pop.tailee691f.ts.net:8443/#/experiments/58). Both attempts processed 2,736
+labelled participants, all 996 train sensor partitions, 315,008,875 sensor rows, and
+6,727,640,239 source bytes. They produced the same dataset and split digests, execution
+identities, predictions, metrics, and submission bytes under distinct attempt IDs.
+
+| Evidence | First attempt | Replay attempt |
+| --- | --- | --- |
+| Ingest / split | `e076185457e548dabe5169707556ec6d` / `a817ac11f439429486614c83dd159aa5` | `1f7d6cf32c3a43ce8331be63cc00d17c` / `eb49eb9345794a9d968ba7abd69c1c0d` |
+| Tabular train / evaluation | `70f124de90934df38f027976d6005104` / `f5bc42c4385545bab494e90ca65f7f7e` | `b6261224a867434693e2aef3222133d3` / `21d317d6eaa74c3da3638f89696bdf06` |
+| Fused train / evaluation | `a337ba7ae58c43de91d54704d6bc2a04` / `e77f00a2c6374b7eaa1caf2ff58ce50a` | `5405199dd0bf4d649f32aa77db1b79e6` / `ff6624fa3c774ef9abd53e3410a897e7` |
+
+The tabular model recorded accuracy `0.464912` and QWK `0.359652`. The fused model recorded
+accuracy `0.482456`, overall QWK `0.368758`, sensor-present QWK `0.361094`, sensor-missing
+QWK `0.373657`, ablated QWK `0.333343`, and an ablation delta of `+0.027751`. The replay's
+ready exported models are `models:/m-d567a34769a440d9a7d6d01813822ab7` (tabular) and
+`models:/m-2df3b580a33b40188b00327fd5a558bf` (fused). Inference attempts
+`31996d8284984c26aabfba6847ba3fb2` and `e4bbb57d6f9a433fbbaa387a4fce077c`
+each retain a 20-row `id,sii` submission; their replay-stable SHA-256 digests are
+`c82e90366a53ceb188445af0f8b7b01ad2254f91553159ee919849e1243f99f5` and
+`9d9d6e73cc657333e16c0eb0e4e5a9378b4238bca135c05dba48050990a819af` respectively.
 
 The checked-in tests generate tiny deterministic CSVs with the official schemas. Their
 metrics prove only plumbing, leakage controls, replay, evidence, and submission shape. They

@@ -22,10 +22,11 @@ def test_essay_boundary_and_quadratic_weighted_kappa(essay_scoring_csvs: Path) -
     from reference_projects.kaggle.essay_scoring.components import (
         MAX_TOKENS,
         pad_essays,
-        quadratic_weighted_kappa,
         tokenize,
     )
     from reference_projects.kaggle.essay_scoring.data import load_competition_data
+
+    from dsio.eval.metrics import quadratic_weighted_kappa
 
     loaded = load_competition_data(essay_scoring_csvs)
 

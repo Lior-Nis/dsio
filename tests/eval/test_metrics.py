@@ -25,6 +25,7 @@ from dsio.eval.metrics import (
     log_loss,
     mae,
     positive_rate,
+    quadratic_weighted_kappa,
     r2,
     rmse,
     roc_auc,
@@ -136,6 +137,50 @@ def test_accuracy_matches_sklearn() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("truth", "predicted"),
+    [
+        (
+            np.array([0, 0, 1, 1, 2, 2, 3, 3]),
+            np.array([0, 1, 1, 2, 2, 3, 3, 3]),
+        ),
+        (
+            np.array([1, 1, 2, 3, 4, 5, 6, 6]),
+            np.array([1, 2, 2, 3, 5, 5, 5, 6]),
+        ),
+    ],
+)
+def test_quadratic_weighted_kappa_matches_sklearn(
+    truth: np.ndarray, predicted: np.ndarray
+) -> None:
+    expected = sklearn_metrics.cohen_kappa_score(truth, predicted, weights="quadratic")
+    assert quadratic_weighted_kappa(truth, predicted) == pytest.approx(expected, abs=TOL)
+    assert compute(["quadratic_weighted_kappa"], truth, predicted) == {
+        "quadratic_weighted_kappa": pytest.approx(expected, abs=TOL)
+    }
+
+
+def test_quadratic_weighted_kappa_preserves_gaps_in_the_rating_scale() -> None:
+    truth = np.array([0, 0, 1, 1, 3, 3])
+    predicted = np.array([1, 1, 0, 3, 1, 3])
+
+    expected = sklearn_metrics.cohen_kappa_score(
+        truth,
+        predicted,
+        labels=[0, 1, 2, 3],
+        weights="quadratic",
+    )
+
+    assert quadratic_weighted_kappa(truth, predicted) == pytest.approx(expected, abs=TOL)
+
+
+def test_quadratic_weighted_kappa_keeps_mixed_extreme_integers_distinct() -> None:
+    truth = np.array([np.iinfo(np.int64).min, 0], dtype=np.int64)
+    predicted = np.array([0, np.iinfo(np.uint64).max], dtype=np.uint64)
+
+    assert quadratic_weighted_kappa(truth, predicted) == pytest.approx(2 / 7, abs=TOL)
+
+
 def test_log_loss_matches_sklearn(binary) -> None:
     truth, score = binary
     assert log_loss(truth, score > 0.5, score) == pytest.approx(
@@ -192,6 +237,23 @@ def test_binary_metrics_refuse_multiclass() -> None:
 def test_r2_refuses_a_constant_target() -> None:
     with pytest.raises(MetricError, match="undefined"):
         r2(np.full(10, 3.0), np.arange(10, dtype=float))
+
+
+@pytest.mark.parametrize(
+    ("truth", "predicted", "message"),
+    [
+        (np.array([]), np.array([]), "non-empty"),
+        (np.array([[0, 1]]), np.array([[0, 1]]), "one-dimensional"),
+        (np.array([0, 1]), np.array([0]), "same shape"),
+        (np.array([0.0, 1.0]), np.array([0.0, 1.0]), "integer ratings"),
+        (np.array([2, 2]), np.array([2, 2]), "undefined"),
+    ],
+)
+def test_quadratic_weighted_kappa_refuses_invalid_or_undefined_ratings(
+    truth: np.ndarray, predicted: np.ndarray, message: str
+) -> None:
+    with pytest.raises(MetricError, match=message):
+        quadratic_weighted_kappa(truth, predicted)
 
 
 # --- the registry -------------------------------------------------------------------
