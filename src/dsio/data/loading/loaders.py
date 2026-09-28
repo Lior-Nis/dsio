@@ -25,11 +25,19 @@ def build_loader[Item: Mapping[str, Any]](
     shuffle: bool = False,
     drop_last: bool = False,
     num_workers: int = 0,
+    pin_memory: bool = False,
+    prefetch_factor: int = 2,
     seed: int = 42,
     collate_fn: Collate | None = None,
 ) -> DataLoader[dict[str, Any]]:
     """Build one seeded loader; workers use spawn so threaded orchestrators stay safe."""
-    validate_loader_options(batch_size=batch_size, num_workers=num_workers, seed=seed)
+    validate_loader_options(
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        prefetch_factor=prefetch_factor,
+        seed=seed,
+    )
     if not isinstance(shuffle, bool):
         raise LoadingError(f"shuffle must be bool, got {type(shuffle).__name__}")
     if not isinstance(drop_last, bool):
@@ -45,7 +53,7 @@ def build_loader[Item: Mapping[str, Any]](
     if num_workers:
         kwargs.update(
             persistent_workers=True,
-            prefetch_factor=2,
+            prefetch_factor=prefetch_factor,
             multiprocessing_context="spawn",
         )
     sampler = None
@@ -58,16 +66,27 @@ def build_loader[Item: Mapping[str, Any]](
         shuffle=False,
         sampler=sampler,
         num_workers=num_workers,
+        pin_memory=pin_memory,
         drop_last=drop_last,
         collate_fn=collator,
         **kwargs,
     )
 
 
-def validate_loader_options(*, batch_size: object, num_workers: object, seed: object) -> None:
+def validate_loader_options(
+    *,
+    batch_size: object,
+    num_workers: object,
+    seed: object,
+    pin_memory: object = False,
+    prefetch_factor: object = 2,
+) -> None:
     """Validate shared loader scalars before a DataModule reaches setup."""
     _positive_integer("batch_size", batch_size)
     _nonnegative_integer("num_workers", num_workers)
+    if not isinstance(pin_memory, bool):
+        raise LoadingError(f"pin_memory must be bool, got {type(pin_memory).__name__}")
+    _positive_integer("prefetch_factor", prefetch_factor)
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= _MAX_SEED:
         raise LoadingError(f"seed must be an integer in [0, {_MAX_SEED}], got {seed!r}")
 

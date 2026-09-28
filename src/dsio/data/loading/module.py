@@ -47,6 +47,8 @@ class DsioDataModule(LightningDataModule):
         dataset_factory: DatasetFactory,
         batch_size: int = 32,
         num_workers: int = 0,
+        pin_memory: bool = False,
+        prefetch_factor: int = 2,
         seed: int = 42,
         shuffle: Mapping[str, bool] | None = None,
         drop_last: Mapping[str, bool] | None = None,
@@ -63,12 +65,20 @@ class DsioDataModule(LightningDataModule):
         self.dataset_factory = dataset_factory
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        self.prefetch_factor = prefetch_factor
         self.seed = seed
         self.shuffle = _phase_flags("shuffle", shuffle, train_default=True)
         self.drop_last = _drop_last_flags(drop_last)
         self.collate_fn = collate_fn
         self._loaders: dict[Phase, DataLoader[dict[str, Any]]] = {}
-        validate_loader_options(batch_size=batch_size, num_workers=num_workers, seed=seed)
+        validate_loader_options(
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            prefetch_factor=prefetch_factor,
+            seed=seed,
+        )
 
     def setup(self, stage: str | None = None) -> None:
         try:
@@ -104,6 +114,8 @@ class DsioDataModule(LightningDataModule):
                 shuffle=self.shuffle[phase],
                 drop_last=self.drop_last[phase],
                 num_workers=self.num_workers,
+                pin_memory=self.pin_memory,
+                prefetch_factor=self.prefetch_factor,
                 seed=self.seed,
                 collate_fn=self.collate_fn,
             )

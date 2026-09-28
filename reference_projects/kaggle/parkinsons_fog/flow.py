@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from prefect import flow
@@ -29,6 +30,7 @@ def parkinsons_fog_flow(
     labelled_root: str | None = None,
     daily_root: str | None = None,
     trainer_config: TrainerConfig | None = None,
+    execution_calibration: Mapping[str, Any] | None = None,
     scan_batch_rows: int = 65_536,
     scan_memory_budget_bytes: int = 4 * 1024**3,
 ) -> dict[str, Any]:
@@ -52,7 +54,14 @@ def parkinsons_fog_flow(
         source_inventory = scale["inventory"]
     data = ingest(data_dir, workspace, experiment_id, source_inventory)
     split = split_data(data, experiment_id, seed)
-    training = train(data, split, experiment_id, seed, trainer_config)
+    training = train(
+        data,
+        split,
+        experiment_id,
+        seed,
+        trainer_config,
+        execution_calibration,
+    )
     exported = export(data, split, training, experiment_id)
     evaluation = evaluate_model(data, split, exported, experiment_id)
     inference = infer_and_submit(data, exported, workspace, experiment_id)
@@ -76,6 +85,7 @@ def parkinsons_fog_flow(
         "ignored_points": data["ignored_points"],
         "ingest_telemetry": data["telemetry"],
         "training_telemetry": training["telemetry"],
+        "execution_calibration": training["execution_calibration"],
         "scale": (
             None
             if scale is None

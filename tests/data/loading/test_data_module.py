@@ -23,6 +23,14 @@ from dsio.data.splits import generate
 from dsio.data.store import SignalStore
 
 
+class _PicklableSamples(Dataset[dict[str, Any]]):
+    def __len__(self) -> int:
+        return 2
+
+    def __getitem__(self, position: int) -> dict[str, Any]:
+        return {"sample_id": str(position), "x": torch.tensor(position)}
+
+
 def _store(path: Path) -> SignalStore:
     with SignalStore.builder(path, channels=2, dtype="float32") as builder:
         for index in range(8):
@@ -89,6 +97,39 @@ def test_worker_loaders_do_not_fork_threaded_orchestrators(tmp_path: Path) -> No
 
     assert loader.multiprocessing_context is not None
     assert loader.multiprocessing_context.get_start_method() == "spawn"
+
+
+def test_build_loader_exposes_transfer_and_prefetch_execution_controls() -> None:
+    loader = build_loader(
+        _PicklableSamples(),
+        num_workers=1,
+        pin_memory=True,
+        prefetch_factor=4,
+    )
+
+    assert loader.pin_memory is True
+    assert loader.prefetch_factor == 4
+
+
+def test_data_module_carries_execution_controls_to_every_loader(tmp_path: Path) -> None:
+    store, examples, split = _inputs(tmp_path / "samples")
+    module = DsioDataModule(
+        store,
+        examples,
+        split,
+        fold=0,
+        roles={"train": "train", "validate": "test"},
+        dataset_factory=stored_samples,
+        num_workers=1,
+        pin_memory=True,
+        prefetch_factor=3,
+    )
+
+    module.setup("fit")
+
+    for loader in (module.train_dataloader(), module.val_dataloader()):
+        assert loader.pin_memory is True
+        assert loader.prefetch_factor == 3
 
 
 def test_setup_maps_exact_split_roles_to_lightning_phases(tmp_path: Path) -> None:
@@ -694,6 +735,8 @@ def test_missing_role_and_invalid_stage_fail_before_factory_use(tmp_path: Path) 
         ({"roles": {"fit": "train"}}, "unsupported Lightning phase"),
         ({"batch_size": 0}, "batch_size"),
         ({"num_workers": -1}, "num_workers"),
+        ({"pin_memory": 1}, "pin_memory"),
+        ({"prefetch_factor": 0}, "prefetch_factor"),
         ({"seed": -1}, "seed"),
         ({"shuffle": {"train": "yes"}}, "shuffle"),
         ({"shuffle": {"fit": True}}, "unsupported Lightning phase"),

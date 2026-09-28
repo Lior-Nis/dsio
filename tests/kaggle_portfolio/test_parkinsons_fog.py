@@ -555,6 +555,15 @@ def test_parkinsons_scale_flow_tracks_scan_and_explicit_training_configuration(
             labelled_root=str(labelled),
             daily_root=str(daily),
             trainer_config=trainer_config,
+            execution_calibration={
+                "target_effective_batch_size": 2,
+                "candidates": [
+                    {"batch_size": 1, "num_workers": 0, "pin_memory": False},
+                    {"batch_size": 2, "num_workers": 0, "pin_memory": False},
+                ],
+                "warmup_effective_batches": 1,
+                "measure_effective_batches": 1,
+            },
             scan_batch_rows=2,
         )
 
@@ -566,9 +575,25 @@ def test_parkinsons_scale_flow_tracks_scan_and_explicit_training_configuration(
     assert result["scale"]["scan_telemetry"]["peak_process_tree_rss_bytes"] > 0
     assert result["ingest_telemetry"]["elapsed_seconds"] > 0
     assert result["training_telemetry"]["elapsed_seconds"] > 0
+    calibration = result["execution_calibration"]
+    assert calibration["selected"]["batch_size"] in {1, 2}
+    assert (
+        calibration["selected"]["batch_size"]
+        * calibration["selected"]["accumulate_grad_batches"]
+        == 2
+    )
+    assert len(calibration["trials"]) == 2
     run = MlflowClient().get_run(result["scale"]["scan_run_id"])
     assert run.data.metrics["scale.scan.files"] == 2
     assert run.data.metrics["scale.scan.rows"] == 5
+    train_run = MlflowClient().get_run(result["train_run_id"])
+    assert int(train_run.data.params["calibration.selected.batch_size"]) in {1, 2}
+    assert train_run.data.metrics["calibration.selected.projected_examples_per_second"] > 0
+    assert train_run.data.metrics["calibration.trial.batch_size"] in {1, 2}
+    assert any(
+        artifact.path == "execution/calibration.json"
+        for artifact in MlflowClient().list_artifacts(result["train_run_id"], "execution")
+    )
 
 
 def test_parkinsons_boundary_streams_windows_and_excludes_test_subjects(
