@@ -30,6 +30,17 @@ kaggle competitions download -c child-mind-institute-problematic-internet-use -p
 
 Unzip each archive, then call the project-owned flows directly:
 
+When Prefect starts its ephemeral server, give each real execution an isolated
+`PREFECT_HOME`. The SQLite schema belongs to the installed Prefect version; reusing one
+global database across project environments can make otherwise independent flows fail during
+migration. Experiment evidence remains in MLflow, so the temporary orchestration state need
+not be shared:
+
+```bash
+prefect_run_home="$(mktemp -d)"
+PREFECT_HOME="$prefect_run_home" uv run python run_experiment.py
+```
+
 ```python
 from reference_projects.kaggle.titanic.flow import titanic_flow
 from reference_projects.kaggle.bike_sharing.flow import bike_sharing_flow
@@ -143,6 +154,17 @@ ready exported models are `models:/m-d567a34769a440d9a7d6d01813822ab7` (tabular)
 each retain a 20-row `id,sii` submission; their replay-stable SHA-256 digests are
 `c82e90366a53ceb188445af0f8b7b01ad2254f91553159ee919849e1243f99f5` and
 `9d9d6e73cc657333e16c0eb0e4e5a9378b4238bca135c05dba48050990a819af` respectively.
+
+A 2026-09-28 acceptance from merged `main` (`27faef6`) repeated the same dataset digest,
+split digest, model metrics, and submission digests. The complete ingest, split, two model
+trains, exports, evaluations, and inference passes finished in 117.70 seconds with 1,106,404
+KiB maximum process RSS. The [ingest
+attempt](https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/93538b3708574f1991c1b155a0567a75)
+again recorded all 315,008,875 sensor rows and 6,727,640,239 source bytes. Its split attempt is
+`d4abe4553f9343e4aefe155f6e8c851a`; tabular train/evaluation attempts are
+`6e2b2d72c71b4f4cb8bd56179b9480d6` / `166c4834d5b24621b1f72d414697c127`;
+fused train/evaluation attempts are `94b92730a1dc4979a4ed89c5f4d6e1b7` /
+`bc3d645375cd4a9e93dd00ea27be246f`.
 
 The checked-in tests generate tiny deterministic CSVs with the official schemas. Their
 metrics prove only plumbing, leakage controls, replay, evidence, and submission shape. They
