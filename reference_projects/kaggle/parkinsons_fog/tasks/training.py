@@ -18,6 +18,8 @@ from dsio.data.examples import Examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
+from dsio.experimental.telemetry import log_phase_evidence, measure_phase
+from dsio.experimental.training import calibrate_training_execution, log_calibration
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -33,11 +35,6 @@ from reference_projects.kaggle.parkinsons_fog.components import (
     FogObjective,
     fog_windows,
     pad_windows,
-)
-from reference_projects.kaggle.parkinsons_fog.scale import log_phase_evidence, measure_phase
-from reference_projects.kaggle.parkinsons_fog.scale.calibration import (
-    calibrate_training_execution,
-    log_calibration,
 )
 from reference_projects.kaggle.parkinsons_fog.tasks.data import labelled_examples
 

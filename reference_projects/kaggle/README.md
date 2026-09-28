@@ -166,6 +166,17 @@ again recorded all 315,008,875 sensor rows and 6,727,640,239 source bytes. Its s
 fused train/evaluation attempts are `94b92730a1dc4979a4ed89c5f4d6e1b7` /
 `bc3d645375cd4a9e93dd00ea27be246f`.
 
+## Raw-sequence Child Mind acceptance
+
+The separate `child_mind.sequence` project keeps the original actigraphy rows instead of
+summary features. Its 2026-09-28 CUDA acceptance processed all 314,569,149 labelled sensor
+rows into 40,646 windows, retained an explicit path for all 1,740 participants without the
+sensor modality, and trained through the exact `DsioModule` and `DsioDataModule` classes.
+Two optimized executions produced identical dataset, split, checkpoint, and metric evidence.
+The full evidence and limits are recorded in the
+[scale acceptance report](../../docs/research/2026-09-28-child-mind-sequence-scale.md) and
+[MLflow experiment 59](https://pop.tailee691f.ts.net:8443/#/experiments/59).
+
 The checked-in tests generate tiny deterministic CSVs with the official schemas. Their
 metrics prove only plumbing, leakage controls, replay, evidence, and submission shape. They
 do not validate model quality on the official datasets and make no leaderboard claim.

@@ -1,4 +1,4 @@
-"""Linux/CUDA resource evidence local to the Parkinson scale consumer."""
+"""Linux/CUDA resource evidence shared by measured training experiments."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def measure_phase(
             utilization,
             sampler_errors,
         ),
-        name=f"parkinsons-{phase}-telemetry",
+        name=f"dsio-{phase}-telemetry",
         daemon=False,
     )
     started = time.perf_counter()

@@ -24,7 +24,7 @@ def calibrate_execution(
     max_device_memory_bytes: int | None = None,
     max_host_memory_bytes: int | None = None,
     objective_metric: str = "examples_per_second",
-    objective_tolerance_fraction: float = 0.02,
+    objective_tolerance_fraction: float = 0.1,
     device: str | torch.device | None = None,
 ) -> dict[str, Any]:
     """Measure execution-only candidates and return the fastest admissible one.

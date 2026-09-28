@@ -12,6 +12,7 @@ from prefect import task
 from dsio.data.adapters import TableExamples
 from dsio.data.splits import generate
 from dsio.data.store import SignalStore
+from dsio.experimental.telemetry import log_phase_evidence, measure_phase
 from dsio.tracking import attempt, record_provenance, record_split_evidence
 from reference_projects.kaggle.parkinsons_fog.components import CHANNEL_COUNT
 from reference_projects.kaggle.parkinsons_fog.data import (
@@ -20,8 +21,6 @@ from reference_projects.kaggle.parkinsons_fog.data import (
     load_competition_data,
 )
 from reference_projects.kaggle.parkinsons_fog.scale import (
-    log_phase_evidence,
-    measure_phase,
     resolve_official_inventory,
     scan_non_supervised,
 )
