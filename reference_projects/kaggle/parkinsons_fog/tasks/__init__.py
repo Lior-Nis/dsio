@@ -3,6 +3,7 @@
 from reference_projects.kaggle.parkinsons_fog.tasks.data import (
     SPLIT_PARAMETERS,
     ingest,
+    scan_scale_sources,
     split_data,
 )
 from reference_projects.kaggle.parkinsons_fog.tasks.downstream import (
@@ -18,6 +19,7 @@ __all__ = [
     "export",
     "infer_and_submit",
     "ingest",
+    "scan_scale_sources",
     "split_data",
     "train",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,9 @@ from mlflow import MlflowClient
 from prefect import task
 
 from dsio.config.components import ComponentConfig, resolve_component
+from dsio.data.examples import Examples
 from dsio.data.loading import DsioDataModule
+from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
@@ -30,6 +33,11 @@ from reference_projects.kaggle.parkinsons_fog.components import (
     FogObjective,
     fog_windows,
     pad_windows,
+)
+from reference_projects.kaggle.parkinsons_fog.scale import log_phase_evidence, measure_phase
+from reference_projects.kaggle.parkinsons_fog.scale.calibration import (
+    calibrate_training_execution,
+    log_calibration,
 )
 from reference_projects.kaggle.parkinsons_fog.tasks.data import labelled_examples
 
@@ -55,10 +63,16 @@ PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters":
 
 @task(persist_result=False)
 def train(
-    data: dict[str, Any], split: dict[str, Any], experiment_id: str, seed: int
+    data: dict[str, Any],
+    split: dict[str, Any],
+    experiment_id: str,
+    seed: int,
+    trainer_config: TrainerConfig | None = None,
+    execution_calibration: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
-        check_requested_capabilities(TRAINER)
+        requested = trainer_config or TRAINER
+        check_requested_capabilities(requested)
         store = SignalStore(data["store_path"])
         examples = labelled_examples(store)
         manifest = load_split_evidence(
@@ -68,27 +82,40 @@ def train(
             "reference": "reference_projects.kaggle.parkinsons_fog.components:FogDetector",
             "parameters": MODEL_PARAMETERS,
         }
+
+        def module_factory() -> DsioModule:
+            return _module(model_config)
+
+        def data_module_factory(candidate: Mapping[str, Any]) -> DsioDataModule:
+            return _data_module(store, examples, manifest, seed, candidate)
+
+        calibration = None
+        loader_execution: dict[str, Any] = {
+            "batch_size": BATCH_SIZE,
+            "num_workers": NUM_WORKERS,
+            "pin_memory": False,
+            "prefetch_factor": 2,
+            "accumulate_grad_batches": requested.accumulate_grad_batches,
+        }
+        if execution_calibration is not None:
+            calibration = calibrate_training_execution(
+                module_factory,
+                data_module_factory,
+                seed=seed,
+                accelerator=requested.accelerator,
+                expected_epochs=requested.max_epochs,
+                configuration=execution_calibration,
+            )
+            loader_execution = dict(calibration["selected"])
+            requested = requested.model_copy(
+                update={
+                    "accumulate_grad_batches": loader_execution["accumulate_grad_batches"]
+                }
+            )
+            log_calibration(run.info.run_id, calibration)
         seed_everything(seed, workers=True, verbose=False)
-        data_module = DsioDataModule(
-            store,
-            examples,
-            manifest,
-            fold=0,
-            roles=ROLES,
-            dataset_factory=fog_windows,
-            batch_size=BATCH_SIZE,
-            num_workers=NUM_WORKERS,
-            seed=seed,
-            shuffle=SHUFFLE,
-            drop_last=DROP_LAST,
-            collate_fn=pad_windows,
-        )
-        module = DsioModule(
-            model=resolve_component(model_config, expected=FogDetector),
-            objective=FogObjective(),
-            optimizer_factory=torch.optim.Adam,
-            optimizer_parameters=OPTIMIZER_PARAMETERS,
-        )
+        data_module = data_module_factory(loader_execution)
+        module = module_factory()
         logger = MLFlowLogger(
             experiment_name="dsio-kaggle-parkinsons-fog",
             tracking_uri=mlflow.get_tracking_uri(),
@@ -97,12 +124,12 @@ def train(
         )
         directory = Path(data["store_path"]).parent
         trainer = build_trainer(
-            TRAINER,
+            requested,
             directory,
             logger,
-            build_callbacks(TRAINER, directory, has_validation=True),
+            build_callbacks(requested, directory, has_validation=True),
         )
-        execution = resolve_training_capabilities(trainer, requested=TRAINER)
+        execution = resolve_training_capabilities(trainer, requested=requested)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -110,14 +137,29 @@ def train(
                 "split_digest": split["split_digest"],
                 "seed": seed,
                 "fold": 0,
-                "batch_size": BATCH_SIZE,
-                "num_workers": NUM_WORKERS,
+                "batch_size": loader_execution["batch_size"],
+                "num_workers": loader_execution.get("num_workers", 0),
+                "pin_memory": loader_execution.get("pin_memory", False),
+                "prefetch_factor": loader_execution.get("prefetch_factor", 2),
                 "optimizer_parameters": OPTIMIZER_PARAMETERS,
                 "roles": ROLES,
                 "shuffle": SHUFFLE,
                 "drop_last": DROP_LAST,
-                "trainer": TRAINER.model_dump(mode="json"),
+                "trainer": requested.model_dump(mode="json"),
                 "execution": execution,
+                "execution_calibration": (
+                    None
+                    if calibration is None
+                    else {
+                        "policy": calibration["policy"],
+                        "candidates": [
+                            trial["candidate"] for trial in calibration["trials"]
+                        ],
+                        "selected": calibration["selected"],
+                        "environment": calibration["environment"],
+                        "environment_digest": calibration["environment_digest"],
+                    }
+                ),
             },
             components={
                 "module": "dsio.model.module:DsioModule",
@@ -133,7 +175,20 @@ def train(
             },
         )
         log_capabilities(logger, execution)
-        trainer.fit(module, datamodule=data_module)
+        root_device = trainer.strategy.root_device
+        cuda_device = root_device.index if root_device.type == "cuda" else None
+        if requested.accelerator == "cuda" and cuda_device is None:
+            raise RuntimeError(
+                f"CUDA training resolved an invalid trainer root device: {root_device}"
+            )
+        telemetry_context = (
+            measure_phase("training", cuda_device=cuda_device)
+            if trainer_config is not None
+            else _unmeasured_phase()
+        )
+        with telemetry_context as telemetry:
+            trainer.fit(module, datamodule=data_module)
+        completed_epochs = int(trainer.current_epoch)
         checkpoint = directory / "parkinsons-fog.ckpt"
         trainer.save_checkpoint(checkpoint)
         reference = save_artifact(
@@ -142,8 +197,69 @@ def train(
         MlflowClient().log_dict(
             run.info.run_id, reference.model_dump(mode="json"), "outputs/checkpoint.json"
         )
+        if trainer_config is not None:
+            elapsed = float(telemetry["elapsed_seconds"])
+            labelled_windows = sum(
+                len(split["assignments"][role]) for role in ("train", "validate")
+            )
+            log_phase_evidence(
+                run.info.run_id,
+                "training",
+                telemetry,
+                {
+                    "epochs": completed_epochs,
+                    "requested_epochs": requested.max_epochs,
+                    "labelled_windows": labelled_windows,
+                    "store_rows": store.n_rows,
+                    "window_epochs_per_second": labelled_windows
+                    * completed_epochs
+                    / elapsed,
+                },
+            )
         return {
             "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
             "identity": identity,
+            "telemetry": telemetry or None,
+            "execution_calibration": calibration,
         }
+
+
+def _unmeasured_phase() -> Any:
+    from contextlib import nullcontext
+
+    return nullcontext({})
+
+
+def _module(model_config: ComponentConfig) -> DsioModule:
+    return DsioModule(
+        model=resolve_component(model_config, expected=FogDetector),
+        objective=FogObjective(),
+        optimizer_factory=torch.optim.Adam,
+        optimizer_parameters=OPTIMIZER_PARAMETERS,
+    )
+
+
+def _data_module(
+    store: SignalStore,
+    examples: Examples,
+    manifest: SplitFile,
+    seed: int,
+    execution: Mapping[str, Any],
+) -> DsioDataModule:
+    return DsioDataModule(
+        store,
+        examples,
+        manifest,
+        fold=0,
+        roles=ROLES,
+        dataset_factory=fog_windows,
+        batch_size=execution["batch_size"],
+        num_workers=execution.get("num_workers", 0),
+        pin_memory=execution.get("pin_memory", False),
+        prefetch_factor=execution.get("prefetch_factor", 2),
+        seed=seed,
+        shuffle=SHUFFLE,
+        drop_last=DROP_LAST,
+        collate_fn=pad_windows,
+    )

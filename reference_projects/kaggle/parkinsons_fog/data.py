@@ -22,14 +22,24 @@ METADATA_COLUMNS = {
 }
 
 
-def load_competition_data(data_dir: str | Path) -> dict[str, Any]:
+def load_competition_data(
+    data_dir: str | Path, *, source_inventory: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     root = Path(data_dir)
     metadata = {
         kind: _metadata(root / f"{kind}_metadata.csv", columns)
         for kind, columns in METADATA_COLUMNS.items()
     }
-    train = _recordings(root / "train", metadata, labelled=True)
-    test = _recordings(root / "test", metadata, labelled=False)
+    if source_inventory is None:
+        train = _recordings(root / "train", metadata, labelled=True)
+        test = _recordings(root / "test", metadata, labelled=False)
+    else:
+        train = _inventory_recordings(
+            [*source_inventory["train_defog"], *source_inventory["train_tdcsfog"]],
+            metadata,
+            labelled=True,
+        )
+        test = _inventory_recordings(source_inventory["test"], metadata, labelled=False)
     test_subjects = sorted({str(recording["subject"]) for recording in test})
     excluded = sorted(
         str(recording["recording_id"])
@@ -49,15 +59,82 @@ def load_competition_data(data_dir: str | Path) -> dict[str, Any]:
     }
 
 
+def _inventory_recordings(
+    items: object,
+    metadata: Mapping[str, Mapping[str, str]],
+    *,
+    labelled: bool,
+) -> list[dict[str, Any]]:
+    if not isinstance(items, list) or not items:
+        raise ValueError("Parkinson source inventory must contain a non-empty recording list")
+    result: list[dict[str, Any]] = []
+    observed: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise ValueError("Parkinson source inventory entries must be mappings")
+        kind = str(item.get("kind"))
+        recording_id = str(item.get("recording_id"))
+        path = Path(str(item.get("path")))
+        if kind not in METADATA_COLUMNS:
+            raise ValueError(f"Parkinson source inventory has unsupported kind {kind!r}")
+        key = (kind, recording_id)
+        if key in observed:
+            raise ValueError(f"Parkinson source inventory duplicates {kind} Id {recording_id!r}")
+        observed.add(key)
+        if not path.is_file():
+            raise ValueError(f"Parkinson source inventory file is missing: {path}")
+        bytes_value = item.get("bytes")
+        mtime_value = item.get("mtime_ns")
+        if (
+            isinstance(bytes_value, bool)
+            or not isinstance(bytes_value, int)
+            or bytes_value < 0
+            or isinstance(mtime_value, bool)
+            or not isinstance(mtime_value, int)
+            or mtime_value < 0
+        ):
+            raise ValueError(
+                f"Parkinson source inventory {recording_id!r} has an invalid stat fingerprint"
+            )
+        _validate_source_fingerprint(path, recording_id, bytes_value, mtime_value)
+        try:
+            subject = metadata[kind][recording_id]
+        except KeyError:
+            raise ValueError(
+                f"Parkinson source inventory {recording_id!r} has no {kind} metadata"
+            ) from None
+        result.append(
+            {
+                "path": str(path),
+                "kind": kind,
+                "recording_id": recording_id,
+                "subject": subject,
+                "labelled": labelled,
+                "inventory_bytes": bytes_value,
+                "inventory_mtime_ns": mtime_value,
+            }
+        )
+    return sorted(result, key=lambda item: (item["kind"], item["recording_id"]))
+
+
 def iter_recording_windows(
     recording: Mapping[str, Any], *, window_size: int = WINDOW_SIZE
 ) -> Iterator[dict[str, Any]]:
     if isinstance(window_size, bool) or not isinstance(window_size, int) or window_size < 1:
         raise ValueError(f"window_size must be a positive integer, got {window_size!r}")
     path = Path(str(recording["path"]))
+    if "inventory_bytes" in recording or "inventory_mtime_ns" in recording:
+        _validate_source_fingerprint(
+            path,
+            str(recording["recording_id"]),
+            int(recording["inventory_bytes"]),
+            int(recording["inventory_mtime_ns"]),
+        )
     labelled = bool(recording["labelled"])
     kind = str(recording["kind"])
-    expected = DEFOG_COLUMNS if labelled and kind == "defog" else TRAIN_COLUMNS
+    expected: tuple[str, ...] = (
+        DEFOG_COLUMNS if labelled and kind == "defog" else TRAIN_COLUMNS
+    )
     if not labelled:
         expected = BASE_COLUMNS
     buffer: list[list[float]] = []
@@ -95,6 +172,21 @@ def iter_recording_windows(
         yield {"start": times[0], "times": times, "data": np.asarray(buffer, np.float32)}
     if rows == 0:
         raise ValueError(f"{path.name} must contain at least one row")
+
+
+def _validate_source_fingerprint(
+    path: Path, recording_id: str, expected_bytes: int, expected_mtime_ns: int
+) -> None:
+    try:
+        stat = path.stat()
+    except OSError as error:
+        raise ValueError(f"Parkinson source {recording_id!r} cannot be stat-ed: {path}") from error
+    if stat.st_size != expected_bytes or stat.st_mtime_ns != expected_mtime_ns:
+        raise ValueError(
+            f"Parkinson source {recording_id!r} changed since inventory: "
+            f"expected ({expected_bytes}, {expected_mtime_ns}), observed "
+            f"({stat.st_size}, {stat.st_mtime_ns})"
+        )
 
 
 def _recordings(
