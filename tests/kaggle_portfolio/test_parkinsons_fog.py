@@ -346,7 +346,7 @@ def test_parkinsons_scale_telemetry_records_resources_and_refuses_cuda_fallback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from reference_projects.kaggle.parkinsons_fog.scale.telemetry import measure_phase
+    from dsio.experimental.telemetry import measure_phase
 
     for interval in (True, 0, float("inf"), float("nan")):
         with pytest.raises(ValueError, match="sample_interval_seconds.*finite positive number"):
@@ -435,7 +435,7 @@ def test_parkinsons_scale_rejects_invalid_resource_configuration_before_work(
 
 
 def test_parkinsons_telemetry_counts_children_spawned_by_non_main_threads() -> None:
-    from reference_projects.kaggle.parkinsons_fog.scale.telemetry import measure_phase
+    from dsio.experimental.telemetry import measure_phase
 
     baseline = 0
     for line in Path(f"/proc/{os.getpid()}/status").read_text().splitlines():
@@ -565,6 +565,7 @@ def test_parkinsons_scale_flow_tracks_scan_and_explicit_training_configuration(
                 "measure_effective_batches": 1,
             },
             scan_batch_rows=2,
+            scan_memory_budget_bytes=sys.maxsize,
         )
 
     assert result["scale"]["scan_run_id"]

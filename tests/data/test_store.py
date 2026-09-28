@@ -288,6 +288,37 @@ def test_manifest_records_group_count(store: SignalStore) -> None:
     assert manifest.channels == 3
 
 
+def test_signal_examples_broadcast_vector_entity_attributes(tmp_path: Path) -> None:
+    path = tmp_path / "vectors"
+    with SignalStore.builder(path, channels=1, dtype="float32") as builder:
+        builder.add(
+            "first",
+            np.zeros((4, 1), dtype="float32"),
+            group="first",
+            attrs={"features": [1.0, 2.0]},
+        )
+        builder.add(
+            "second",
+            np.zeros((4, 1), dtype="float32"),
+            group="second",
+            attrs={"features": [3.0, 4.0]},
+        )
+
+    vectors = SignalStore(path)
+    examples = SignalExamples(
+        vectors,
+        build_index(vectors, WindowSpec(length=2, stride=2)),
+    )
+
+    assert examples.attribute("features").dtype == np.dtype("float64")
+    assert examples.attribute("features").tolist() == [
+        [1.0, 2.0],
+        [1.0, 2.0],
+        [3.0, 4.0],
+        [3.0, 4.0],
+    ]
+
+
 def test_adapter_identities_require_a_manifest(store: SignalStore) -> None:
     examples = SignalExamples(store, build_index(store, WindowSpec(length=500, stride=500)))
     (store.path / "manifest.yaml").unlink()

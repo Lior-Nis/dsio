@@ -1,10 +1,11 @@
-"""Measured execution calibration for the Parkinson consumer workload."""
+"""Measured execution calibration for a real DSIO training workload."""
 
 from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence, Sized
+from contextlib import suppress
 from math import ceil
 from pathlib import Path
 from typing import Any
@@ -15,8 +16,8 @@ from mlflow import MlflowClient
 
 from dsio.data.loading import DsioDataModule
 from dsio.experimental.execution import calibrate_execution
+from dsio.experimental.telemetry import measure_phase
 from dsio.model.module import DsioModule
-from reference_projects.kaggle.parkinsons_fog.scale.telemetry import measure_phase
 
 ModuleFactory = Callable[[], DsioModule]
 DataModuleFactory = Callable[[Mapping[str, Any]], DsioDataModule]
@@ -39,7 +40,7 @@ def calibrate_training_execution(
         "warmup_effective_batches", configuration.get("warmup_effective_batches", 1)
     )
     measured = _positive_integer(
-        "measure_effective_batches", configuration.get("measure_effective_batches", 3)
+        "measure_effective_batches", configuration.get("measure_effective_batches", 10)
     )
     expected_epochs = _positive_integer("expected_epochs", expected_epochs)
     device = _device(accelerator)
@@ -119,7 +120,7 @@ def _benchmark(
     if not isinstance(optimizer, torch.optim.Optimizer):
         raise ValueError("execution calibration currently requires an optimizer without scheduler")
     accumulation = int(candidate["accumulate_grad_batches"])
-    iterator = None
+    iterator: Iterator[Mapping[str, Any]] | None = None
     training_step = 0
 
     def effective_batch() -> int:
@@ -127,8 +128,10 @@ def _benchmark(
         examples_seen = 0
         optimizer.zero_grad(set_to_none=True)
         for _ in range(accumulation):
+            if iterator is None:
+                iterator = iter(loader)
             try:
-                batch = next(iterator)  # type: ignore[arg-type]
+                batch = next(iterator)
             except StopIteration:
                 iterator = iter(loader)
                 batch = next(iterator)
@@ -161,32 +164,41 @@ def _benchmark(
         optimizer.step()
         return examples_seen
 
-    startup_started = time.perf_counter()
-    iterator = iter(loader)
-    warmup_examples = sum(effective_batch() for _ in range(warmup_effective_batches))
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
-    startup_seconds = time.perf_counter() - startup_started
-    prefetched_micro_batches = int(candidate.get("num_workers", 0)) * int(
-        candidate.get("prefetch_factor", 2)
-    )
-    measured_batches = max(
-        measure_effective_batches,
-        ceil((prefetched_micro_batches + 2) / accumulation),
-    )
-    cuda_index = device.index if device.type == "cuda" else None
-    with measure_phase("calibration", cuda_device=cuda_index) as telemetry:
-        examples_seen = sum(effective_batch() for _ in range(measured_batches))
+    try:
+        startup_started = time.perf_counter()
+        iterator = iter(loader)
+        warmup_examples = sum(effective_batch() for _ in range(warmup_effective_batches))
         if device.type == "cuda":
             torch.cuda.synchronize(device)
+        startup_seconds = time.perf_counter() - startup_started
+        prefetched_micro_batches = int(candidate.get("num_workers", 0)) * int(
+            candidate.get("prefetch_factor", 2)
+        )
+        measured_batches = max(
+            measure_effective_batches,
+            ceil((prefetched_micro_batches + 2) / accumulation),
+        )
+        cuda_index = device.index if device.type == "cuda" else None
+        with measure_phase("calibration", cuda_device=cuda_index) as telemetry:
+            examples_seen = sum(effective_batch() for _ in range(measured_batches))
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+    finally:
+        shutdown = getattr(iterator, "_shutdown_workers", None)
+        if callable(shutdown):
+            with suppress(Exception):
+                shutdown()
 
     elapsed = float(telemetry["elapsed_seconds"])
     cuda = telemetry["cuda"]
     steady_throughput = examples_seen / elapsed
-    projected_examples = len(loader.dataset) * expected_epochs
-    projected_seconds = startup_seconds + max(projected_examples - warmup_examples, 0) / (
-        steady_throughput
-    )
+    dataset = loader.dataset
+    if not isinstance(dataset, Sized):
+        raise TypeError("execution calibration requires a sized training dataset")
+    projected_examples = len(dataset) * expected_epochs
+    projected_seconds = startup_seconds * expected_epochs + max(
+        projected_examples - warmup_examples, 0
+    ) / steady_throughput
     peak_allocated = int(cuda["peak_allocated_bytes"] or 0)
     peak_reserved = int(cuda["peak_reserved_bytes"] or 0)
     result: dict[str, float | int] = {

@@ -28,6 +28,7 @@ def test_calibration_selects_measured_throughput_without_changing_effective_batc
             {"batch_size": 64, "num_workers": 4, "pin_memory": True},
             {"batch_size": 256, "num_workers": 8, "pin_memory": True},
         ],
+        objective_tolerance_fraction=0.02,
     )
 
     assert [candidate["accumulate_grad_batches"] for candidate in measured] == [16, 4, 1]
@@ -181,6 +182,28 @@ def test_calibration_prefers_simpler_execution_when_measurements_are_effectively
     )
 
     assert evidence["selected"]["batch_size"] == 1024
+
+
+def test_calibration_default_is_stable_across_small_benchmark_jitter() -> None:
+    from dsio.experimental.execution import calibrate_execution
+
+    measurements = (
+        {64: 100.0, 128: 92.0},
+        {64: 97.0, 128: 100.0},
+    )
+    selected: list[int] = []
+    for throughput in measurements:
+        evidence = calibrate_execution(
+            lambda candidate: {
+                "examples_per_second": throughput[candidate["batch_size"]],
+                "peak_device_memory_bytes": candidate["batch_size"],
+            },
+            target_effective_batch_size=128,
+            candidates=[{"batch_size": 64}, {"batch_size": 128}],
+        )
+        selected.append(evidence["selected"]["batch_size"])
+
+    assert selected == [128, 128]
 
 
 def test_calibration_fingerprints_the_measured_device_not_cuda_availability(

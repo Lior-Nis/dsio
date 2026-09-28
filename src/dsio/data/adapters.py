@@ -219,14 +219,16 @@ class SignalExamples:
         if name == "label" and self.index.labels is not None:
             return np.asarray(self.index.labels)
 
-        per_entity = np.array(
-            [entity.attrs.get(name, np.nan) for entity in self.store.entities], dtype=object
-        )
-        if all(value is np.nan or value != value for value in per_entity):
+        if not any(name in entity.attrs for entity in self.store.entities):
             raise ExamplesError(
                 f"{self.name} has no attribute {name!r}; it has "
                 f"{', '.join(self.attribute_names()) or 'none'}"
             )
+        values = [entity.attrs.get(name, np.nan) for entity in self.store.entities]
+        try:
+            per_entity = np.asarray(values)
+        except ValueError:
+            per_entity = np.asarray(values, dtype=object)
         return per_entity[self.index.entity_codes]
 
     def times(self) -> tuple[np.ndarray, np.ndarray] | None:
