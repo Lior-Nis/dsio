@@ -9,10 +9,10 @@ import pytest
 import torch
 from torch import nn
 
-from dsio.model.components import Jitter, no_augmentation
-from dsio.model.masking import CausalMask, SpanMask
+from dsio.experimental.model.components import Jitter, no_augmentation
+from dsio.experimental.model.masking import CausalMask, SpanMask
+from dsio.experimental.train.augmentation import AugmentationError, MaskedReconstruction, TwoView
 from dsio.model.module import DsioModule, ModuleError
-from dsio.train.augmentation import AugmentationError, MaskedReconstruction, TwoView
 
 
 class CaptureObjective(nn.Module):
@@ -98,7 +98,7 @@ def test_two_view_replays_from_explicit_identity_without_touching_global_rng() -
     identity = {
         "kind": "two_view",
         "component": {
-            "reference": "dsio.model.components:Jitter",
+            "reference": "dsio.experimental.model.components:Jitter",
             "parameters": {"sigma": 0.5},
         },
         "views": ["online", "target"],
@@ -158,7 +158,7 @@ def test_masked_reconstruction_builds_the_existing_loss_contract_on_device() -> 
         step=5,
         identity={
             "kind": "masked_reconstruction",
-            "component": {"reference": "dsio.model.masking:SpanMask"},
+            "component": {"reference": "dsio.experimental.model.masking:SpanMask"},
         },
     )
 

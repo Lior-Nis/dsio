@@ -23,5 +23,26 @@ def test_all_declared_contracts_are_present():
 
     assert names == {
         "Evaluation depends on no pipeline layer",
+        "Stable packages never import experimental components",
         "The spine never imports its own contract suites",
     }
+
+
+def test_stable_contract_covers_every_non_experimental_package():
+    """A new stable package must join the contract, or it could import dsio.experimental."""
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text())
+    contract = next(
+        contract
+        for contract in data["tool"]["importlinter"]["contracts"]
+        if contract["name"] == "Stable packages never import experimental components"
+    )
+    package_root = root / "src" / "dsio"
+    stable = {
+        f"dsio.{path.stem if path.is_file() else path.name}"
+        for path in package_root.iterdir()
+        if path.name != "experimental"
+        and not path.name.startswith("_")
+        and ((path.is_dir() and (path / "__init__.py").is_file()) or path.suffix == ".py")
+    }
+    assert stable <= set(contract["source_modules"])

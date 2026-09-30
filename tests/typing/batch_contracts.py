@@ -15,9 +15,10 @@ from dsio.batches import (
     TrainingBatch,
     WindowItem,
 )
-from dsio.data.loading import WindowDataset, build_loader
+from dsio.data.loading import build_loader
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowIndex
+from dsio.experimental.data import WindowDataset
 from dsio.model.module import DsioModule
 
 

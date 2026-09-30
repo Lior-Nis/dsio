@@ -70,6 +70,10 @@ _Avoid_: Result model
 A reviewed DSio Component proven by one real downstream Experiment but not yet covered by a compatibility promise.
 _Avoid_: Project component
 
+**Legacy Experimental Component**:
+A pre-existing DSio Component with no real downstream use, kept under `dsio.experimental` without a compatibility promise until DSio 1.0, when it is deleted if still unproven.
+_Avoid_: Deprecated component
+
 **Stable Component**:
 A DSio Component proven by an unrelated second use and protected by compatibility tests.
 _Avoid_: Blessed component

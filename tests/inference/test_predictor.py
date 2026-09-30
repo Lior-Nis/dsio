@@ -15,14 +15,8 @@ import torch
 from mlflow.tracking import MlflowClient
 from torch import Tensor, nn
 
-from dsio.inference import (
-    Predictor,
-    PredictorError,
-    TensorOutput,
-    build_predictor,
-    require_checkpoint_lineage,
-    validate_tensor_prediction,
-)
+from dsio.experimental.inference import TensorOutput, validate_tensor_prediction
+from dsio.inference import Predictor, PredictorError, build_predictor, require_checkpoint_lineage
 from dsio.model.module import DsioModule
 from dsio.tracking import record_provenance
 from dsio.tracking.client import resolve_tracking_uri

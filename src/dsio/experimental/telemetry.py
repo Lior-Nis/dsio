@@ -288,3 +288,6 @@ def _gpu_utilization(uuid: str) -> float:
         return float(completed.stdout.strip().splitlines()[0])
     except (OSError, ValueError, IndexError, subprocess.SubprocessError) as error:
         raise RuntimeError(f"CUDA telemetry failed to sample nvidia-smi for {uuid}") from error
+
+
+__all__ = ["log_phase_evidence", "measure_phase"]

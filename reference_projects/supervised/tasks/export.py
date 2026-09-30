@@ -8,12 +8,11 @@ import torch
 from prefect import task
 
 from dsio.config.components import resolve_component
+from dsio.experimental.inference import TensorOutput, validate_tensor_prediction
 from dsio.inference import (
-    TensorOutput,
     build_predictor,
     log_predictor,
     require_checkpoint_lineage,
-    validate_tensor_prediction,
 )
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef
@@ -52,9 +51,9 @@ def export_model(
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
-                "normalizer": "dsio.inference.predictor:TensorOutput",
+                "normalizer": "dsio.experimental.inference.outputs:TensorOutput",
                 "preprocessor": components["preprocessor"],
-                "validator": "dsio.inference.predictor:validate_tensor_prediction",
+                "validator": "dsio.experimental.inference.outputs:validate_tensor_prediction",
             },
         )
         input_example = {

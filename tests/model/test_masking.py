@@ -6,7 +6,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from dsio.model.masking import (  # noqa: E402
+from dsio.experimental.model.masking import (  # noqa: E402
     CausalMask,
     PatchMask,
     RandomMask,

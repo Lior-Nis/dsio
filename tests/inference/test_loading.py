@@ -13,14 +13,8 @@ from mlflow.tracking import MlflowClient
 from mlflow.types.schema import Schema, TensorSpec
 from torch import Tensor, nn
 
-from dsio.inference import (
-    InferenceError,
-    Predictor,
-    PredictorError,
-    TensorOutput,
-    log_predictor,
-    predict,
-)
+from dsio.experimental.inference import TensorOutput
+from dsio.inference import InferenceError, Predictor, PredictorError, log_predictor, predict
 
 
 class AddOne(nn.Module):

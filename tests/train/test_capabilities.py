@@ -18,8 +18,8 @@ pytest.importorskip("lightning")
 from lightning import Trainer  # noqa: E402
 
 import dsio.train.capabilities as capabilities  # noqa: E402
-from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.model.components import CrossEntropy, EmbeddingEncoder  # noqa: E402
+from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
+from dsio.experimental.model.components import CrossEntropy, EmbeddingEncoder  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
 from dsio.train.capabilities import (  # noqa: E402
     CapabilityError,

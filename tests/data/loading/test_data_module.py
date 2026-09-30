@@ -12,15 +12,10 @@ import torch
 from torch.utils.data import Dataset, IterableDataset, default_collate
 
 from dsio.data.adapters import entity_examples
-from dsio.data.loading import (
-    DsioDataModule,
-    LoadingError,
-    build_loader,
-    collate_items,
-    stored_samples,
-)
+from dsio.data.loading import DsioDataModule, LoadingError, build_loader, collate_items
 from dsio.data.splits import generate
 from dsio.data.store import SignalStore
+from dsio.experimental.data import stored_samples
 
 
 class _PicklableSamples(Dataset[dict[str, Any]]):

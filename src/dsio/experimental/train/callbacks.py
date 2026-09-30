@@ -22,6 +22,9 @@ representation. Without a probe there is no signal to stop on. Nothing here is l
 that use, though — running :class:`OnlineProbe` or :class:`RankMeMonitor` against a
 supervised run's own validation loop is exactly as meaningful, and costs nothing extra to
 support since neither callback knows or cares which kind of run it was attached to.
+
+Legacy experimental (docs/component-admission.md): no real downstream use yet, no
+compatibility promise, deleted at 1.0 if still unproven.
 """
 
 from __future__ import annotations

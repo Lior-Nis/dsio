@@ -9,8 +9,9 @@ pytest.importorskip("lightning")
 
 from torch import nn  # noqa: E402
 
-from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.model.components import (  # noqa: E402
+from dsio.experimental.model import export_encoder  # noqa: E402
+from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
+from dsio.experimental.model.components import (  # noqa: E402
     Conv1dEncoder,
     CrossEntropy,
     InstanceStandardize,
@@ -22,7 +23,7 @@ from dsio.model.components import (  # noqa: E402
     simclr_projector_head,
     vicreg_projector_head,
 )
-from dsio.model.module import ComponentError, DsioModule, export_encoder  # noqa: E402
+from dsio.model.module import ComponentError, DsioModule  # noqa: E402
 
 
 def tiny_module(**overrides) -> DsioModule:  # type: ignore[no-untyped-def]

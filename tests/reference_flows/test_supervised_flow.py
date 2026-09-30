@@ -280,14 +280,14 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
             "parameters": {},
         }
         assert export_provenance["components"]["normalizer"] == (
-            "dsio.inference.predictor:TensorOutput"
+            "dsio.experimental.inference.outputs:TensorOutput"
         )
         assert export_provenance["components"]["preprocessor"] == {
             "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
             "parameters": {"channels": 1, "time": 4},
         }
         assert export_provenance["components"]["validator"] == (
-            "dsio.inference.predictor:validate_tensor_prediction"
+            "dsio.experimental.inference.outputs:validate_tensor_prediction"
         )
         assert export_provenance["configuration"]["preprocessor"] == {
             "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",

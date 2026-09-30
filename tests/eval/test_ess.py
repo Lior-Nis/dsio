@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from dsio.eval.ess import EssError, autocorrelation, effective_sample_size
+from dsio.experimental.eval.ess import EssError, autocorrelation, effective_sample_size
 
 
 def test_independent_series_has_ess_close_to_n():

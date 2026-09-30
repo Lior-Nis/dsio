@@ -9,7 +9,7 @@ from pathlib import Path
 
 import dsio
 import dsio.config.components
-import dsio.model.chain
+import dsio.experimental.model.chain
 import dsio.model.module
 
 PACKAGE_INIT = Path(dsio.__file__)
@@ -51,5 +51,5 @@ def test_package_root_exposes_only_the_version() -> None:
 
 def test_component_error_is_defined_once() -> None:
     canonical = dsio.config.components.ComponentError
-    assert dsio.model.chain.ComponentError is canonical
+    assert dsio.experimental.model.chain.ComponentError is canonical
     assert dsio.model.module.ComponentError is canonical

@@ -21,10 +21,15 @@ pytest.importorskip("sklearn")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader, Dataset  # noqa: E402
 
-from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.model.components import Conv1dEncoder, CrossEntropy  # noqa: E402
+from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
+from dsio.experimental.model.components import Conv1dEncoder, CrossEntropy  # noqa: E402
+from dsio.experimental.train.callbacks import (  # noqa: E402
+    OnlineProbe,
+    RankMeMonitor,
+    embed,
+    rankme,
+)
 from dsio.model.module import DsioModule  # noqa: E402
-from dsio.train.callbacks import OnlineProbe, RankMeMonitor, embed, rankme  # noqa: E402
 
 
 class Toy(Dataset):
@@ -150,7 +155,7 @@ def test_embed_leaves_no_gradients(module: DsioModule, loader: DataLoader) -> No
 
 
 def test_embed_runs_the_encoder_with_grad_disabled(module: DsioModule, loader: DataLoader) -> None:
-    """``@torch.no_grad()`` on ``embed`` (train/callbacks.py) is what keeps this from
+    """``@torch.no_grad()`` on ``embed`` (experimental/train/callbacks.py) is what keeps this from
     building an autograd graph over the whole corpus every time a probe runs.
 
     ``test_embed_leaves_no_gradients`` above checks ``p.grad is None`` -- true for any
@@ -258,7 +263,7 @@ def test_quality_callbacks_apply_the_same_schedule(
     current_epoch: int,
     expected_runs: int,
 ) -> None:
-    import dsio.train.callbacks as callback_module
+    import dsio.experimental.train.callbacks as callback_module
 
     logged = Mock()
     callback: OnlineProbe | RankMeMonitor

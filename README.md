@@ -210,7 +210,8 @@ algorithms enter through DSIO's reviewed
 Replay those exact assignments through the one Lightning data composition root:
 
 ```python
-from dsio.data.loading import DsioDataModule, stored_samples
+from dsio.data.loading import DsioDataModule
+from dsio.experimental.data import stored_samples
 
 data = DsioDataModule(
     store,
@@ -228,7 +229,8 @@ batch = next(iter(data.train_dataloader()))
 assert set(batch) >= {"sample_id", "x"}
 ```
 
-`stored_samples` is the canonical whole-sample decoder. Windowed or task-labelled paths
+`stored_samples` is the whole-sample decoder (legacy experimental until the Component
+Warehouse v1 field-mapping dataset replaces it). Windowed or task-labelled paths
 provide another ordinary dataset factory with the same `(store, examples, sample_ids)`
 signature. DSIO still owns assignment replay, seeded sampling, batching, worker setup, and
 the identity guard: every item and batch must retain the exact ordered `sample_id` values.
@@ -299,7 +301,8 @@ image. There is no separate item-store concept to add, because an item *is* a wi
 exactly entity length.
 
 ```python
-from dsio.data.loading import WindowDataset, build_loader
+from dsio.data.loading import build_loader
+from dsio.experimental.data import WindowDataset
 from dsio.data.store import SignalStore
 from dsio.data.views import WindowSpec, build_index
 

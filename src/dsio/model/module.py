@@ -18,7 +18,6 @@ from dsio.config.components import (
     validate_component_config,
 )
 from dsio.contracts import canonical_json
-from dsio.model.chain import export_encoder
 
 Stage = Literal["train", "validate", "test"]
 type Batch = Mapping[str, Any]
@@ -388,5 +387,4 @@ __all__ = [
     "Objective",
     "ObjectiveResult",
     "Stage",
-    "export_encoder",
 ]

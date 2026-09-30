@@ -33,14 +33,19 @@ lightning = pytest.importorskip("lightning")
 from torch import nn  # noqa: E402
 
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
-from dsio.data.loading import WindowDataset, build_loader  # noqa: E402
+from dsio.data.loading import build_loader  # noqa: E402
 from dsio.data.splits.folds import folds_from_splits  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.splits.resolve import assert_no_row_overlap, resolve  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
-from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.model.components import CrossEntropy, EmbeddingEncoder, linear_head  # noqa: E402
+from dsio.experimental.data import WindowDataset  # noqa: E402
+from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
+from dsio.experimental.model.components import (  # noqa: E402
+    CrossEntropy,
+    EmbeddingEncoder,
+    linear_head,
+)
 from dsio.model.module import DsioModule  # noqa: E402
 
 VOCAB, LENGTH, STRIDE, DIM = 64, 32, 16, 16

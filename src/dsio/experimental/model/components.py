@@ -7,6 +7,9 @@ plugin type system.
 Every module here takes ``[batch, channels, time]`` and is shape-checked on the way in,
 because a silent broadcast between a channels-first and a channels-last tensor produces a
 model that trains, converges to something, and is wrong.
+
+Legacy experimental (docs/component-admission.md): no real downstream use yet, no
+compatibility promise, deleted at 1.0 if still unproven.
 """
 
 from __future__ import annotations
@@ -102,7 +105,7 @@ class EmbeddingEncoder(nn.Module):
     retrain for every change to a view, which is the coupling the index layer removed.
 
     A float payload is accepted as well as an integer one, because
-    :class:`~dsio.data.loading.windows.WindowDataset`'s float path is the default and a caller
+    :class:`~dsio.experimental.data.windows.WindowDataset`'s float path is the default and a caller
     who has not set ``payload_dtype=torch.long`` should get a working model rather than a
     dtype error. The cast back is lossless only up to 2**24 (16,777,216) — the largest
     integer float32 represents without gaps — so above that vocabulary size two adjacent
@@ -176,13 +179,11 @@ def mae_decoder_head(in_dim: int, channels: int, length: int, hidden_mult: int =
     """MAE's reconstruction head: predict every position of the original window, back in
     the ``[channels, length]`` shape the input arrived in.
 
-    Importable like any other head, moved here from the deleted ``ssl.methods.
-    MaskedReconstruction.build_head`` — ``ssl_task.py`` now resolves it exactly the way
-    ``torch_task.py`` resolves a classification head, which is
-    what let the pretext objective stop being a separate kind of thing that builds its own
-    head. Its output only makes sense paired with :class:`MaskedMSE` and a masked
-    :class:`~dsio.data.loading.windows.WindowDataset` target, which is why
-    :func:`~dsio.model.module.export_encoder` never ships it with the encoder.
+    Importable like any other head and selected by ``module:qualname``, so the pretext
+    objective is not a separate kind of thing that builds its own head. Its output only
+    makes sense paired with :class:`MaskedMSE` and the NaN-sentinel target
+    :class:`~dsio.experimental.train.augmentation.MaskedReconstruction` writes, which is why
+    :func:`~dsio.experimental.model.chain.export_encoder` never ships it with the encoder.
     """
     return nn.Sequential(
         nn.Linear(in_dim, in_dim * hidden_mult),
@@ -265,7 +266,7 @@ class MaskedMSE(nn.Module):
     """Reconstruction loss for a target that carries NaN outside masked positions.
 
     NaN is the continuous analogue of MLM's ``-100``:
-    :class:`~dsio.train.augmentation.MaskedReconstruction` writes the original value at
+    :class:`~dsio.experimental.train.augmentation.MaskedReconstruction` writes the original value at
     every ``hidden`` position and NaN everywhere the model was allowed to see the input, so
     this is the whole mechanism that keeps a masked autoencoder from winning by copying — a
     reconstruction that only matches the visible input is never compared against anything
@@ -317,7 +318,7 @@ def _pair_halves(
     at those positions gives the other, which recovers the two view-halves a loss like
     :class:`VICReg` needs without assuming how the batch is laid out (a contiguous "first
     half / second half", interleaved, or anything else) — only the index relationship
-    :class:`~dsio.train.augmentation.TwoView` promises.
+    :class:`~dsio.experimental.train.augmentation.TwoView` promises.
     """
     order = torch.arange(target.shape[0], device=target.device)
     first = (order < target).nonzero(as_tuple=True)[0]
@@ -325,7 +326,8 @@ def _pair_halves(
 
 
 class NTXent(nn.Module):
-    """SimCLR's contrastive loss over a batch :class:`~dsio.train.augmentation.TwoView` built.
+    """SimCLR's contrastive loss over a batch built by
+    :class:`~dsio.experimental.train.augmentation.TwoView`.
 
     ``prediction`` is the whole batch's projected embeddings — ``2 * batch`` rows, two per
     window — and ``target`` is each row's pair index, exactly the ``(arange(2 * batch) +
