@@ -218,7 +218,7 @@ needs them; full sections arrive with that first use.
 |---|---|---|
 | `dsio.experimental.data.labels:entity_attribute_labels` | Expand one numeric entity attribute to every row owned by that entity. | — |
 | `dsio.experimental.data.samples:StoredSamples` | Decode whole canonical-store samples into identity-bearing tensor items. | — |
-| `dsio.experimental.data.samples:stored_samples` | Canonical factory for one item per persisted sample. | — |
+| `dsio.experimental.data.samples:stored_samples` | Whole-sample factory: one item per persisted sample. | — |
 | `dsio.experimental.data.windows:WindowDataset` | Read selected index positions as raw, identity-bearing tensor windows. | — |
 | `dsio.experimental.eval.ess:effective_sample_size` | How many independent observations a correlated series is worth. | — |
 | `dsio.experimental.inference.outputs:TensorOutput` | Name one native tensor model output without changing it. | supervised |
