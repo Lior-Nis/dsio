@@ -82,8 +82,8 @@ development_status:
 
   epic-6: in-progress
   6-1-single-source-the-version-and-clean-the-package-surface: done
-  6-2-make-replay-identity-deterministic-in-ci: review
-  6-3-one-batch-field-vocabulary-with-consistent-mask-polarity: backlog
+  6-2-make-replay-identity-deterministic-in-ci: done
+  6-3-one-batch-field-vocabulary-with-consistent-mask-polarity: review
   6-4-generate-a-ci-checked-component-catalog: backlog
   6-5-place-every-component-where-its-evidence-puts-it: backlog
   6-6-record-golden-baselines-and-the-deletion-measure: backlog
