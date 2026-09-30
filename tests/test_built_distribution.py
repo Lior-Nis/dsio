@@ -472,6 +472,7 @@ identity = client.get_run(run_id).data.params['dsio.execution_identity']
 resolved = resolve_evidence(identity, required_artifacts={'outputs/dataset.json'})
 print('DSIO_REUSED_RUN_MATCH=' + str(resolved.info.run_id == run_id))
 print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.json'))
+print('DSIO_PROVENANCE_VERSION=' + client.get_run(run_id).data.tags['dsio.version'])
 """
     flow_result = subprocess.run(
         [str(python), "-I", "-B", "-c", flow_probe],
@@ -487,6 +488,7 @@ print('DSIO_REUSED_URI=' + evidence_uri(resolved.info.run_id, 'outputs/dataset.j
     assert "DSIO_RUN_IDENTITY_LENGTH=64" in flow_result.stdout
     assert "DSIO_REUSED_RUN_MATCH=True" in flow_result.stdout
     assert "DSIO_REUSED_URI=runs:/" in flow_result.stdout
+    assert f"DSIO_PROVENANCE_VERSION={wheel_version}" in flow_result.stdout
 
     shutil.copytree(ROOT / "reference_projects", work / "reference_projects")
     _write_kaggle_fixtures(work / "kaggle-data")
