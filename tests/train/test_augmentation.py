@@ -272,3 +272,20 @@ def test_cyclic_augmentation_identity_is_a_module_error() -> None:
             training_augmentation=AddOne(),
             augmentation_identity=identity,
         )
+
+
+def test_masked_reconstruction_never_emits_or_overwrites_a_batch_mask() -> None:
+    """Batch ``mask`` means True = valid; the corruption tensor is ``hidden`` and stays internal."""
+    valid = torch.ones(2, 8, dtype=torch.bool)
+    batch = {**_batch(), "mask": valid}
+    result = MaskedReconstruction(SpanMask(ratio=0.5, span=2))(
+        batch,
+        seed=11,
+        epoch=2,
+        step=5,
+        identity={"component": "span"},
+    )
+
+    assert set(result) == set(batch)
+    assert result["mask"] is valid
+    assert "hidden" not in result

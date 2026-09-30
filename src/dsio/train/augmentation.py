@@ -12,7 +12,8 @@ from dsio.contracts import sha256_of
 from dsio.model.masking import apply_mask
 
 type Batch = Mapping[str, Any]
-type Mask = Callable[[Tensor, torch.Generator | None], Tensor]
+# A masking strategy: returns a boolean `hidden` tensor, True where a position is hidden.
+type HiddenStrategy = Callable[[Tensor, torch.Generator | None], Tensor]
 
 _INTEGER_DTYPES = {
     torch.uint8,
@@ -31,13 +32,18 @@ class AugmentationError(ValueError):
 
 
 class MaskedReconstruction(nn.Module):
-    """Create a masked input and NaN-sentinel reconstruction target on the input device."""
+    """Create a masked input and NaN-sentinel reconstruction target on the input device.
 
-    def __init__(self, mask: Mask, *, normalize_target: bool = True) -> None:
+    The strategy's ``hidden`` tensor stays internal: hidden positions are zeroed in ``x`` and
+    visible positions become NaN in ``y``. No batch ``mask`` field is emitted, because batch
+    ``mask`` means True = valid and would invert this polarity.
+    """
+
+    def __init__(self, strategy: HiddenStrategy, *, normalize_target: bool = True) -> None:
         super().__init__()
-        if not callable(mask):
-            raise AugmentationError("mask must be callable")
-        self.mask = mask
+        if not callable(strategy):
+            raise AugmentationError("masking strategy must be callable")
+        self.strategy = strategy
         self.normalize_target = normalize_target
 
     def forward(
@@ -51,13 +57,13 @@ class MaskedReconstruction(nn.Module):
     ) -> dict[str, Any]:
         x, sample_ids = _inputs(batch)
         generator = _generator(x, seed, epoch, step, sample_ids, identity, "masked")
-        hidden = self.mask(x, generator)
+        hidden = self.strategy(x, generator)
         if hidden.dtype != torch.bool or hidden.shape != (x.shape[0], x.shape[-1]):
             raise AugmentationError(
-                "mask must return a boolean [batch, time] tensor on the input device"
+                "masking strategy must return a boolean [batch, time] hidden tensor"
             )
         if hidden.device != x.device:
-            raise AugmentationError("mask must remain on the input device")
+            raise AugmentationError("hidden tensor must remain on the input device")
         target = x
         if self.normalize_target:
             target = (x - x.mean(dim=-1, keepdim=True)) / (

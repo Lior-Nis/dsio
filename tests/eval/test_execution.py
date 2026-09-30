@@ -592,6 +592,33 @@ def test_unnamed_mask_and_unmasked_named_targets_are_supported(
     ) == {"accuracy.left": 1.0, "accuracy.right": 1.0, "accuracy.mean": 1.0}
 
 
+def test_mask_true_marks_the_scored_positions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Polarity guard: predictions are wrong exactly where ``mask`` is False."""
+    import dsio.eval.execution as execution
+
+    model_uri, _, dataset_run_id = _sources()
+    client = MlflowClient()
+    experiment_id = client.create_experiment("evaluation-mask-polarity")
+    targets = np.asarray([[1, 0], [0, 1]], dtype=np.int64)
+    predictions = np.asarray([[1, 1], [0, 0]], dtype=np.int64)
+    monkeypatch.setattr(
+        execution,
+        "predict",
+        lambda *_: {"sample_id": np.asarray(["a", "b"]), "prediction": predictions},
+    )
+
+    run_id = _evaluation_attempt(client, experiment_id)
+    assert evaluate(
+        run_id=run_id,
+        model_uri=model_uri,
+        dataset_run_id=dataset_run_id,
+        inputs=_inputs(),
+        targets=targets,
+        metrics=("accuracy",),
+        mask=np.asarray([[True, False], [True, False]]),
+    ) == {"accuracy": 1.0}
+
+
 def test_named_evaluation_rejects_empty_values_and_mismatched_scores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

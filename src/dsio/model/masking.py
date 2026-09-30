@@ -3,13 +3,14 @@
 Masking is separated from the methods that use it because it is the axis that actually
 gets varied: several "different" pretraining setups are the same masked autoencoder with a
 different masking mode. Making masking a slot rather than a constructor argument means a new
-mode is a decorator, not a new pipeline.
+mode is a new strategy class, not a new pipeline.
 
-Every strategy returns a boolean mask that is ``True`` where a position is **hidden**. That
-convention is stated once here and asserted in the tests, because the opposite convention is
-equally natural and mixing them produces a model that trains on exactly the positions it was
-supposed to predict — a leak that shows up as a suspiciously good reconstruction loss and
-nothing else.
+Every strategy returns a boolean ``hidden`` tensor that is ``True`` where a position is
+**hidden**. That convention is stated once here and asserted in the tests, because the
+opposite convention is equally natural and mixing them produces a model that trains on exactly
+the positions it was supposed to predict — a leak that shows up as a suspiciously good
+reconstruction loss and nothing else. DSio batch ``mask`` fields mean the opposite (``True``
+marks a valid, scoreable position), so a hidden tensor is never called ``mask``.
 
 Masks are generated per-sample, never once per batch. A batch-wide mask correlates what
 every sample in the batch has to infer, which quietly reduces the effective difficulty of
@@ -44,9 +45,9 @@ class RandomMask:
         noise = torch.rand(batch, length, device=x.device, generator=generator)
         keep = round(length * (1.0 - self.ratio))
         order = noise.argsort(dim=-1)
-        mask = torch.ones(batch, length, dtype=torch.bool, device=x.device)
-        mask.scatter_(-1, order[:, :keep], False)
-        return mask
+        hidden = torch.ones(batch, length, dtype=torch.bool, device=x.device)
+        hidden.scatter_(-1, order[:, :keep], False)
+        return hidden
 
 
 class SpanMask:
@@ -67,7 +68,7 @@ class SpanMask:
         batch, _, length = x.shape
         span = min(self.span, length)
         n_spans = max(1, round(length * self.ratio / span))
-        mask = torch.zeros(batch, length, dtype=torch.bool, device=x.device)
+        hidden = torch.zeros(batch, length, dtype=torch.bool, device=x.device)
         starts = torch.randint(
             0, max(1, length - span + 1), (batch, n_spans), device=x.device, generator=generator
         )
@@ -75,8 +76,8 @@ class SpanMask:
         # Spans may overlap. That is deliberate: rejecting overlaps would bias starts away
         # from each other and make the masked positions less clustered than configured.
         positions = (starts.unsqueeze(-1) + offsets).clamp_(max=length - 1)
-        mask.scatter_(1, positions.reshape(batch, -1), True)
-        return mask
+        hidden.scatter_(1, positions.reshape(batch, -1), True)
+        return hidden
 
 
 class PatchMask:
@@ -103,16 +104,16 @@ class PatchMask:
         noise = torch.rand(batch, n_patches, device=x.device, generator=generator)
         n_masked = max(1, round(n_patches * self.ratio))
         order = noise.argsort(dim=-1)
-        patch_mask = torch.zeros(batch, n_patches, dtype=torch.bool, device=x.device)
-        patch_mask.scatter_(-1, order[:, :n_masked], True)
+        patch_hidden = torch.zeros(batch, n_patches, dtype=torch.bool, device=x.device)
+        patch_hidden.scatter_(-1, order[:, :n_masked], True)
 
-        mask = patch_mask.repeat_interleave(patch, dim=-1)
-        if mask.shape[-1] < length:
+        hidden = patch_hidden.repeat_interleave(patch, dim=-1)
+        if hidden.shape[-1] < length:
             # The tail that does not fill a patch stays visible rather than being masked
             # as a short patch, which would make it an easier target than every other.
-            pad = torch.zeros(batch, length - mask.shape[-1], dtype=torch.bool, device=x.device)
-            mask = torch.cat([mask, pad], dim=-1)
-        return mask
+            pad = torch.zeros(batch, length - hidden.shape[-1], dtype=torch.bool, device=x.device)
+            hidden = torch.cat([hidden, pad], dim=-1)
+        return hidden
 
 
 class CausalMask:
@@ -129,16 +130,16 @@ class CausalMask:
     def __call__(self, x: torch.Tensor, generator: torch.Generator | None = None) -> torch.Tensor:
         batch, _, length = x.shape
         cut = length - max(1, round(length * self.ratio))
-        mask = torch.zeros(batch, length, dtype=torch.bool, device=x.device)
-        mask[:, cut:] = True
-        return mask
+        hidden = torch.zeros(batch, length, dtype=torch.bool, device=x.device)
+        hidden[:, cut:] = True
+        return hidden
 
 
-def apply_mask(x: torch.Tensor, mask: torch.Tensor, value: float = 0.0) -> torch.Tensor:
-    """Return ``x`` with hidden positions replaced, broadcasting the mask over channels.
+def apply_mask(x: torch.Tensor, hidden: torch.Tensor, value: float = 0.0) -> torch.Tensor:
+    """Return ``x`` with hidden positions replaced, broadcasting ``hidden`` over channels.
 
     Never in place. The unmasked original is the reconstruction target, and overwriting it
     would make the target equal to the input — a loss that goes to zero while the model
     learns nothing, and which looks like spectacular convergence.
     """
-    return x.masked_fill(mask.unsqueeze(1), value)
+    return x.masked_fill(hidden.unsqueeze(1), value)
