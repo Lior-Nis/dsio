@@ -32,11 +32,11 @@ from reference_projects.self_supervised.components import (
 )
 
 _AUGMENTOR: ComponentConfig = {
-    "reference": "dsio.model.components:Jitter",
+    "reference": "dsio.experimental.model.components:Jitter",
     "parameters": {"sigma": 0.1},
 }
 _AUGMENTATION_WRAPPER: ComponentConfig = {
-    "reference": "dsio.train.augmentation:TwoView",
+    "reference": "dsio.experimental.train.augmentation:TwoView",
     "parameters": {"views": ["online", "target"]},
 }
 _AUGMENTATION: dict[str, Any] = {

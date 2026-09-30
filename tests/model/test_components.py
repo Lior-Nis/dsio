@@ -21,8 +21,8 @@ torch = pytest.importorskip("torch")
 
 from torch import nn  # noqa: E402
 
-from dsio.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.model.components import (  # noqa: E402
+from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
+from dsio.experimental.model.components import (  # noqa: E402
     Conv1dEncoder,
     CrossEntropy,
     EmbeddingEncoder,
@@ -35,8 +35,8 @@ from dsio.model.components import (  # noqa: E402
     simclr_projector_head,
     vicreg_projector_head,
 )
+from dsio.experimental.train.augmentation import TwoView  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
-from dsio.train.augmentation import TwoView  # noqa: E402
 
 CHANNELS, LENGTH, DIM = 2, 128, 16
 
@@ -196,8 +196,9 @@ def test_mae_trains_the_backbone_through_the_generic_step() -> None:
 #
 # Moved from the deleted tests/ssl/test_methods.py: SimCLR and VICReg were objects with
 # their own step(module, x); they are now an ordinary registered (prediction, target) loss
-# each, over a batch dsio.train.augmentation.TwoView builds. These tests exercise the losses
-# directly, the same way test_masked_mse_* above does, rather than through a full module.
+# each, over a batch dsio.experimental.train.augmentation.TwoView builds. These tests
+# exercise the losses directly, the same way test_masked_mse_* above does, rather than
+# through a full module.
 
 
 @pytest.fixture

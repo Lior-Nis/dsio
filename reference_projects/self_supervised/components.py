@@ -11,8 +11,8 @@ from torch import Tensor, nn
 from torch.utils.data import Dataset
 
 from dsio.data.store import SignalStore
-from dsio.inference import validate_tensor_prediction
-from dsio.model.components import NTXent
+from dsio.experimental.inference import validate_tensor_prediction
+from dsio.experimental.model.components import NTXent
 from reference_projects.supervised.components import (
     TimeMajorToChannelFirst as TimeMajorToChannelFirst,
 )

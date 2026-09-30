@@ -28,32 +28,6 @@ class PredictorError(ValueError):
     """Predictor evidence, components, input, or output violated its contract."""
 
 
-class TensorOutput(nn.Module):
-    """Name one native tensor model output without changing it."""
-
-    def __init__(self, field: str = "prediction") -> None:
-        super().__init__()
-        if not isinstance(field, str) or not field or field == "sample_id":
-            raise PredictorError("tensor output field must be non-empty and not 'sample_id'")
-        self.field = field
-
-    def forward(self, value: Any) -> Mapping[str, Tensor]:
-        if not isinstance(value, Tensor):
-            raise PredictorError(
-                f"tensor output normalizer expected a tensor, got {type(value).__name__}"
-            )
-        return {self.field: value}
-
-
-def validate_tensor_prediction(output: Mapping[str, Any]) -> None:
-    """Require the standard prediction field to be a finite tensor."""
-    prediction = output.get("prediction")
-    if not isinstance(prediction, Tensor):
-        raise PredictorError("prediction must be a tensor")
-    if not bool(torch.isfinite(prediction).all()):
-        raise PredictorError("prediction tensor must contain only finite values")
-
-
 class Predictor(nn.Module):
     """Deterministic preprocessing, model, normalization, and semantic validation."""
 
@@ -309,7 +283,5 @@ def _name(value: object) -> str:
 __all__ = [
     "Predictor",
     "PredictorError",
-    "TensorOutput",
     "build_predictor",
-    "validate_tensor_prediction",
 ]

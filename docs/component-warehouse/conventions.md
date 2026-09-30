@@ -26,7 +26,7 @@ A batch is a flat mapping. These names are reserved:
 
 Rules:
 
-- **`hidden` stays out of batches today.** The strategies in `dsio.model.masking` return `hidden` tensors. `MaskedReconstruction` keeps its tensor internal: hidden positions are zeroed in `x`, and visible positions are NaN in `y`. It emits no batch `mask` and passes a consumer's `mask` through untouched.
+- **`hidden` stays out of batches today.** The strategies in `dsio.experimental.model.masking` return `hidden` tensors. `MaskedReconstruction` keeps its tensor internal: hidden positions are zeroed in `x`, and visible positions are NaN in `y`. It emits no batch `mask` and passes a consumer's `mask` through untouched.
 - **Validity a model needs travels inside `x`** *(from Stories 8.4, 8.5 and 9.4)*. This covers masked pooling, residual validity and modality presence. Declare it as a channel of `x`, or derive it from a declared padding value.
 - **Multimodal inputs are declared slices of `x`** *(from Story 9.4)*, plus declared presence channels. There is no container class.
 - **Datasets and collators fail on a missing declared field** *(from Story 7.1)*. They never invent one.

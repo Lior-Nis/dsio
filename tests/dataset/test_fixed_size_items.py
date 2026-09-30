@@ -31,11 +31,12 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from dsio.data.adapters import SignalExamples, entity_examples  # noqa: E402
-from dsio.data.loading import WindowDataset, build_loader  # noqa: E402
+from dsio.data.loading import build_loader  # noqa: E402
 from dsio.data.splits.models import SplitFile, SplitFold  # noqa: E402
 from dsio.data.splits.resolve import assert_no_row_overlap, resolve  # noqa: E402
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
+from dsio.experimental.data import WindowDataset  # noqa: E402
 
 HEIGHT = 8
 WIDTH = 8

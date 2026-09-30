@@ -23,5 +23,6 @@ def test_all_declared_contracts_are_present():
 
     assert names == {
         "Evaluation depends on no pipeline layer",
+        "Stable packages never import experimental components",
         "The spine never imports its own contract suites",
     }

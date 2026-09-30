@@ -6,9 +6,7 @@ from dsio.inference.loading import InferenceError, predict
 from dsio.inference.predictor import (
     Predictor,
     PredictorError,
-    TensorOutput,
     build_predictor,
-    validate_tensor_prediction,
 )
 
 __all__ = [
@@ -17,10 +15,8 @@ __all__ = [
     "InferenceError",
     "Predictor",
     "PredictorError",
-    "TensorOutput",
     "build_predictor",
     "log_predictor",
     "predict",
     "require_checkpoint_lineage",
-    "validate_tensor_prediction",
 ]

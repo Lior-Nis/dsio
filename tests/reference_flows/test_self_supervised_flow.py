@@ -15,9 +15,9 @@ from mlflow import MlflowClient
 from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
+from dsio.experimental.train.augmentation import TwoView
 from dsio.model.module import DsioModule
 from dsio.tracking import canonical_dataset_digest
-from dsio.train.augmentation import TwoView
 
 
 def test_legacy_ssl_preprocessor_reference_remains_resolvable(
@@ -226,11 +226,11 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
             {
                 "augmentation": {
                     "augmentor": {
-                        "reference": "dsio.model.components:Jitter",
+                        "reference": "dsio.experimental.model.components:Jitter",
                         "parameters": {"sigma": 0.1},
                     },
                     "wrapper": {
-                        "reference": "dsio.train.augmentation:TwoView",
+                        "reference": "dsio.experimental.train.augmentation:TwoView",
                         "parameters": {"views": ["online", "target"]},
                     },
                 },
@@ -299,7 +299,9 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
             result["train_run_id"], "provenance.json", str(tmp_path / result["train_run_id"])
         )
         provenance = json.loads(Path(provenance_path).read_text())
-        assert provenance["components"]["augmentation"] == ("dsio.train.augmentation:TwoView")
+        assert provenance["components"]["augmentation"] == (
+            "dsio.experimental.train.augmentation:TwoView"
+        )
         assert provenance["components"]["objective"] == (
             "reference_projects.self_supervised.components:ContrastiveObjective"
         )

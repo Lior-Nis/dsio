@@ -137,6 +137,26 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+# Location is maturity: a stable package that imports dsio.experimental would give an
+# unproven component the stable package's compatibility promise by the back door.
+# Experimental code may depend on stable code, never the reverse (docs/component-admission.md).
+name = "Stable packages never import experimental components"
+type = "forbidden"
+source_modules = [
+    "dsio.batches",
+    "dsio.config",
+    "dsio.contracts",
+    "dsio.data",
+    "dsio.eval",
+    "dsio.inference",
+    "dsio.model",
+    "dsio.testing",
+    "dsio.tracking",
+    "dsio.train",
+]
+forbidden_modules = ["dsio.experimental"]
+
+[[tool.importlinter.contracts]]
 # dsio.testing exists to be imported by a *project's* test suite, not by dsio. If the
 # spine imports it, test-only helpers acquire production consumers — and the contract
 # suites, which deliberately spawn processes and pickle payloads to prove a bug, end up

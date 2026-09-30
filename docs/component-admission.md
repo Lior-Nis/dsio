@@ -25,6 +25,25 @@ runtime plugin system.
 Failing any item keeps the component outside DSIO. Static checks are necessary, not a
 substitute for review: genericity and scientific validity require judgment.
 
+## Counting uses
+
+- Uses are counted per public callable, not per module or component family.
+- A real downstream use is a consumer project's experiment, such as a Kaggle reference consumer. DSio's own synthetic reference fixtures demonstrate spine behavior and are not uses.
+- Two consumers of the same data or competition count as one use. "Unrelated" means different data and a different task.
+
+## Legacy components (pre-1.0)
+
+Some components predate this process and have no real downstream use. Until DSio 1.0 they
+live under `dsio.experimental.<domain>` as **legacy experimental** components:
+
+- they carry no compatibility promise;
+- they may change or be deleted in any minor release;
+- they may be reshaped into a warehouse block when a consumer first uses them, which then satisfies "Enter experimental" above;
+- any still unproven at 1.0 are deleted.
+
+Stable packages never import `dsio.experimental`, which an import-linter contract enforces.
+Location therefore always states maturity.
+
 ## Promote to stable
 
 Promotion moves the implementation to its responsibility-named stable package. The PR

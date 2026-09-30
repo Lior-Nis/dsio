@@ -307,6 +307,10 @@ So that I can compose from what exists instead of re-implementing it.
 **When** the test suite runs
 **Then** every example executes as a doctest
 
+**Given** the catalog and evidence register
+**When** CI runs
+**Then** it fails if any importable component in a stable package lists fewer than two unrelated real uses in the evidence register. Closed-dispatcher entries and spine functions are exempt. *(Moved from Story 6.5, which is implemented first.)*
+
 **Given** `docs/component-warehouse/candidates.yaml`
 **When** the catalog is generated
 **Then** candidates render with consumer path, reason and use count
@@ -341,9 +345,7 @@ So that "stable" always means proven by two unrelated real uses.
 **When** the test suite runs
 **Then** `require_admissible_component` passes for each one against every reference consumer package name, including `calibrate_training_execution`, `measure_phase` and `log_phase_evidence`
 
-**Given** the catalog
-**When** CI runs
-**Then** it fails if any importable component in a stable package lists fewer than two unrelated real uses in the evidence register. Closed-dispatcher entries and spine functions are exempt.
+*Implementation order:* Story 6.5 is implemented **before** Story 6.4, so docstring sections are written once, at final locations. The CI check that stable-located components list two unrelated real uses therefore moved to Story 6.4, which introduces the evidence register it reads.
 
 ### Story 6.6: Record golden baselines and the deletion measure
 

@@ -9,7 +9,7 @@ import torch
 from torch import Tensor, nn
 
 from dsio.contracts import sha256_of
-from dsio.model.masking import apply_mask
+from dsio.experimental.model.masking import apply_mask
 
 type Batch = Mapping[str, Any]
 # A masking strategy: returns a boolean `hidden` tensor, True where a position is hidden.

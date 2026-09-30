@@ -16,7 +16,8 @@ from mlflow.entities import Dataset, DatasetInput, InputTag
 from torch import Tensor, nn
 
 from dsio.eval import EvaluationError, evaluate
-from dsio.inference import Predictor, PredictorError, TensorOutput, log_predictor
+from dsio.experimental.inference import TensorOutput
+from dsio.inference import Predictor, PredictorError, log_predictor
 
 
 class AddOne(nn.Module):
