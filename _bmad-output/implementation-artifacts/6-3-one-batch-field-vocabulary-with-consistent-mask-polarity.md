@@ -1,6 +1,6 @@
 # Story 6.3: One batch-field vocabulary with consistent mask polarity
 
-Status: review
+Status: done
 
 ## Story
 

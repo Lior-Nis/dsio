@@ -11,21 +11,16 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
+from pathlib import Path
 
 import pytest
 
 import dsio.experimental
 from dsio.experimental import require_admissible_component
 
-CONSUMER_PROJECTS = (
-    "bike_sharing",
-    "child_mind",
-    "digit_recognizer",
-    "essay_scoring",
-    "parkinsons_fog",
-    "rogii",
-    "store_sales",
-    "titanic",
+KAGGLE = Path(__file__).resolve().parents[2] / "reference_projects" / "kaggle"
+CONSUMER_PROJECTS = tuple(
+    sorted(path.name for path in KAGGLE.iterdir() if (path / "__init__.py").is_file())
 )
 
 
@@ -47,6 +42,20 @@ def _public_objects() -> dict[str, list[str]]:
 
 
 PUBLIC = _public_objects()
+
+
+def test_consumer_names_cover_every_kaggle_consumer() -> None:
+    assert len(CONSUMER_PROJECTS) >= 8
+    assert {"child_mind", "parkinsons_fog", "titanic"} <= set(CONSUMER_PROJECTS)
+
+
+def test_proven_experimental_components_are_audited() -> None:
+    audited = {f"{module}:{name}" for module, names in PUBLIC.items() for name in names}
+    assert {
+        "dsio.experimental.training:calibrate_training_execution",
+        "dsio.experimental.telemetry:measure_phase",
+        "dsio.experimental.telemetry:log_phase_evidence",
+    } <= audited
 
 
 def test_every_experimental_domain_exports_components() -> None:

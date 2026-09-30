@@ -198,6 +198,8 @@ def test_wheel_contains_only_the_public_package_and_neutral_metadata(
     assert "dsio/tracking/evidence/resolution.py" in members
     assert "dsio/tracking/provenance.py" in members
     assert "dsio/experimental/__init__.py" in members
+    for domain in ("data", "eval", "inference", "model", "train"):
+        assert f"dsio/experimental/{domain}/__init__.py" in members
     assert "dsio/experimental/admission/__init__.py" in members
     assert "dsio/experimental/admission/source.py" in members
     assert "dsio/experimental/admission/syntax/__init__.py" in members

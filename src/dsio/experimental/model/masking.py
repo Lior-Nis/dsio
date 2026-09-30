@@ -15,6 +15,9 @@ marks a valid, scoreable position), so a hidden tensor is never called ``mask``.
 Masks are generated per-sample, never once per batch. A batch-wide mask correlates what
 every sample in the batch has to infer, which quietly reduces the effective difficulty of
 the task and makes the batch size a hyperparameter of the objective.
+
+Legacy experimental (docs/component-admission.md): no real downstream use yet, no
+compatibility promise, deleted at 1.0 if still unproven.
 """
 
 from __future__ import annotations

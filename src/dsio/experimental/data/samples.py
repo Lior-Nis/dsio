@@ -47,7 +47,7 @@ def stored_samples(
     examples: Examples,
     sample_ids: Sequence[str],
 ) -> Dataset[DataItem]:
-    """Canonical factory for one item per persisted sample.
+    """Whole-sample factory: one item per persisted sample.
 
     Window factories use ``examples`` to resolve derived identities into view positions;
     this entity-level factory uses it to prove the supplied store is the corpus whose split

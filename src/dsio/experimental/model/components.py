@@ -7,6 +7,9 @@ plugin type system.
 Every module here takes ``[batch, channels, time]`` and is shape-checked on the way in,
 because a silent broadcast between a channels-first and a channels-last tensor produces a
 model that trains, converges to something, and is wrong.
+
+Legacy experimental (docs/component-admission.md): no real downstream use yet, no
+compatibility promise, deleted at 1.0 if still unproven.
 """
 
 from __future__ import annotations
@@ -176,13 +179,11 @@ def mae_decoder_head(in_dim: int, channels: int, length: int, hidden_mult: int =
     """MAE's reconstruction head: predict every position of the original window, back in
     the ``[channels, length]`` shape the input arrived in.
 
-    Importable like any other head, moved here from the deleted ``ssl.methods.
-    MaskedReconstruction.build_head`` — ``ssl_task.py`` now resolves it exactly the way
-    ``torch_task.py`` resolves a classification head, which is
-    what let the pretext objective stop being a separate kind of thing that builds its own
-    head. Its output only makes sense paired with :class:`MaskedMSE` and a masked
-    :class:`~dsio.experimental.data.windows.WindowDataset` target, which is why
-    :func:`~dsio.model.module.export_encoder` never ships it with the encoder.
+    Importable like any other head and selected by ``module:qualname``, so the pretext
+    objective is not a separate kind of thing that builds its own head. Its output only
+    makes sense paired with :class:`MaskedMSE` and the NaN-sentinel target
+    :class:`~dsio.experimental.train.augmentation.MaskedReconstruction` writes, which is why
+    :func:`~dsio.experimental.model.chain.export_encoder` never ships it with the encoder.
     """
     return nn.Sequential(
         nn.Linear(in_dim, in_dim * hidden_mult),

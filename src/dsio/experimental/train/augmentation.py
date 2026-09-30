@@ -1,4 +1,8 @@
-"""Stateless, accelerator-side augmentation of collated training batches."""
+"""Stateless, accelerator-side augmentation of collated training batches.
+
+Legacy experimental (docs/component-admission.md): no real downstream use yet, no
+compatibility promise, deleted at 1.0 if still unproven.
+"""
 
 from __future__ import annotations
 

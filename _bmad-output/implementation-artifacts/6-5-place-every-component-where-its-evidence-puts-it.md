@@ -37,7 +37,22 @@ so that "stable" always means proven by two unrelated real uses.
   - The auditor itself is excluded, along with type aliases.
   - The source audit covers the whole module, so one object per module is audited, and the rest get the cheap namespace check. This takes 24 s instead of 183 s for per-object auditing, with identical coverage.
 
+- [x] Task 5: Review follow-ups (no critical findings).
+  - [x] 5.1 `dsio.experimental.telemetry` declares `__all__`, so `measure_phase` and `log_phase_evidence` are audited. A test asserts the AC 4 components appear in the audited set.
+  - [x] 5.2 Consumer names derive from `reference_projects/kaggle/*`, not a hardcoded list.
+  - [x] 5.3 "Unrelated" means a different consumer on different data (the stricter "and a different task" wording contradicted the spec's counting). The legacy clause states its exemption from the Compatibility section's review requirement.
+  - [x] 5.4 A test asserts every non-experimental `dsio` package is in the stable-never-imports-experimental contract. The wheel test asserts the five experimental domain packages ship.
+  - [x] 5.5 Stale docstrings fixed:
+    - the `mae_decoder_head` export path;
+    - the "Canonical factory" wording;
+    - two test comments;
+    - the `dsio.model` package docstring.
+
+    The moved modules carry the legacy note.
+
 ## Dev Notes
+
+- **Data infrastructure is spine, not warehouse.** The store, views, examples/adapters (`SignalExamples`, `build_index`, `WindowSpec`, `entity_examples`), staging, splits and the `dsio.testing` contract suites stay in stable packages even with fewer than two consumer uses. They are the data layer every block builds on, not injectable Components (`CONTEXT.md`). The review flagged `dsio.data.staging.stage` (tests only) and single-use views/adapters; they are recorded here as spine. Story 6.4's location-vs-evidence check applies to catalogued components only.
 
 - **What stays stable.** Only the spine and the closed dispatchers:
   - `DsioModule`/`DsioDataModule`;
@@ -61,6 +76,14 @@ Claude Opus 5.5 (claude-opus-5-5)
 
 ### Completion Notes List
 
+- The adversarial review found nothing critical. It verified:
+  - no Kaggle consumer imports anything moved;
+  - no stale paths remain;
+  - there are no shims and no circular imports;
+  - the wheel ships all new files;
+  - one-object-per-module auditing is complete.
+
+  Its important and minor findings are fixed (Task 5), apart from the spine note above.
 - Gates: full suite 1043 passed, 1 deselected (405 s). `ruff check`, `ruff format --check`, `mypy` (104 files) and `lint-imports` (3 contracts kept) are clean.
 
 ### File List

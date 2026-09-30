@@ -5,6 +5,9 @@ windows drawn with stride 100 from a 500-step window has nothing like 10,000
 independent observations, and any interval that assumes it does is too narrow.
 This is kept from the deleted multiplicity layer because it is true at any number
 of trials, where deflation and PBO need hundreds to say anything.
+
+Legacy experimental (docs/component-admission.md): no real downstream use yet, no
+compatibility promise, deleted at 1.0 if still unproven.
 """
 
 from __future__ import annotations

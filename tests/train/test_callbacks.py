@@ -155,7 +155,7 @@ def test_embed_leaves_no_gradients(module: DsioModule, loader: DataLoader) -> No
 
 
 def test_embed_runs_the_encoder_with_grad_disabled(module: DsioModule, loader: DataLoader) -> None:
-    """``@torch.no_grad()`` on ``embed`` (train/callbacks.py) is what keeps this from
+    """``@torch.no_grad()`` on ``embed`` (experimental/train/callbacks.py) is what keeps this from
     building an autograd graph over the whole corpus every time a probe runs.
 
     ``test_embed_leaves_no_gradients`` above checks ``p.grad is None`` -- true for any
