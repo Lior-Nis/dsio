@@ -1,5 +1,5 @@
 # generated: 2026-09-21T18:15:08+03:00
-# last_updated: 2026-09-21T18:31:23+03:00
+# last_updated: 2026-09-30T16:21:27+03:00
 # project: DSio
 # project_key: NOKEY
 # tracking_system: file-system
@@ -32,10 +32,11 @@
 # - An epic becomes in-progress when its first story is created.
 # - Stories are implemented sequentially by default so later stories can use earlier learning.
 # - A story moves through review before done.
+# - Epics 6-11 (Component Warehouse v1) come from planning-artifacts/epics-component-warehouse.md.
 # - Re-run sprint planning to refresh statuses without downgrading existing progress.
 
 generated: "2026-09-21T18:15:08+03:00"
-last_updated: "2026-09-22T14:55:00+03:00"
+last_updated: "2026-09-30T16:21:27+03:00"
 project: DSio
 project_key: NOKEY
 tracking_system: file-system
@@ -78,3 +79,56 @@ development_status:
   5-2-run-the-supervised-reference-flow: done
   5-3-run-the-self-supervised-reference-flow: done
   epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-single-source-the-version-and-clean-the-package-surface: backlog
+  6-2-make-replay-identity-deterministic-in-ci: backlog
+  6-3-one-batch-field-vocabulary-with-consistent-mask-polarity: backlog
+  6-4-generate-a-ci-checked-component-catalog: backlog
+  6-5-place-every-component-where-its-evidence-puts-it: backlog
+  6-6-record-golden-baselines-and-the-deletion-measure: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-map-stored-samples-into-training-items: backlog
+  7-2-fit-standardization-on-training-role-samples: backlog
+  7-3-compose-mlp-models-from-backbones-and-heads: backlog
+  7-4-train-with-dsio-objectives: backlog
+  7-5-declare-prediction-outputs-without-writing-validators: backlog
+  7-6-build-evaluation-arrays-from-the-training-collation: backlog
+  7-7-record-tabular-migration-parity: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-pad-variable-length-batches-with-a-dsio-collator: backlog
+  8-2-train-dense-sequence-models-with-masked-objectives: backlog
+  8-3-compose-dense-signal-models-with-layout-adapters-and-per-instance-standardization: backlog
+  8-4-compose-token-sequence-models-with-masked-pooling: backlog
+  8-5-compose-residual-models-around-an-explicit-baseline: backlog
+  8-6-declare-dense-and-ordinal-prediction-outputs: backlog
+  8-7-record-sequence-migration-parity: backlog
+  epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-map-windows-into-training-items-with-weights-and-groups: backlog
+  9-2-fit-observed-only-statistics-for-missing-data: backlog
+  9-3-balance-training-by-class-and-group: backlog
+  9-4-compose-multimodal-fusion-with-modality-presence-gating: backlog
+  9-5-evaluate-subgroups-and-modality-ablation: backlog
+  9-6-record-multimodal-migration-parity: backlog
+  epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-train-inside-a-project-task-with-one-dsio-fit-function: backlog
+  10-2-opt-into-execution-calibration-through-the-fit-function: backlog
+  10-3-migrate-the-remaining-training-tasks: backlog
+  10-4-export-predictors-with-one-dsio-function: backlog
+  10-5-run-downstream-tasks-over-dsio-arrays: backlog
+  10-6-record-wiring-parity-and-reduction: backlog
+  epic-10-retrospective: optional
+
+  epic-11: backlog
+  11-1-promote-evidence-backed-blocks-to-stable: backlog
+  11-2-prove-a-warehouse-first-consumer: backlog
+  11-3-release-dsio-0-3-0: backlog
+  epic-11-retrospective: optional
