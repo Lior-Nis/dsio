@@ -8,9 +8,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-
-class ComponentError(ValueError):
-    """An encoder/head component chain is incomplete or incompatible."""
+from dsio.config.components import ComponentError
 
 
 class ComponentChain(nn.Module):
