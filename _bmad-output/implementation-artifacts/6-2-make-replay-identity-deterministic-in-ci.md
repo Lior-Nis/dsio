@@ -1,6 +1,6 @@
 # Story 6.2: Make replay identity deterministic in CI
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -23,9 +23,9 @@ so that migration parity rests on trustworthy replays.
   - [x] 1.4 `tests/conftest.py` puts the repo root on `sys.path`, so every suite can import `tests.*` helpers.
 - [x] Task 2: Test the dirty-checkout hypothesis (AC 2)
   - [x] 2.1 Evidence (below) refutes it. A guard in the CMI replay test still asserts that `git status --porcelain` is unchanged across both flows.
-- [ ] Task 3: Resolution (AC 3)
-  - [ ] 3.1 20 consecutive local CMI replay passes.
-  - [ ] 3.2 20 consecutive CMI replay passes on a GitHub-hosted runner (CI-equivalent), via a temporary stress step on this PR. Remove the step before merge.
+- [x] Task 3: Resolution (AC 3), via the "20 consecutive green runs with provenance-diff capture in place" branch; the root cause is unconfirmed.
+  - [x] 3.1 20/20 consecutive local CMI replay passes, with the working tree untouched during the loop. An earlier loop logged 1 failure in 20 without output; files were being edited during that loop, which the new checkout guard reports as a failure. It is recorded here as unverified.
+  - [x] 3.2 20/20 consecutive CMI replay passes on a GitHub-hosted `ubuntu-latest` runner. This used the temporary step "Replay stress (temporary, Story 6.2)" in PR #79, CI run 36779671321, 2026-09-30, and 20 `1 passed` lines in the job log. The full CI suite passed in the same run. The temporary commit was dropped before merge.
 
 ## Dev Notes
 
@@ -50,6 +50,10 @@ so that migration parity rests on trustworthy replays.
 Claude Opus 5.5 (claude-opus-5-5)
 
 ### Completion Notes List
+
+- AC 1: `tests/replay.py` plus 5 unit tests. All 11 replay tests use it.
+- AC 2: the dirty-checkout hypothesis is refuted by identity structure and a local trace. A guard in the CMI replay asserts the checkout is unchanged.
+- AC 3: 20/20 locally and 20/20 on a GitHub runner, with capture in place. If the flake recurs, the failure now names the moved provenance field and, for a moved checkpoint digest, the drifting tensors.
 
 ### File List
 
