@@ -1,0 +1,117 @@
+# Consumer-local code awaiting a warehouse block, or staying local on purpose.
+# Rendered into catalog.md by tools/catalog.py. Each entry shrinks as its story lands;
+# `reason` names the cohort block (#n in the spec) and story, or why it stays local.
+
+Stored-sample Dataset classes:
+  consumers:
+    - reference_projects/kaggle/titanic
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/digit_recognizer
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+    - reference_projects/kaggle/store_sales
+    - reference_projects/kaggle/child_mind
+  reason: Field-mapping dataset (#1), Story 7.1.
+Window Dataset class:
+  consumers:
+    - reference_projects/kaggle/child_mind/sequence
+  reason: Window dataset with weights and groups (#2), Story 9.1.
+Local nn.Module models:
+  consumers:
+    - reference_projects/kaggle/titanic
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/digit_recognizer
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+    - reference_projects/kaggle/store_sales
+    - reference_projects/kaggle/child_mind
+    - reference_projects/kaggle/child_mind/sequence
+  reason: Backbones, heads, adapters and compositions (#7-#17), Stories 7.3, 8.3-8.5, 9.4.
+Local objectives:
+  consumers:
+    - reference_projects/kaggle/titanic
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/digit_recognizer
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+    - reference_projects/kaggle/store_sales
+    - reference_projects/kaggle/child_mind
+    - reference_projects/kaggle/child_mind/sequence
+  reason: Supervised, masked dense and reconstruction objectives (#18-#20), Stories 7.4, 8.2.
+Pad collate functions:
+  consumers:
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+  reason: Pad collator (#3), Story 8.1.
+Prediction normalizers and validators:
+  consumers:
+    - reference_projects/kaggle/titanic
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/digit_recognizer
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+    - reference_projects/kaggle/store_sales
+    - reference_projects/kaggle/child_mind
+    - reference_projects/kaggle/child_mind/sequence
+  reason: Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6.
+Evaluation array builders:
+  consumers:
+    - reference_projects/kaggle/titanic
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/digit_recognizer
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+    - reference_projects/kaggle/store_sales
+    - reference_projects/kaggle/child_mind
+  reason: Array assembly from the training collation (#5), Story 7.6.
+Train-fold statistics and weight fitting:
+  consumers:
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/child_mind
+    - reference_projects/kaggle/child_mind/sequence
+  reason: Training-role fitters (#4a-#4c), Stories 7.2, 9.2, 9.3.
+Train and export task wiring:
+  consumers:
+    - reference_projects/kaggle/titanic
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/digit_recognizer
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+    - reference_projects/kaggle/store_sales
+    - reference_projects/kaggle/child_mind
+    - reference_projects/kaggle/child_mind/sequence
+  reason: Fit and export spine functions (CAP-7), Epic 10.
+Hash-bucket tokenizer:
+  consumers:
+    - reference_projects/kaggle/essay_scoring
+  reason: Stays local - one use; text preprocessing candidate.
+Well feature engineering:
+  consumers:
+    - reference_projects/kaggle/rogii
+  reason: Stays local - domain feature mapping.
+Verified encoder handoff:
+  consumers:
+    - reference_projects/kaggle/digit_recognizer
+  reason: Stays local - pretrained-weights path is deferred to v2.
+Streaming evaluation with participant aggregation:
+  consumers:
+    - reference_projects/kaggle/child_mind/sequence
+  reason: Stays local - bounded-memory streaming evaluation is on the roadmap.
+Labelled-example attribute filter:
+  consumers:
+    - reference_projects/kaggle/titanic
+    - reference_projects/kaggle/bike_sharing
+    - reference_projects/kaggle/digit_recognizer
+    - reference_projects/kaggle/essay_scoring
+    - reference_projects/kaggle/parkinsons_fog
+    - reference_projects/kaggle/rogii
+    - reference_projects/kaggle/store_sales
+    - reference_projects/kaggle/child_mind
+  reason: Stays local - a one-line filter fails the depth test (cohort #6).

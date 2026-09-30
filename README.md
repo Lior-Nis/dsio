@@ -116,6 +116,17 @@ normalizer—all injected into the same exact `DsioModule` and `DsioDataModule` 
 uv run pytest -q tests/reference_flows/test_self_supervised_flow.py
 ```
 
+## Find a component before writing one
+
+DSio is becoming a warehouse of battle-tested blocks: datasets, collators, models,
+objectives, prediction outputs and evaluation that consumers compose instead of
+re-implementing. The [component catalog](docs/component-warehouse/catalog.md) lists every
+public component with its batch contract, maturity and the consumer runs that prove it, and
+the [conventions](docs/component-warehouse/conventions.md) define the batch fields every
+block shares. Maturity is location: `dsio.experimental` carries no compatibility promise,
+and components graduate by the [admission process](docs/component-admission.md). The
+catalog is generated (`uv run python tools/catalog.py`) and CI rejects drift.
+
 ## Shape
 
 A single versioned Python distribution rooted at one package:

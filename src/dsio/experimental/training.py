@@ -32,7 +32,37 @@ def calibrate_training_execution(
     expected_epochs: int,
     configuration: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Calibrate the real loader/model/objective while keeping the effective batch fixed."""
+    """Calibrate the real loader/model/objective while keeping the effective batch fixed.
+
+    Consumes:
+        ``module_factory()`` returning a fresh ``DsioModule`` and
+        ``data_module_factory(batch_size, num_workers, pin_memory, prefetch_factor)``
+        returning a ``DsioDataModule``: the project's real model, objective and data.
+
+    Produces:
+        The :func:`~dsio.experimental.execution.calibrate_execution` evidence, measured by
+        short warm-up and timed optimizer steps on the real training path.
+
+    Parameters:
+        ``seed``; ``accelerator`` (``"cpu"`` or ``"cuda"``); ``expected_epochs``;
+        ``configuration`` with ``target_effective_batch_size`` and optional
+        ``warmup_effective_batches`` (1), ``measure_effective_batches`` (10), ``candidates``
+        and memory budgets.
+
+    Devices:
+        CPU or CUDA; fails closed when CUDA is requested but unavailable.
+
+    Limitations:
+        Loader workers import the full training stack, so worker count trades host memory
+        against throughput; benchmarks are seconds long, not full epochs.
+
+    Example:
+        >>> configuration = {"target_effective_batch_size": 64, "measure_effective_batches": 10}
+        >>> calibrate_training_execution(  # doctest: +SKIP
+        ...     build_module, build_data_module,
+        ...     seed=7, accelerator="cuda", expected_epochs=2, configuration=configuration,
+        ... )
+    """
     target = _positive_integer(
         "target_effective_batch_size", configuration.get("target_effective_batch_size")
     )
@@ -221,7 +251,52 @@ def _benchmark(
 
 
 def log_calibration(run_id: str, evidence: Mapping[str, Any]) -> None:
-    """Record the complete calibration artifact and dashboard-friendly MLflow series."""
+    """Record the complete calibration artifact and dashboard-friendly MLflow series.
+
+    Consumes:
+        An active MLflow run ID and the evidence returned by
+        :func:`calibrate_training_execution`, whose trial measurements carry
+        ``examples_per_second``, ``projected_examples_per_second``,
+        ``peak_device_memory_bytes``, ``peak_process_tree_rss_bytes`` and
+        ``gpu_utilization_mean_percent``.
+
+    Produces:
+        ``execution/calibration.json``, ``calibration.selected.*`` and
+        ``calibration.environment_digest`` params, and one metric step per trial.
+
+    Parameters:
+        ``run_id``; ``evidence``.
+
+    Devices:
+        Device-independent.
+
+    Limitations:
+        Requires a writable MLflow run; it logs, it does not select.
+
+    Example:
+        >>> from mlflow import MlflowClient
+        >>> from dsio.experimental.execution import calibrate_execution
+        >>> client = MlflowClient()
+        >>> run = client.create_run(client.create_experiment("calibration-example"))
+        >>> def benchmark(candidate):  # the measurement shape training calibration records
+        ...     return {
+        ...         "examples_per_second": float(candidate["batch_size"]),
+        ...         "projected_examples_per_second": float(candidate["batch_size"]),
+        ...         "peak_device_memory_bytes": 0,
+        ...         "peak_host_memory_bytes": 0,
+        ...         "peak_process_tree_rss_bytes": 0,
+        ...         "gpu_utilization_mean_percent": 0.0,
+        ...     }
+        >>> evidence = calibrate_execution(
+        ...     benchmark,
+        ...     target_effective_batch_size=8,
+        ...     candidates=[{"batch_size": 8}],
+        ...     device="cpu",
+        ... )
+        >>> log_calibration(run.info.run_id, evidence)
+        >>> client.get_run(run.info.run_id).data.params["calibration.selected.batch_size"]
+        '8'
+    """
     client = MlflowClient()
     client.log_dict(run_id, dict(evidence), "execution/calibration.json")
     selected = evidence["selected"]

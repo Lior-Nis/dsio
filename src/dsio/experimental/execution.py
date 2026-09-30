@@ -33,6 +33,47 @@ def calibrate_execution(
     derived rather than tuned. Different micro-batches can still change floating-point
     numerics or batch-dependent model behavior, so the selected configuration remains
     explicit provenance rather than being treated as an equivalent replay.
+
+    Consumes:
+        A ``benchmark(candidate) -> measurement`` callable whose measurement reports the
+        objective metric plus ``peak_device_memory_bytes`` and ``peak_host_memory_bytes``,
+        and execution-only candidate mappings (``batch_size``, ``num_workers``,
+        ``pin_memory``, ``prefetch_factor``); each ``batch_size`` must divide
+        ``target_effective_batch_size``.
+
+    Produces:
+        ``{"selected", "trials", "policy", "environment", "environment_digest"}``: the chosen
+        execution settings with derived ``accumulate_grad_batches``, every trial with its
+        measurement and ``admissible``/``rejected`` status, and the selection policy.
+
+    Parameters:
+        ``target_effective_batch_size``; ``candidates``; optional ``max_device_memory_bytes``
+        and ``max_host_memory_bytes`` budgets; ``objective_metric`` (default
+        ``examples_per_second``); ``objective_tolerance_fraction`` (default 0.1, ties within
+        it prefer the simpler candidate); ``device``.
+
+    Devices:
+        CPU or CUDA; out-of-memory candidates are rejected, never retried on another device.
+
+    Limitations:
+        Changes execution knobs only; scientific configuration and the effective batch are
+        fixed. Selection is benchmark-noise sensitive inside the tolerance band.
+
+    Example:
+        >>> def benchmark(candidate):
+        ...     return {
+        ...         "examples_per_second": 100.0 * candidate["batch_size"],
+        ...         "peak_device_memory_bytes": 0,
+        ...         "peak_host_memory_bytes": 0,
+        ...     }
+        >>> evidence = calibrate_execution(
+        ...     benchmark,
+        ...     target_effective_batch_size=64,
+        ...     candidates=[{"batch_size": 64}, {"batch_size": 32}],
+        ...     device="cpu",
+        ... )
+        >>> evidence["selected"]["batch_size"], evidence["selected"]["accumulate_grad_batches"]
+        (64, 1)
     """
     if not callable(benchmark):
         raise ValueError("benchmark must be callable")
