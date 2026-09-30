@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from dsio.data.store import DATA_ROOT_ENV
+
+# Shared test helpers (e.g. ``tests.replay``) import as ``tests.*`` from every suite.
+if str(Path(__file__).parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parents[1]))
 
 
 @pytest.fixture(autouse=True)

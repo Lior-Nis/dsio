@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from tests.replay import assert_same_identities
 from torch.utils.data import default_collate
 
 from dsio.data.loading import DsioDataModule
@@ -235,6 +236,6 @@ def test_sequence_flow_replays_data_split_weights_and_metrics(
     assert first["assignments"] == replay["assignments"]
     assert first["checkpoint_digest"] == replay["checkpoint_digest"]
     assert first["metrics"] == replay["metrics"]
-    assert first["identities"] == replay["identities"]
+    assert_same_identities(first, replay)
     assert first["train_run_id"] != replay["train_run_id"]
     assert first["model_uri"] != replay["model_uri"]

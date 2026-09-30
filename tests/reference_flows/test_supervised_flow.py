@@ -11,6 +11,7 @@ import pytest
 import torch
 from lightning import Trainer
 from mlflow import MlflowClient
+from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
@@ -165,7 +166,7 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
     assert observed_runtime == [expected_runtime, expected_runtime]
     assert first["split_digest"] == second["split_digest"]
     assert first["assignments"] == second["assignments"]
-    assert first["identities"] == second["identities"]
+    assert_same_identities(first, second)
     np.testing.assert_array_equal(first["prediction"], second["prediction"])
     assert first["prediction"].shape == (len(first["test_sample_id"]), 1)
     assert np.isfinite(first["prediction"]).all()
