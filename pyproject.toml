@@ -68,6 +68,11 @@ extend-exclude = ["docs/adr"]
 # by default. Force it so the boundary holds no matter how ruff is invoked.
 force-exclude = true
 
+[tool.ruff.format]
+# docs/superpowers holds dated specs and plans: frozen design history whose code blocks
+# record what was written at the time. The formatter must not rewrite that record.
+exclude = ["docs/superpowers/**"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "BLE", "SIM", "RUF"]
 # BLE is load-bearing: FORGE's swallowed callback exceptions silently disabled
