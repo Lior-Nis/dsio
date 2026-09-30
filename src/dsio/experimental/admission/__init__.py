@@ -29,8 +29,7 @@ def audit_component(
     module = validated["reference"].partition(":")[0]
     if module != "dsio.experimental" and not module.startswith("dsio.experimental."):
         return (
-            f"namespace: proposed component module {module!r} must live under "
-            "'dsio.experimental'",
+            f"namespace: proposed component module {module!r} must live under 'dsio.experimental'",
         )
     path = component_source(module)
     if path is None:
@@ -47,8 +46,7 @@ def audit_component(
         "dsio.experimental."
     ):
         return (
-            f"namespace: resolved component lives in {component_module!r}, not "
-            "'dsio.experimental'",
+            f"namespace: resolved component lives in {component_module!r}, not 'dsio.experimental'",
         )
     return ()
 

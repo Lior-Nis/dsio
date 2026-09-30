@@ -528,8 +528,7 @@ def test_parkinsons_scale_flow_tracks_scan_and_explicit_training_configuration(
         daily / "daily0.parquet",
     )
     (parkinsons_fog_csvs / "daily_metadata.csv").write_text(
-        "Id,Subject,Visit,Beginning of recording [00:00-23:59]\n"
-        "daily0,daily-subject,1,08:00\n"
+        "Id,Subject,Visit,Beginning of recording [00:00-23:59]\ndaily0,daily-subject,1,08:00\n"
     )
     monkeypatch.setattr(
         scale_inventory,
@@ -579,8 +578,7 @@ def test_parkinsons_scale_flow_tracks_scan_and_explicit_training_configuration(
     calibration = result["execution_calibration"]
     assert calibration["selected"]["batch_size"] in {1, 2}
     assert (
-        calibration["selected"]["batch_size"]
-        * calibration["selected"]["accumulate_grad_batches"]
+        calibration["selected"]["batch_size"] * calibration["selected"]["accumulate_grad_batches"]
         == 2
     )
     assert len(calibration["trials"]) == 2

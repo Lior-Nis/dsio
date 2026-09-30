@@ -55,9 +55,7 @@ def calibrate_training_execution(
     if not 0 < memory_fraction <= 1:
         raise ValueError("max_device_memory_fraction must be a number in (0, 1]")
     host_memory_fraction = configuration.get("max_host_memory_fraction", 0.5)
-    if isinstance(host_memory_fraction, bool) or not isinstance(
-        host_memory_fraction, int | float
-    ):
+    if isinstance(host_memory_fraction, bool) or not isinstance(host_memory_fraction, int | float):
         raise ValueError("max_host_memory_fraction must be a number in (0, 1]")
     if not 0 < host_memory_fraction <= 1:
         raise ValueError("max_host_memory_fraction must be a number in (0, 1]")
@@ -196,9 +194,10 @@ def _benchmark(
     if not isinstance(dataset, Sized):
         raise TypeError("execution calibration requires a sized training dataset")
     projected_examples = len(dataset) * expected_epochs
-    projected_seconds = startup_seconds * expected_epochs + max(
-        projected_examples - warmup_examples, 0
-    ) / steady_throughput
+    projected_seconds = (
+        startup_seconds * expected_epochs
+        + max(projected_examples - warmup_examples, 0) / steady_throughput
+    )
     peak_allocated = int(cuda["peak_allocated_bytes"] or 0)
     peak_reserved = int(cuda["peak_reserved_bytes"] or 0)
     result: dict[str, float | int] = {

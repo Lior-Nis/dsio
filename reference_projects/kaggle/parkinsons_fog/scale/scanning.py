@@ -77,9 +77,7 @@ def scan_non_supervised(
     }
 
 
-def _scan_csv(
-    path: Path, identity: str, batch_rows: int, hasher: Any
-) -> tuple[int, int]:
+def _scan_csv(path: Path, identity: str, batch_rows: int, hasher: Any) -> tuple[int, int]:
     rows = 0
     maximum = 0
     batch: list[bytes] = []
@@ -122,9 +120,7 @@ def _scan_csv(
     return rows, maximum
 
 
-def _scan_parquet(
-    path: Path, identity: str, batch_rows: int, hasher: Any
-) -> tuple[int, int]:
+def _scan_parquet(path: Path, identity: str, batch_rows: int, hasher: Any) -> tuple[int, int]:
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -145,9 +141,7 @@ def _scan_parquet(
     ):
         raise ValueError(f"daily source {identity!r} has unsupported column types: {schema}")
 
-    dtype = np.dtype(
-        [("Time", "<i8"), ("AccV", "<f8"), ("AccML", "<f8"), ("AccAP", "<f8")]
-    )
+    dtype = np.dtype([("Time", "<i8"), ("AccV", "<f8"), ("AccML", "<f8"), ("AccAP", "<f8")])
     rows = 0
     maximum = 0
     try:
@@ -200,9 +194,7 @@ def _integer(value: str, identity: str, row: int, field: str) -> int:
 
 def _binary(value: str, identity: str, row: int, field: str) -> None:
     if _integer(value, identity, row, field) not in (0, 1):
-        raise ValueError(
-            f"non-task source {identity!r} row {row} has non-binary {field}={value!r}"
-        )
+        raise ValueError(f"non-task source {identity!r} row {row} has non-binary {field}={value!r}")
 
 
 def _validate_source_fingerprint(

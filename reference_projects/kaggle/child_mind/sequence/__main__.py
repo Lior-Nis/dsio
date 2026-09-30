@@ -30,9 +30,7 @@ def main() -> None:
         existing_store_path=arguments.existing_store_path,
     )
     summary = {
-        name: value
-        for name, value in result.items()
-        if name not in {"assignments", "split_groups"}
+        name: value for name, value in result.items() if name not in {"assignments", "split_groups"}
     }
     print("DSIO_CMI_SEQUENCE_RESULT=" + json.dumps(summary, sort_keys=True, default=str))
 

@@ -80,8 +80,7 @@ def _scan_statements(
         if isinstance(statement, ast.Try | ast.TryStar):
             branch_states = [_scan_statements(statement.body, state, contexts)]
             branch_states.extend(
-                _scan_statements(handler.body, state, contexts)
-                for handler in statement.handlers
+                _scan_statements(handler.body, state, contexts) for handler in statement.handlers
             )
             branch_states.append(_scan_statements(statement.orelse, state, contexts))
             state = set().union(state, *branch_states)
@@ -116,9 +115,7 @@ def _record_context(node: ast.AST, aliases: set[str], contexts: list[ast.AST]) -
         contexts.append(node)
 
 
-def _record_nested_contexts(
-    node: ast.AST, aliases: set[str], contexts: list[ast.AST]
-) -> None:
+def _record_nested_contexts(node: ast.AST, aliases: set[str], contexts: list[ast.AST]) -> None:
     for candidate in ast.walk(node):
         if isinstance(candidate, ast.BoolOp):
             _record_context(candidate, aliases, contexts)

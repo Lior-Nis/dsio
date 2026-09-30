@@ -55,8 +55,7 @@ def scan_scale_sources(
         or memory_budget_bytes < 1
     ):
         raise ValueError(
-            "memory_budget_bytes must be a positive integer, "
-            f"got {memory_budget_bytes!r}"
+            f"memory_budget_bytes must be a positive integer, got {memory_budget_bytes!r}"
         )
     with attempt(experiment_id) as run:
         inventory = resolve_official_inventory(metadata_root, labelled_root, daily_root)
@@ -86,8 +85,7 @@ def scan_scale_sources(
                     "resolve_official_inventory"
                 ),
                 "scanner": (
-                    "reference_projects.kaggle.parkinsons_fog.scale.scanning:"
-                    "scan_non_supervised"
+                    "reference_projects.kaggle.parkinsons_fog.scale.scanning:scan_non_supervised"
                 ),
             },
         )

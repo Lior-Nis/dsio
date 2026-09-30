@@ -42,9 +42,7 @@ def store(tmp_path: Path) -> SignalStore:
         for group in range(3):
             for session in range(2):
                 signal = np.arange(1200 * 3, dtype="float32").reshape(1200, 3)
-                builder.add(
-                    f"p{group}_s{session}", signal + group * 1000, group=f"p{group}"
-                )
+                builder.add(f"p{group}_s{session}", signal + group * 1000, group=f"p{group}")
     return SignalStore(path)
 
 
@@ -103,7 +101,7 @@ def test_magic_is_stable() -> None:
         np.array([-1]),
         np.array([2]),
         np.array([2**32], dtype=np.uint64),
-        np.array([-2**32]),
+        np.array([-(2**32)]),
         np.array([0.0]),
         np.array(["0"]),
     ],
@@ -634,9 +632,7 @@ def test_dense_stride_oversamples_only_marked_regions(store: SignalStore) -> Non
     mask[entity.start_row + 300 : entity.start_row + 800] = True
 
     plain = build_index(store, WindowSpec(length=200, stride=200))
-    dense = build_index(
-        store, WindowSpec(length=200, stride=200, dense_stride=50), dense_mask=mask
-    )
+    dense = build_index(store, WindowSpec(length=200, stride=200, dense_stride=50), dense_mask=mask)
     assert len(dense) > len(plain)
 
     extra = set(dense.starts.tolist()) - set(plain.starts.tolist())
@@ -763,10 +759,7 @@ def test_window_label_reduction_preserves_nonzero_semantics(labels: np.ndarray) 
     starts = np.array([0, 2], dtype=np.int64)
     spec = WindowSpec(length=4, stride=2, label_policy="ratio")
     expected = np.array(
-        [
-            np.count_nonzero(labels[start : start + spec.length]) / spec.length
-            for start in starts
-        ],
+        [np.count_nonzero(labels[start : start + spec.length]) / spec.length for start in starts],
         dtype=np.float32,
     )
 
@@ -819,9 +812,7 @@ def test_empty_window_starts_return_float32_without_reading_labels() -> None:
 # again, torch-facing, as tests/dataset/test_dataset.py::test_a_foreign_index_is_rejected)
 # and SignalExamples.__init__ below, which used to carry its own hand-written copy of the
 # same comparison and message before this function existed to call instead.
-def test_index_built_for_a_different_store_is_rejected(
-    store: SignalStore, tmp_path: Path
-) -> None:
+def test_index_built_for_a_different_store_is_rejected(store: SignalStore, tmp_path: Path) -> None:
     other = tmp_path / "other"
     with SignalStore.builder(other, channels=3) as builder:
         builder.add("x", np.zeros((900, 3), "float32"), group="g")

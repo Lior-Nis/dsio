@@ -13,19 +13,13 @@ def test_cache_key_is_deterministic_and_input_sensitive() -> None:
     from dsio.tracking import prefect_cache_key
 
     context = SimpleNamespace(task=SimpleNamespace(task_key="pure-task"))
-    assert prefect_cache_key(
-        context, {"left": 1, "right": [2, 3]}
-    ) == prefect_cache_key(
+    assert prefect_cache_key(context, {"left": 1, "right": [2, 3]}) == prefect_cache_key(
         context,
         {"right": (2, 3), "left": 1},
     )
-    assert prefect_cache_key(context, {"value": 1}) != prefect_cache_key(
-        context, {"value": 2}
-    )
+    assert prefect_cache_key(context, {"value": 1}) != prefect_cache_key(context, {"value": 2})
     other = SimpleNamespace(task=SimpleNamespace(task_key="other-task"))
-    assert prefect_cache_key(context, {"value": 1}) != prefect_cache_key(
-        other, {"value": 1}
-    )
+    assert prefect_cache_key(context, {"value": 1}) != prefect_cache_key(other, {"value": 1})
 
 
 def test_prefect_uses_the_identity_key_for_a_pure_task(

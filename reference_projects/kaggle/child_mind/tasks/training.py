@@ -82,9 +82,7 @@ def train(
         statistics = _statistics(store, training_ids)
         weights = _class_weights(store, training_ids)
         model_config: ComponentConfig = {
-            "reference": (
-                "reference_projects.kaggle.child_mind.components:CmiFusionClassifier"
-            ),
+            "reference": ("reference_projects.kaggle.child_mind.components:CmiFusionClassifier"),
             "parameters": {
                 **statistics,
                 "use_sensor": mode == "fused",
@@ -150,9 +148,7 @@ def train(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
-                "dataset_factory": (
-                    "reference_projects.kaggle.child_mind.components:cmi_samples"
-                ),
+                "dataset_factory": ("reference_projects.kaggle.child_mind.components:cmi_samples"),
                 "model": model_config,
                 "objective": objective_config,
                 "optimizer": "torch.optim:AdamW",
@@ -221,8 +217,7 @@ def _class_weights(store: SignalStore, sample_ids: list[str]) -> list[float]:
         counts[int(store.read_sample(sample_id)["attrs"]["target"])] += 1
     if bool((counts == 0).any()):
         raise ValueError(
-            f"CMI training fold must contain all {CLASSES} classes; "
-            f"counts={counts.tolist()}"
+            f"CMI training fold must contain all {CLASSES} classes; counts={counts.tolist()}"
         )
     weights = counts.sum() / (CLASSES * counts)
     return weights.tolist()

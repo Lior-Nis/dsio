@@ -158,9 +158,7 @@ def resolve_reference(reference: str) -> Any:
 
 def _split_reference(reference: str) -> tuple[str, str]:
     if reference.count(":") != 1:
-        raise ComponentError(
-            f"component reference {reference!r} must use module:qualname form"
-        )
+        raise ComponentError(f"component reference {reference!r} must use module:qualname form")
     module, qualname = reference.split(":", 1)
     if (
         not module

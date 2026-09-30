@@ -114,12 +114,7 @@ def test_child_mind_sensor_boundary_requires_exact_arrow_types(
     )
 
     participant_id = "train-000"
-    partition = (
-        child_mind_data
-        / "series_train.parquet"
-        / f"id={participant_id}"
-        / "part-0.parquet"
-    )
+    partition = child_mind_data / "series_train.parquet" / f"id={participant_id}" / "part-0.parquet"
     columns = {
         name: pa.array(
             [0, 1],
@@ -154,12 +149,7 @@ def test_child_mind_sensor_boundary_requires_valid_steps(
     )
 
     participant_id = "train-000"
-    partition = (
-        child_mind_data
-        / "series_train.parquet"
-        / f"id={participant_id}"
-        / "part-0.parquet"
-    )
+    partition = child_mind_data / "series_train.parquet" / f"id={participant_id}" / "part-0.parquet"
     columns = {
         name: pa.array(
             steps if name == "step" else [0] * len(steps),
@@ -184,12 +174,7 @@ def test_child_mind_sensor_summary_has_stable_variance_and_finite_float32_output
     )
 
     participant_id = "train-000"
-    partition = (
-        child_mind_data
-        / "series_train.parquet"
-        / f"id={participant_id}"
-        / "part-0.parquet"
-    )
+    partition = child_mind_data / "series_train.parquet" / f"id={participant_id}" / "part-0.parquet"
     table = pq.ParquetFile(partition).read()
     time_index = table.schema.get_field_index("time_of_day")
     base = 1_000_000_000_000
@@ -221,12 +206,7 @@ def test_child_mind_sensor_summary_rejects_infinite_source_values(
     from reference_projects.kaggle.child_mind.data import summarize_partition
 
     participant_id = "train-000"
-    partition = (
-        child_mind_data
-        / "series_train.parquet"
-        / f"id={participant_id}"
-        / "part-0.parquet"
-    )
+    partition = child_mind_data / "series_train.parquet" / f"id={participant_id}" / "part-0.parquet"
     table = pq.ParquetFile(partition).read()
     field_index = table.schema.get_field_index("X")
     table = table.set_column(
@@ -347,9 +327,7 @@ def test_child_mind_prediction_validation_rejects_invalid_output_values(
     from reference_projects.kaggle.child_mind.components import validate_cmi_prediction
 
     with pytest.raises(ValueError, match=message):
-        validate_cmi_prediction(
-            {"prediction": prediction, "probability": probability}
-        )
+        validate_cmi_prediction({"prediction": prediction, "probability": probability})
 
 
 def test_child_mind_flow_trains_tabular_and_fused_models_with_replayable_evidence(

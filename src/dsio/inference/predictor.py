@@ -242,9 +242,7 @@ def _inputs(batch: object) -> tuple[list[str], Tensor]:
 
 def _prediction(sample_ids: list[str], normalized: object) -> Prediction:
     if not isinstance(normalized, Mapping):
-        raise PredictorError(
-            f"normalizer must return a mapping, got {type(normalized).__name__}"
-        )
+        raise PredictorError(f"normalizer must return a mapping, got {type(normalized).__name__}")
     if "sample_id" in normalized:
         raise PredictorError("normalizer cannot replace reserved sample_id identity")
     if not normalized:
@@ -264,8 +262,7 @@ def _prediction(sample_ids: list[str], normalized: object) -> Prediction:
             )
         if size != len(sample_ids):
             raise PredictorError(
-                f"prediction field {name!r} has {size} rows for "
-                f"{len(sample_ids)} sample_id values"
+                f"prediction field {name!r} has {size} rows for {len(sample_ids)} sample_id values"
             )
         result[name] = value
     return result

@@ -52,9 +52,7 @@ def measure_phase(
             "cuda_memory": "torch.cuda.max_memory_allocated-and-reserved"
             if cuda_requested
             else "not_applicable",
-            "gpu_utilization": "nvidia-smi-device-sampling"
-            if cuda_requested
-            else "not_applicable",
+            "gpu_utilization": "nvidia-smi-device-sampling" if cuda_requested else "not_applicable",
         },
         "cuda": {
             "requested": cuda_requested,
@@ -74,9 +72,7 @@ def measure_phase(
     proc_root = Path(proc_root)
     samples: list[int] = [_process_tree_rss(proc_root)]
     stop = threading.Event()
-    utilization: list[float] = (
-        [_gpu_utilization(cuda_uuid)] if cuda_uuid is not None else []
-    )
+    utilization: list[float] = [_gpu_utilization(cuda_uuid)] if cuda_uuid is not None else []
     sampler_errors: list[Exception] = []
     sampler = threading.Thread(
         target=_sample_resources,
@@ -118,9 +114,7 @@ def measure_phase(
                 evidence["cuda"]["peak_reserved_bytes"] = torch.cuda.max_memory_reserved()
             evidence["cuda"]["utilization_samples"] = len(utilization)
             if utilization:
-                evidence["cuda"]["utilization_mean_percent"] = sum(utilization) / len(
-                    utilization
-                )
+                evidence["cuda"]["utilization_mean_percent"] = sum(utilization) / len(utilization)
                 evidence["cuda"]["utilization_peak_percent"] = max(utilization)
         if sampler_errors and body_error is None:
             raise RuntimeError("CUDA telemetry sampling failed") from sampler_errors[0]

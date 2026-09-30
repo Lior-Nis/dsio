@@ -85,9 +85,7 @@ def test_the_contract_catches_a_subset_of_the_wrong_length() -> None:
     class ShortSubset(TableExamples):
         def subset(self, mask: np.ndarray) -> ShortSubset:
             mask = np.asarray(mask, dtype=bool)
-            return ShortSubset(
-                name=self.name, groups=self.groups[mask][:-1], digest=self.digest
-            )
+            return ShortSubset(name=self.name, groups=self.groups[mask][:-1], digest=self.digest)
 
     with pytest.raises(ContractViolation, match="length"):
         check_examples_contract(ShortSubset(name="s", groups=["a", "a", "b", "b"]))
@@ -127,9 +125,7 @@ def test_a_per_process_reader_satisfies_the_contract(
     payload: tuple[Path, np.ndarray],
 ) -> None:
     path, rows = payload
-    open_reader = functools.partial(
-        MmapReader, path, np.dtype(np.float32), CHANNELS, N_ROWS
-    )
+    open_reader = functools.partial(MmapReader, path, np.dtype(np.float32), CHANNELS, N_ROWS)
     check_reader_contract(open_reader, expected=rows)
 
 

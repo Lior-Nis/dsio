@@ -34,6 +34,8 @@ _POLICY_MODULES = frozenset(
         "dsio.experimental.admission.syntax.registries",
     }
 )
+
+
 def audit_source(
     path: str | Path,
     *,
@@ -51,9 +53,7 @@ def audit_source(
         return ("input: project_names must be a string or a sequence of non-empty strings",)
     if any(not isinstance(name, str) or not name for name in project_names):
         return ("input: project_names must contain only non-empty strings",)
-    return _audit_source(
-        Path(path), module=module, project_names=project_names, seen_modules=set()
-    )
+    return _audit_source(Path(path), module=module, project_names=project_names, seen_modules=set())
 
 
 def _audit_source(
@@ -82,12 +82,9 @@ def _audit_source(
         id(node): syntax.aliases_at(tree, node, module, is_package=is_package)
         for node in ast.walk(tree)
     }
-    imported_modules = (
-        *syntax.imports(tree, module, is_package=is_package),
-    )
+    imported_modules = (*syntax.imports(tree, module, is_package=is_package),)
     if any(syntax.is_dynamic_import_api(imported) for imported in imported_modules) or any(
-        syntax.dynamic_import_reference(node, aliases_by_node[id(node)])
-        for node in ast.walk(tree)
+        syntax.dynamic_import_reference(node, aliases_by_node[id(node)]) for node in ast.walk(tree)
     ):
         failures.append(
             "dependency: dynamic import and code-evaluation APIs are not statically admissible"
@@ -104,9 +101,7 @@ def _audit_source(
             failures.append(
                 f"runtime-registration: import {imported!r} exposes a closed DSIO dispatcher"
             )
-        elif imported == "dsio.config.registry" or imported.startswith(
-            "dsio.config.registry."
-        ):
+        elif imported == "dsio.config.registry" or imported.startswith("dsio.config.registry."):
             failures.append(
                 "runtime-registration: experimental components cannot depend on the "
                 "closed DSIO registry implementation"
@@ -118,9 +113,7 @@ def _audit_source(
             )
 
     explicit_projects = {
-        name.casefold()
-        for name in project_names
-        if isinstance(name, str) and name
+        name.casefold() for name in project_names if isinstance(name, str) and name
     }
     explicit_match = _matched_project(tree, explicit_projects)
     identifier_match = syntax.references_consumer_names(tree, explicit_projects)

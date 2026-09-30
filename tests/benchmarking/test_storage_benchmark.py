@@ -80,9 +80,7 @@ def test_report_records_inputs_environment_raw_measurements_and_recovery(
         assert result["build"]["throughput_bytes_per_second"] > 0
         assert result["storage"]["bytes"] > 0
         assert result["storage"]["files"] == 1
-        assert result["sequential"]["checksum"] == workload["expected_checksums"][
-            "sequential"
-        ]
+        assert result["sequential"]["checksum"] == workload["expected_checksums"]["sequential"]
         assert result["random"]["checksum"] == workload["expected_checksums"]["random"]
         assert {item["workers"] for item in result["multi_worker"]} == {1, 2}
         for measurement in result["multi_worker"]:
@@ -91,6 +89,8 @@ def test_report_records_inputs_environment_raw_measurements_and_recovery(
         assert result["recovery"]["published"] is False
         assert result["recovery"]["partial_accepted_as_complete"] is False
         assert result["recovery"]["retry_succeeded"] is True
+
+
 def test_production_store_has_no_backend_selector() -> None:
     assert "backend" not in inspect.signature(SignalStore).parameters
     assert "backend" not in inspect.signature(SignalStore.open).parameters
@@ -116,17 +116,14 @@ def test_all_candidates_return_identical_logical_reads(tmp_path: Path) -> None:
     assert set(report["versions"]) == {"numcodecs", "numpy", "pyarrow", "zarr"}
     results = report["workloads"][0]["candidates"]
     expected = report["workloads"][0]["expected_checksums"]
-    assert {result["sequential"]["checksum"] for result in results} == {
-        expected["sequential"]
-    }
+    assert {result["sequential"]["checksum"] for result in results} == {expected["sequential"]}
     assert {result["random"]["checksum"] for result in results} == {expected["random"]}
     recovery = {result["candidate"]: result["recovery"] for result in results}
     assert recovery["flat-binary"]["partial_opened"] is False
     assert recovery["arrow-ipc"]["partial_opened"] is False
     assert recovery["zarr-v3"]["partial_opened"] is True
     assert all(
-        observation["partial_accepted_as_complete"] is False
-        for observation in recovery.values()
+        observation["partial_accepted_as_complete"] is False for observation in recovery.values()
     )
 
 

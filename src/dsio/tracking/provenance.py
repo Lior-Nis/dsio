@@ -174,8 +174,7 @@ def _filter_fields(
             for key in value:
                 if not isinstance(key, str):
                     raise NonCanonicalValueError(
-                        f"dict keys must be str for canonical encoding, got "
-                        f"{type(key).__name__}"
+                        f"dict keys must be str for canonical encoding, got {type(key).__name__}"
                     )
                 if key in omitted:
                     continue
@@ -197,9 +196,7 @@ def _field_names(fields: Collection[str]) -> frozenset[str]:
     if isinstance(fields, str):
         return frozenset({fields})
     values = tuple(fields)
-    invalid_types = sorted(
-        {type(field).__name__ for field in values if not isinstance(field, str)}
-    )
+    invalid_types = sorted({type(field).__name__ for field in values if not isinstance(field, str)})
     if invalid_types:
         types = ", ".join(invalid_types)
         raise NonCanonicalValueError(f"field selectors must be str, got: {types}")

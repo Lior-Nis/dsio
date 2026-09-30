@@ -17,8 +17,7 @@ def defines_registration_surface(tree: ast.AST) -> bool:
     all_tables = {
         target.id
         for statement in declarations
-        if statement.value is not None
-        and _mutable_mapping(statement.value)
+        if statement.value is not None and _mutable_mapping(statement.value)
         for target in (
             statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         )
@@ -53,17 +52,14 @@ def defines_registration_surface(tree: ast.AST) -> bool:
         return True
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign | ast.AnnAssign | ast.Delete):
-            targets = (
-                node.targets
-                if isinstance(node, ast.Assign | ast.Delete)
-                else [node.target]
-            )
+            targets = node.targets if isinstance(node, ast.Assign | ast.Delete) else [node.target]
             if any(_mutates_table(target, semantic_tables) for target in targets):
                 return True
         elif isinstance(node, ast.AugAssign):
-            if _mutates_table(node.target, semantic_tables) or expression_name(
-                node.target, {}
-            ) in semantic_tables:
+            if (
+                _mutates_table(node.target, semantic_tables)
+                or expression_name(node.target, {}) in semantic_tables
+            ):
                 return True
         elif (
             isinstance(node, ast.Call)

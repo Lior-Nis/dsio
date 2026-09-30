@@ -64,8 +64,7 @@ def export(
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
                 "normalizer": (
-                    "reference_projects.kaggle.child_mind.sequence.components:"
-                    "CmiSequencePrediction"
+                    "reference_projects.kaggle.child_mind.sequence.components:CmiSequencePrediction"
                 ),
                 "validator": (
                     "reference_projects.kaggle.child_mind.sequence.components:"
@@ -174,10 +173,7 @@ def evaluate_model(
             dtype=np.int64,
         )
         ablated_prediction = np.asarray(
-            [
-                int(np.argmax(ablated_sum[value] / window_count[value]))
-                for value in participants
-            ],
+            [int(np.argmax(ablated_sum[value] / window_count[value])) for value in participants],
             dtype=np.int64,
         )
         sensor_present = np.asarray([present[value] for value in participants], dtype=bool)

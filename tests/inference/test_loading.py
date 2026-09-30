@@ -184,9 +184,7 @@ def test_predict_revalidates_model_evidence_after_loading(
 
     def load_then_retag(uri: str) -> Any:
         loaded = real_load(uri)
-        MlflowClient().set_logged_model_tags(
-            model_id, {"dsio.export_form": "pytorch"}
-        )
+        MlflowClient().set_logged_model_tags(model_id, {"dsio.export_form": "pytorch"})
         return loaded
 
     monkeypatch.setattr(mlflow.pyfunc, "load_model", load_then_retag)

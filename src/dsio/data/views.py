@@ -447,9 +447,7 @@ class WindowDiscards:
         )
 
 
-def _entity_offsets(
-    entity: Entity, spec: WindowSpec, dense_mask: np.ndarray | None
-) -> list[int]:
+def _entity_offsets(entity: Entity, spec: WindowSpec, dense_mask: np.ndarray | None) -> list[int]:
     """Sorted window starts for one entity, or ``[]`` if it cannot hold one window.
 
     The single enumeration both :func:`build_index` and :func:`window_discards` read, so
@@ -598,15 +596,11 @@ def _refuse_multi_window_entities(index: WindowIndex, store: SignalStore) -> Non
     metric floor removed from it.
     """
     counts = np.bincount(index.entity_codes, minlength=len(index.entity_names))
-    offenders = [
-        (index.entity_names[code], int(n)) for code, n in enumerate(counts) if n != 1
-    ]
+    offenders = [(index.entity_names[code], int(n)) for code, n in enumerate(counts) if n != 1]
     if not offenders:
         return
 
-    named = ", ".join(
-        f"{name} ({n} windows)" for name, n in offenders[:MAX_NAMED_ENTITIES]
-    )
+    named = ", ".join(f"{name} ({n} windows)" for name, n in offenders[:MAX_NAMED_ENTITIES])
     if len(offenders) > MAX_NAMED_ENTITIES:
         named += f", and {len(offenders) - MAX_NAMED_ENTITIES:,} more"
     sizes = sorted({entity.n_rows for entity in store.entities})
@@ -860,9 +854,7 @@ def index_path(
     The identity covers the complete store, the spec, and every runtime input that changes
     the logical index. Policy-only validation flags remain outside it.
     """
-    dense_mask, labels, row_metrics = _normalise_index_inputs(
-        spec, dense_mask, labels, row_metrics
-    )
+    dense_mask, labels, row_metrics = _normalise_index_inputs(spec, dense_mask, labels, row_metrics)
     return _index_path_for_inputs(
         store,
         spec,
@@ -896,9 +888,7 @@ def load_or_build(
     ``one_window_per_entity`` is checked on both paths for the same reason and, being
     counted from the index itself, needs no re-derivation to check a cached one.
     """
-    dense_mask, labels, row_metrics = _normalise_index_inputs(
-        spec, dense_mask, labels, row_metrics
-    )
+    dense_mask, labels, row_metrics = _normalise_index_inputs(spec, dense_mask, labels, row_metrics)
     path = _index_path_for_inputs(
         store,
         spec,

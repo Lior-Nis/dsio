@@ -119,9 +119,7 @@ def test_record_provenance_captures_consumer_git_patch_and_root_lock(
     execution = payload["execution"]
     assert execution["git"]["dirty"] is True
     assert execution["git"]["code_hash"].startswith(execution["git"]["sha"] + "-dirty-")
-    assert execution["environment"]["lock_sha256"] == sha256_of_file(
-        str(git_repo / "uv.lock")
-    )
+    assert execution["environment"]["lock_sha256"] == sha256_of_file(str(git_repo / "uv.lock"))
     patch = Path(client.download_artifacts(run.info.run_id, "git.patch", tmp_path))
     assert b"dirty consumer code" in patch.read_bytes()
     client.set_terminated(run.info.run_id, "FINISHED")

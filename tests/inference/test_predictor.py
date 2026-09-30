@@ -339,9 +339,7 @@ def test_checkpoint_run_is_rechecked_after_artifact_loading(
 ) -> None:
     ref = _checkpoint(tmp_path)
 
-    def load_then_delete(
-        checkpoint: ArtifactRef, *, tracking_uri: str | None = None
-    ) -> bytes:
+    def load_then_delete(checkpoint: ArtifactRef, *, tracking_uri: str | None = None) -> bytes:
         payload = load_artifact(checkpoint, tracking_uri=tracking_uri)
         MlflowClient(resolve_tracking_uri(tracking_uri)).delete_run(checkpoint.run_id)
         return payload
@@ -370,9 +368,7 @@ def test_checkpoint_preserves_native_pytorch_extra_state(tmp_path: Path) -> None
 def test_malformed_model_state_is_not_silently_discarded(tmp_path: Path) -> None:
     payload = io.BytesIO()
     source = _linear()
-    state: dict[str, Any] = {
-        f"model.{name}": value for name, value in source.state_dict().items()
-    }
+    state: dict[str, Any] = {f"model.{name}": value for name, value in source.state_dict().items()}
     state["model.corrupt"] = 1
     torch.save({"state_dict": state}, payload)
     client = MlflowClient(resolve_tracking_uri())

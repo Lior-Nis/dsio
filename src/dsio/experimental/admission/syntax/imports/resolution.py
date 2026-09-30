@@ -67,9 +67,7 @@ def aliases_at(
     for index, scope in enumerate(scopes):
         _remove_parameters(scope, resolved)
         cutoff = _position(node) if index == len(scopes) - 1 else (float("inf"), 0)
-        for event, conditional in sorted(
-            _scope_events(scope), key=lambda item: _position(item[0])
-        ):
+        for event, conditional in sorted(_scope_events(scope), key=lambda item: _position(item[0])):
             if _position(event) > cutoff:
                 break
             _apply_alias_event(
@@ -121,9 +119,7 @@ def _remove_parameters(
 def _scope_events(
     scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
 ) -> tuple[tuple[ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign, bool], ...]:
-    events: list[
-        tuple[ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign, bool]
-    ] = []
+    events: list[tuple[ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign, bool]] = []
 
     def collect(node: ast.AST, *, conditional: bool) -> None:
         for child in ast.iter_child_nodes(node):
@@ -133,13 +129,7 @@ def _scope_events(
                 continue
             child_conditional = conditional or isinstance(
                 child,
-                ast.If
-                | ast.For
-                | ast.AsyncFor
-                | ast.While
-                | ast.Try
-                | ast.TryStar
-                | ast.Match,
+                ast.If | ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar | ast.Match,
             )
             if isinstance(child, ast.Import | ast.ImportFrom | ast.Assign | ast.AnnAssign):
                 events.append((child, conditional))
@@ -154,13 +144,7 @@ def _scope_events(
             statement,
             conditional=isinstance(
                 statement,
-                ast.If
-                | ast.For
-                | ast.AsyncFor
-                | ast.While
-                | ast.Try
-                | ast.TryStar
-                | ast.Match,
+                ast.If | ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar | ast.Match,
             ),
         )
     return tuple(dict.fromkeys(events))
@@ -227,9 +211,7 @@ def _position(node: ast.AST) -> tuple[float, int]:
     return (float(getattr(node, "lineno", 0)), getattr(node, "col_offset", 0))
 
 
-def _import_from_base(
-    node: ast.ImportFrom, module: str, *, is_package: bool = False
-) -> str:
+def _import_from_base(node: ast.ImportFrom, module: str, *, is_package: bool = False) -> str:
     if not node.level:
         return node.module or ""
     package = module if is_package else module.rpartition(".")[0]

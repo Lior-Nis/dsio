@@ -144,10 +144,7 @@ def load_competition_data(data_dir: str | Path) -> dict[str, Any]:
                 "series_path": train_series.get(str(row["id"])),
             }
         )
-    test = [
-        {**row, "series_path": test_series.get(str(row["id"]))}
-        for row in test_rows
-    ]
+    test = [{**row, "series_path": test_series.get(str(row["id"]))} for row in test_rows]
     submission = _rows(root / "sample_submission.csv", ("id", "sii"))
     submission_ids = [str(row["id"]) for row in submission]
     test_ids = [str(row["id"]) for row in test]
@@ -180,9 +177,7 @@ def summarize_partition(path: Path, participant_id: str) -> SensorSummary:
         ) from error
     expected = [name for name, _ in SENSOR_PARQUET_COLUMNS]
     if parquet.schema_arrow.names != expected:
-        raise ValueError(
-            f"sensor partition {participant_id!r} columns must be {expected}"
-        )
+        raise ValueError(f"sensor partition {participant_id!r} columns must be {expected}")
     declared_types = dict(SENSOR_PARQUET_COLUMNS)
     expected_types = {
         name: pa.type_for_alias(field_type) for name, field_type in SENSOR_PARQUET_COLUMNS
@@ -202,22 +197,15 @@ def summarize_partition(path: Path, participant_id: str) -> SensorSummary:
     rows = 0
     previous_step: int | None = None
     try:
-        for batch in parquet.iter_batches(
-            batch_size=65_536, columns=["step", *SENSOR_COLUMNS]
-        ):
+        for batch in parquet.iter_batches(batch_size=65_536, columns=["step", *SENSOR_COLUMNS]):
             rows += batch.num_rows
             step_column = batch.column(0)
             if step_column.null_count:
                 raise ValueError("step must be non-null")
-            steps = np.asarray(
-                step_column.to_numpy(zero_copy_only=False), dtype=np.int64
-            )
-            if (
-                steps.size
-                and (
-                    (previous_step is not None and int(steps[0]) <= previous_step)
-                    or bool((np.diff(steps) <= 0).any())
-                )
+            steps = np.asarray(step_column.to_numpy(zero_copy_only=False), dtype=np.int64)
+            if steps.size and (
+                (previous_step is not None and int(steps[0]) <= previous_step)
+                or bool((np.diff(steps) <= 0).any())
             ):
                 raise ValueError("step must be strictly increasing and unique")
             if steps.size:
@@ -230,9 +218,7 @@ def summarize_partition(path: Path, participant_id: str) -> SensorSummary:
             )
             infinite = np.argwhere(np.isinf(matrix))
             if infinite.size:
-                raise ValueError(
-                    f"field {SENSOR_COLUMNS[int(infinite[0, 1])]!r} contains infinity"
-                )
+                raise ValueError(f"field {SENSOR_COLUMNS[int(infinite[0, 1])]!r} contains infinity")
             valid = np.isfinite(matrix)
             batch_count = valid.sum(axis=0, dtype=np.int64)
             safe = np.where(valid, matrix, 0.0)
@@ -243,9 +229,7 @@ def summarize_partition(path: Path, participant_id: str) -> SensorSummary:
                 where=batch_count > 0,
             )
             deviations = np.where(valid, matrix - batch_mean, 0.0)
-            batch_squared_deviations = np.square(deviations).sum(
-                axis=0, dtype=np.float64
-            )
+            batch_squared_deviations = np.square(deviations).sum(axis=0, dtype=np.float64)
             combined_count = count + batch_count
             delta = batch_mean - mean
             merge_weight = np.divide(
@@ -262,12 +246,8 @@ def summarize_partition(path: Path, participant_id: str) -> SensorSummary:
             )
             mean += delta * merge_weight
             count = combined_count
-            minimum = np.minimum(
-                minimum, np.min(np.where(valid, matrix, np.inf), axis=0)
-            )
-            maximum = np.maximum(
-                maximum, np.max(np.where(valid, matrix, -np.inf), axis=0)
-            )
+            minimum = np.minimum(minimum, np.min(np.where(valid, matrix, np.inf), axis=0))
+            maximum = np.maximum(maximum, np.max(np.where(valid, matrix, -np.inf), axis=0))
     except ValueError as error:
         raise ValueError(f"sensor partition {participant_id!r} is malformed: {error}") from error
     except Exception as error:
@@ -321,9 +301,7 @@ def pack_participant(
             try:
                 value = _SEASONS[str(raw)]
             except KeyError:
-                raise ValueError(
-                    f"participant {row['id']!r} has invalid {field}={raw!r}"
-                ) from None
+                raise ValueError(f"participant {row['id']!r} has invalid {field}={raw!r}") from None
         else:
             try:
                 value = float(raw)
@@ -332,13 +310,10 @@ def pack_participant(
                     f"participant {row['id']!r} has non-numeric {field}={raw!r}"
                 ) from error
             if not math.isfinite(value):
-                raise ValueError(
-                    f"participant {row['id']!r} has non-finite {field}={raw!r}"
-                )
+                raise ValueError(f"participant {row['id']!r} has non-finite {field}={raw!r}")
         if abs(value) > _FLOAT32_MAX:
             raise ValueError(
-                f"participant {row['id']!r} field {field!r} is outside float32 range: "
-                f"{raw!r}"
+                f"participant {row['id']!r} field {field!r} is outside float32 range: {raw!r}"
             )
         tabular[index] = value
         tabular_mask[index] = 1.0
@@ -379,9 +354,7 @@ def _unique_ids(rows: list[dict[str, str]], source: str) -> None:
         raise ValueError(f"{source} contains duplicate participant identity")
 
 
-def _partitions(
-    directory: Path, rows: list[dict[str, str]], source: str
-) -> dict[str, Path]:
+def _partitions(directory: Path, rows: list[dict[str, str]], source: str) -> dict[str, Path]:
     if not directory.is_dir():
         raise ValueError(f"missing CMI sensor directory: {directory}")
     known = {row["id"] for row in rows}

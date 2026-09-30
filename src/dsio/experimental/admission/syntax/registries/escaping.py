@@ -9,9 +9,7 @@ from dsio.experimental.admission.syntax.imports import expression_name
 
 def escaping_local_mutator(tree: ast.Module) -> bool:
     functions = (
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     )
     for function in functions:
         tables = {
@@ -30,9 +28,7 @@ def escaping_local_mutator(tree: ast.Module) -> bool:
     return False
 
 
-def _returns_mutator(
-    function: ast.FunctionDef | ast.AsyncFunctionDef, tables: set[str]
-) -> bool:
+def _returns_mutator(function: ast.FunctionDef | ast.AsyncFunctionDef, tables: set[str]) -> bool:
     returned = {
         expression_name(node.value, {})
         for node in ast.walk(function)

@@ -101,9 +101,7 @@ def _logo(store: SignalStore, *, name: str) -> list[SplitFile]:
     ]
 
 
-def _temporal_folds(
-    examples: SignalExamples, spec: TemporalSpec, *, name: str
-) -> list[SplitFile]:
+def _temporal_folds(examples: SignalExamples, spec: TemporalSpec, *, name: str) -> list[SplitFile]:
     """One walk-forward fold per :func:`walk_forward` bound — calling the two functions
     this ADR keeps, not reimplementing them."""
     t_start, t_end = examples.times()
@@ -112,9 +110,7 @@ def _temporal_folds(
             store=examples.name,
             store_manifest_sha256=examples.digest,
             name=name,
-            folds=[
-                SplitFold(index=fold, counts=describe(bounds, t_start, t_end), temporal=bounds)
-            ],
+            folds=[SplitFold(index=fold, counts=describe(bounds, t_start, t_end), temporal=bounds)],
         )
         for fold, bounds in enumerate(walk_forward(t_start, t_end, spec))
     ]
@@ -193,9 +189,7 @@ def test_no_group_is_trained_on_and_tested_in_the_same_fold(store: SignalStore, 
         assert not (set(groups[fold.train]) & set(groups[fold.test]))
 
 
-def test_no_raw_row_is_shared_between_a_fold_train_and_test(
-    store: SignalStore, index
-) -> None:
+def test_no_raw_row_is_shared_between_a_fold_train_and_test(store: SignalStore, index) -> None:
     """Overlapping windows straddling a boundary are the failure this whole layer exists
     to prevent — near-identical rows in train and test simultaneously."""
     for fold in folds_from_splits(SignalExamples(store, index), _kfold3(store)):
@@ -210,18 +204,14 @@ def test_every_window_is_tested_exactly_once_across_folds(store: SignalStore, in
     assert sorted(tested.tolist()) == list(range(len(index)))
 
 
-def test_leave_one_group_out_produces_one_fold_per_subject(
-    store: SignalStore, index
-) -> None:
+def test_leave_one_group_out_produces_one_fold_per_subject(store: SignalStore, index) -> None:
     splits = _logo(store, name="logo")
     folds = folds_from_splits(SignalExamples(store, index), splits)
     assert len(folds) == 9
     assert all(len(set(index.groups[fold.test])) == 1 for fold in folds)
 
 
-def test_fold_numbers_come_from_the_file_not_the_list_position(
-    store: SignalStore, index
-) -> None:
+def test_fold_numbers_come_from_the_file_not_the_list_position(store: SignalStore, index) -> None:
     """Running folds 1 and 2 alone must not renumber them 0 and 1.
 
     Otherwise `fold0` in an artifact means a different fold depending on which subset was

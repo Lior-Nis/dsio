@@ -105,9 +105,7 @@ def train(
             )
             loader_execution = dict(calibration["selected"])
             requested = requested.model_copy(
-                update={
-                    "accumulate_grad_batches": loader_execution["accumulate_grad_batches"]
-                }
+                update={"accumulate_grad_batches": loader_execution["accumulate_grad_batches"]}
             )
             log_calibration(run.info.run_id, calibration)
         seed_everything(seed, workers=True, verbose=False)
@@ -149,9 +147,7 @@ def train(
                     if calibration is None
                     else {
                         "policy": calibration["policy"],
-                        "candidates": [
-                            trial["candidate"] for trial in calibration["trials"]
-                        ],
+                        "candidates": [trial["candidate"] for trial in calibration["trials"]],
                         "selected": calibration["selected"],
                         "environment": calibration["environment"],
                         "environment_digest": calibration["environment_digest"],
@@ -208,9 +204,7 @@ def train(
                     "requested_epochs": requested.max_epochs,
                     "labelled_windows": labelled_windows,
                     "store_rows": store.n_rows,
-                    "window_epochs_per_second": labelled_windows
-                    * completed_epochs
-                    / elapsed,
+                    "window_epochs_per_second": labelled_windows * completed_epochs / elapsed,
                 },
             )
         return {

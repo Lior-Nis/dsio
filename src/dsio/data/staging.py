@@ -84,9 +84,7 @@ def _stage_lock(target: Path) -> Iterator[None]:
         yield
 
 
-def _identity_of(
-    config: dict[str, Any], identity_fields: Sequence[str] | None
-) -> dict[str, Any]:
+def _identity_of(config: dict[str, Any], identity_fields: Sequence[str] | None) -> dict[str, Any]:
     """The identity-bearing part of ``config``, or all of it when none is named.
 
     A named field absent from the config is refused rather than skipped. Skipping would

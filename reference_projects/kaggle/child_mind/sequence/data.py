@@ -63,9 +63,7 @@ def stage_sequence_store(
                 )
                 signal = np.concatenate((signal, padding), axis=0)
             packed = pack_participant(row, None)[0]
-            tabular = np.concatenate(
-                (packed[TABULAR_VALUE_SLICE], packed[TABULAR_MASK_SLICE])
-            )
+            tabular = np.concatenate((packed[TABULAR_VALUE_SLICE], packed[TABULAR_MASK_SLICE]))
             builder.add(
                 participant_id,
                 signal,

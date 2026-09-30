@@ -28,9 +28,7 @@ def artifact_paths(paths: Collection[str]) -> tuple[str, ...]:
 
 def validate_artifact_path(path: str) -> str:
     if not isinstance(path, str):
-        raise TrackingError(
-            f"Evidence artifact path must be str, got {type(path).__name__}."
-        )
+        raise TrackingError(f"Evidence artifact path must be str, got {type(path).__name__}.")
     candidate = PurePosixPath(path)
     if (
         not path

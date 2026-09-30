@@ -114,9 +114,7 @@ class SignalStoreBuilder:
             self._entities = [
                 entity.model_copy(
                     update={
-                        "attrs": validated_attrs(
-                            entity.attrs, f"entity {entity.entity_id!r} attrs"
-                        )
+                        "attrs": validated_attrs(entity.attrs, f"entity {entity.entity_id!r} attrs")
                     }
                 )
                 for entity in self._entities

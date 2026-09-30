@@ -122,9 +122,7 @@ def evaluate_model(
             },
             components={
                 "evaluation": "dsio.eval.execution:evaluate",
-                "qwk": (
-                    "dsio.eval.metrics:quadratic_weighted_kappa"
-                ),
+                "qwk": ("dsio.eval.metrics:quadratic_weighted_kappa"),
             },
         )
         metrics = evaluate(

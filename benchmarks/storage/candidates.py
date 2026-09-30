@@ -22,9 +22,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Windows
     resource = None  # type: ignore[assignment]
 
 CANDIDATES = ("flat-binary", "arrow-ipc", "zarr-v3")
-RSS_METHOD = (
-    "resource.getrusage(RUSAGE_SELF).ru_maxrss" if resource is not None else None
-)
+RSS_METHOD = "resource.getrusage(RUSAGE_SELF).ru_maxrss" if resource is not None else None
 
 
 def build_candidate(candidate: str, source_path: Path, target: Path) -> dict[str, Any]:
@@ -42,9 +40,7 @@ def build_candidate(candidate: str, source_path: Path, target: Path) -> dict[str
             pa.array(np.asarray(source).reshape(-1)), source.shape[1]
         )
         table = pa.table({"values": values})
-        with pa.OSFile(str(target), "wb") as sink, pa.ipc.new_file(
-            sink, table.schema
-        ) as writer:
+        with pa.OSFile(str(target), "wb") as sink, pa.ipc.new_file(sink, table.schema) as writer:
             writer.write_table(table)
         configuration = {"container": "IPC file", "compression": None}
         dependencies = ["numpy", "pyarrow"]

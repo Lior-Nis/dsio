@@ -81,11 +81,7 @@ def calibrate_execution(
                 f"{target_effective_batch_size}"
             )
         num_workers = resolved["num_workers"]
-        if (
-            isinstance(num_workers, bool)
-            or not isinstance(num_workers, int)
-            or num_workers < 0
-        ):
+        if isinstance(num_workers, bool) or not isinstance(num_workers, int) or num_workers < 0:
             raise ValueError("candidate num_workers must be a non-negative integer")
         if not isinstance(resolved["pin_memory"], bool):
             raise ValueError("candidate pin_memory must be bool")
@@ -137,12 +133,8 @@ def calibrate_execution(
     admissible = [trial for trial in trials if trial["status"] == "admissible"]
     if not admissible:
         reasons = sorted({str(trial.get("reason", "unknown")) for trial in trials})
-        raise ValueError(
-            "no admissible execution candidate; rejected by: " + ", ".join(reasons)
-        )
-    best_objective = max(
-        trial["measurement"][objective_metric] for trial in admissible
-    )
+        raise ValueError("no admissible execution candidate; rejected by: " + ", ".join(reasons))
+    best_objective = max(trial["measurement"][objective_metric] for trial in admissible)
     effectively_tied = [
         trial
         for trial in admissible

@@ -69,8 +69,7 @@ def train(
         training_ids = list(manifest.fold(0).assignments["train"])
         model_config: ComponentConfig = {
             "reference": (
-                "reference_projects.kaggle.child_mind.sequence.components:"
-                "CmiSequenceClassifier"
+                "reference_projects.kaggle.child_mind.sequence.components:CmiSequenceClassifier"
             ),
             "parameters": {
                 "window_length": int(data["window_length"]),
@@ -81,8 +80,7 @@ def train(
         }
         objective_config: ComponentConfig = {
             "reference": (
-                "reference_projects.kaggle.child_mind.sequence.components:"
-                "CmiSequenceObjective"
+                "reference_projects.kaggle.child_mind.sequence.components:CmiSequenceObjective"
             ),
             "parameters": {"class_weights": _class_weights(store, examples, training_ids)},
         }
@@ -118,9 +116,7 @@ def train(
             )
             loader_execution = dict(calibration["selected"])
             requested = requested.model_copy(
-                update={
-                    "accumulate_grad_batches": loader_execution["accumulate_grad_batches"]
-                }
+                update={"accumulate_grad_batches": loader_execution["accumulate_grad_batches"]}
             )
             log_calibration(run.info.run_id, calibration)
 
@@ -173,8 +169,7 @@ def train(
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": (
-                    "reference_projects.kaggle.child_mind.sequence.components:"
-                    "sequence_windows"
+                    "reference_projects.kaggle.child_mind.sequence.components:sequence_windows"
                 ),
                 "model": model_config,
                 "objective": objective_config,
@@ -197,9 +192,7 @@ def train(
             run.info.run_id, reference.model_dump(mode="json"), "outputs/checkpoint.json"
         )
         elapsed = float(telemetry["elapsed_seconds"])
-        processed_windows = sum(
-            len(split["assignments"][role]) for role in ("train", "validate")
-        )
+        processed_windows = sum(len(split["assignments"][role]) for role in ("train", "validate"))
         log_phase_evidence(
             run.info.run_id,
             "training",
@@ -251,12 +244,8 @@ def _data_module(
 def _participant_entities(
     store: SignalStore, examples: SignalExamples, sample_ids: list[str]
 ) -> list[Any]:
-    positions = {
-        examples.index.sample_id(position): position for position in range(len(examples))
-    }
-    codes = {
-        int(examples.index.entity_codes[positions[sample_id]]) for sample_id in sample_ids
-    }
+    positions = {examples.index.sample_id(position): position for position in range(len(examples))}
+    codes = {int(examples.index.entity_codes[positions[sample_id]]) for sample_id in sample_ids}
     return [store.entities[code] for code in sorted(codes)]
 
 

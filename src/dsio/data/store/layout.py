@@ -80,9 +80,7 @@ def validated_attrs(attrs: dict[str, Any] | None, field: str) -> dict[str, Any]:
         raise StoreError(f"{field} is nested too deeply to be valid JSON metadata") from None
 
 
-def _copy_json_object(
-    value: dict[Any, Any], field: str, active: set[int]
-) -> dict[str, Any]:
+def _copy_json_object(value: dict[Any, Any], field: str, active: set[int]) -> dict[str, Any]:
     _enter_container(value, field, active)
     try:
         copied: dict[str, Any] = {}

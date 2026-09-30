@@ -65,9 +65,7 @@ def sanitise_metric(name: str) -> str:
     return name.replace("/", "_").replace("\\", "_").replace("=", "-")
 
 
-def build_callbacks(
-    trainer: TrainerConfig, directory: Path, *, has_validation: bool
-) -> list[Any]:
+def build_callbacks(trainer: TrainerConfig, directory: Path, *, has_validation: bool) -> list[Any]:
     """Construct the checkpoint/early-stopping callbacks a fold needs, letting any
     construction failure propagate.
 
