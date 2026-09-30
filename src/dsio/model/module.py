@@ -13,11 +13,12 @@ from torchmetrics import Metric
 
 from dsio.batches import PredictionBatch
 from dsio.config.components import (
-    ComponentError as ConfiguredComponentError,
+    ComponentError,
+    require_importable_component,
+    validate_component_config,
 )
-from dsio.config.components import require_importable_component, validate_component_config
 from dsio.contracts import canonical_json
-from dsio.model.chain import ComponentError, export_encoder
+from dsio.model.chain import export_encoder
 
 Stage = Literal["train", "validate", "test"]
 type Batch = Mapping[str, Any]
@@ -122,7 +123,7 @@ class DsioModule(LightningModule):
                     raise ModuleError("training_augmentation must not have learnable parameters")
                 assert augmentation_identity is not None
                 augmentation_config = json.loads(canonical_json(dict(augmentation_identity)))
-        except ConfiguredComponentError as error:
+        except ComponentError as error:
             raise ModuleError(str(error)) from None
         except (RecursionError, TypeError, ValueError) as error:
             raise ModuleError(f"augmentation_identity must be canonical: {error}") from None

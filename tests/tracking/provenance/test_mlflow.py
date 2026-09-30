@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+import dsio
+
 
 def _running_run(name: str) -> object:
     from mlflow import MlflowClient
@@ -52,7 +54,7 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
     client = MlflowClient()
     stored = client.get_run(run.info.run_id)
     assert stored.data.tags["dsio.execution_identity"] == identity
-    assert stored.data.tags["dsio.version"] == version("dsio")
+    assert stored.data.tags["dsio.version"] == version("dsio") == dsio.__version__
     assert stored.data.params["dsio.execution_identity"] == identity
     artifact = Path(client.download_artifacts(run.info.run_id, "provenance.json", tmp_path))
     payload = json.loads(artifact.read_text())
@@ -73,7 +75,7 @@ def test_record_provenance_logs_one_safe_native_artifact_and_searchable_tags(
             "dataset": "sha256:data",
             "seed": 7,
         },
-        "dsio_version": version("dsio"),
+        "dsio_version": dsio.__version__,
         "execution": execution,
         "execution_identity": identity,
         "schema_version": 2,

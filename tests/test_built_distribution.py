@@ -365,6 +365,7 @@ print(json.dumps({
     'state_unchanged': state_before == snapshot(state),
     'environment_unchanged': environment_before == snapshot(environment),
     'origin': dsio.__file__,
+    'version': dsio.__version__,
     'experimental_api': [AdmissionError.__name__, audit_component.__name__, audit_source.__name__],
     'heavy': sorted({
         name.split('.', 1)[0]
@@ -410,6 +411,12 @@ print(json.dumps({
     assert result["heavy"] == []
     assert result["experimental_api"] == ["AdmissionError", "audit_component", "audit_source"]
     assert Path(result["origin"]).is_relative_to(environment)
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_name = next(
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        )
+        wheel_version = BytesParser().parsebytes(archive.read(metadata_name))["Version"]
+    assert result["version"] == wheel_version
 
     flow_probe = """
 from prefect import flow, task
