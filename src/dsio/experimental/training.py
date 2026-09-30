@@ -35,33 +35,72 @@ def calibrate_training_execution(
     """Calibrate the real loader/model/objective while keeping the effective batch fixed.
 
     Consumes:
-        ``module_factory()`` returning a fresh ``DsioModule`` and
-        ``data_module_factory(batch_size, num_workers, pin_memory, prefetch_factor)``
-        returning a ``DsioDataModule``: the project's real model, objective and data.
+        ``module_factory()`` returning a fresh ``DsioModule`` whose ``configure_optimizers``
+        returns a bare optimizer, and ``data_module_factory(candidate)`` taking one candidate
+        mapping (``batch_size``, ``num_workers``, ``pin_memory``, ``prefetch_factor``) and
+        returning an object with ``setup(stage)`` and a ``train_dataloader()`` over a sized
+        dataset whose batches carry ``sample_id``: the project's real model, objective and
+        data.
 
     Produces:
         The :func:`~dsio.experimental.execution.calibrate_execution` evidence, measured by
-        short warm-up and timed optimizer steps on the real training path.
+        short warm-up and timed optimizer steps on the real training path; each trial's
+        measurement adds ``projected_examples_per_second``, ``startup_seconds``,
+        ``peak_process_tree_rss_bytes`` and GPU utilization.
 
     Parameters:
-        ``seed``; ``accelerator`` (``"cpu"`` or ``"cuda"``); ``expected_epochs``;
-        ``configuration`` with ``target_effective_batch_size`` and optional
-        ``warmup_effective_batches`` (1), ``measure_effective_batches`` (10), ``candidates``
-        and memory budgets.
+        ``seed``; ``accelerator`` (``"cpu"``, ``"cuda"`` or ``"auto"``);
+        ``expected_epochs``; ``configuration`` with ``target_effective_batch_size`` and
+        optional ``warmup_effective_batches`` (1), ``measure_effective_batches`` (10),
+        ``candidates`` (derived from the target when omitted),
+        ``max_device_memory_fraction`` (0.8) and ``max_host_memory_fraction`` (0.5).
 
     Devices:
         CPU or CUDA; fails closed when CUDA is requested but unavailable.
 
     Limitations:
-        Loader workers import the full training stack, so worker count trades host memory
-        against throughput; benchmarks are seconds long, not full epochs.
+        Requires an optimizer without a scheduler; loader workers import the full training
+        stack, so worker count trades host memory against throughput; benchmarks are
+        seconds long, not full epochs, and selection is timing-sensitive within the
+        tolerance band.
 
     Example:
-        >>> configuration = {"target_effective_batch_size": 64, "measure_effective_batches": 10}
-        >>> calibrate_training_execution(  # doctest: +SKIP
-        ...     build_module, build_data_module,
-        ...     seed=7, accelerator="cuda", expected_epochs=2, configuration=configuration,
+        >>> import torch
+        >>> from torch.utils.data import DataLoader
+        >>> from dsio.experimental.model import LossObjective
+        >>> from dsio.model.module import DsioModule
+        >>> rows = [
+        ...     {"sample_id": f"s{i}", "x": torch.ones(4), "y": torch.ones(1)} for i in range(32)
+        ... ]
+        >>> class Rows:
+        ...     def __init__(self, candidate):
+        ...         self.candidate = candidate
+        ...     def setup(self, stage):
+        ...         pass
+        ...     def train_dataloader(self):
+        ...         return DataLoader(rows, batch_size=self.candidate["batch_size"])
+        >>> def build_module():
+        ...     return DsioModule(
+        ...         model=torch.nn.Linear(4, 1),
+        ...         objective=LossObjective(torch.nn.MSELoss()),
+        ...         optimizer_factory=torch.optim.SGD,
+        ...         optimizer_parameters={"lr": 0.01},
+        ...     )
+        >>> evidence = calibrate_training_execution(
+        ...     build_module,
+        ...     Rows,
+        ...     seed=7,
+        ...     accelerator="cpu",
+        ...     expected_epochs=1,
+        ...     configuration={
+        ...         "target_effective_batch_size": 8,
+        ...         "measure_effective_batches": 2,
+        ...         "candidates": [{"batch_size": 8}, {"batch_size": 4}],
+        ...     },
         ... )
+        >>> selected = evidence["selected"]
+        >>> selected["batch_size"] * selected["accumulate_grad_batches"]
+        8
     """
     target = _positive_integer(
         "target_effective_batch_size", configuration.get("target_effective_batch_size")
@@ -283,7 +322,6 @@ def log_calibration(run_id: str, evidence: Mapping[str, Any]) -> None:
         ...         "examples_per_second": float(candidate["batch_size"]),
         ...         "projected_examples_per_second": float(candidate["batch_size"]),
         ...         "peak_device_memory_bytes": 0,
-        ...         "peak_host_memory_bytes": 0,
         ...         "peak_process_tree_rss_bytes": 0,
         ...         "gpu_utilization_mean_percent": 0.0,
         ...     }

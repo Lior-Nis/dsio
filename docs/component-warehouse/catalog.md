@@ -9,24 +9,27 @@ Conventions every block follows: [conventions.md](conventions.md).
 
 ## Components
 
-### `dsio.experimental.execution:calibrate_execution`
+### `dsio.experimental.execution`
 
-Measure execution-only candidates and return the fastest admissible one. — **experimental**; real uses: 2 (child-mind, parkinsons-fog).
+#### `dsio.experimental.execution:calibrate_execution`
 
-**Consumes**: A ``benchmark(candidate) -> measurement`` callable whose measurement reports the
-objective metric plus ``peak_device_memory_bytes`` and ``peak_host_memory_bytes``,
-and execution-only candidate mappings (``batch_size``, ``num_workers``,
-``pin_memory``, ``prefetch_factor``); each ``batch_size`` must divide
-``target_effective_batch_size``.
+Measure execution-only candidates and return the fastest admissible one. — **experimental**; real uses: 2 (child_mind, parkinsons_fog).
 
-**Produces**: ``{"selected", "trials", "policy", "environment", "environment_digest"}``: the chosen
-execution settings with derived ``accumulate_grad_batches``, every trial with its
-measurement and ``admissible``/``rejected`` status, and the selection policy.
+**Consumes**: A `benchmark(candidate) -> measurement` callable whose measurement reports the
+positive objective metric and `peak_device_memory_bytes` (plus
+`peak_process_tree_rss_bytes` when `max_host_memory_bytes` is set), and
+execution-only candidate mappings (`batch_size`, `num_workers`, `pin_memory`,
+`prefetch_factor`); each `batch_size` must divide
+`target_effective_batch_size`.
 
-**Parameters**: ``target_effective_batch_size``; ``candidates``; optional ``max_device_memory_bytes``
-and ``max_host_memory_bytes`` budgets; ``objective_metric`` (default
-``examples_per_second``); ``objective_tolerance_fraction`` (default 0.1, ties within
-it prefer the simpler candidate); ``device``.
+**Produces**: `{"selected", "trials", "policy", "environment", "environment_digest"}`: the chosen
+execution settings with derived `accumulate_grad_batches`, every trial with its
+measurement and `admissible`/`rejected` status, and the selection policy.
+
+**Parameters**: `target_effective_batch_size`; `candidates`; optional `max_device_memory_bytes`
+and `max_host_memory_bytes` budgets; `objective_metric` (default
+`examples_per_second`); `objective_tolerance_fraction` (default 0.1, ties within
+it prefer the simpler candidate); `device`.
 
 **Devices**: CPU or CUDA; out-of-memory candidates are rejected, never retried on another device.
 
@@ -40,7 +43,6 @@ fixed. Selection is benchmark-noise sensitive inside the tolerance band.
 ...     return {
 ...         "examples_per_second": 100.0 * candidate["batch_size"],
 ...         "peak_device_memory_bytes": 0,
-...         "peak_host_memory_bytes": 0,
 ...     }
 >>> evidence = calibrate_execution(
 ...     benchmark,
@@ -54,19 +56,21 @@ fixed. Selection is benchmark-noise sensitive inside the tolerance band.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
-- real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
+- real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
-### `dsio.experimental.telemetry:log_phase_evidence`
+### `dsio.experimental.telemetry`
 
-Log one phase's consumer-owned resource artifact and native MLflow metrics. — **experimental**; real uses: 2 (child-mind, parkinsons-fog).
+#### `dsio.experimental.telemetry:log_phase_evidence`
+
+Log one phase's consumer-owned resource artifact and native MLflow metrics. — **experimental**; real uses: 2 (child_mind, parkinsons_fog).
 
 **Consumes**: An active MLflow run ID, the :func:`measure_phase` evidence and the consumer's own
 measurements (rows, bytes, examples).
 
-**Produces**: ``outputs/<namespace>-telemetry.json`` and ``scale.<namespace>.*`` MLflow metrics.
+**Produces**: `outputs/<namespace>-telemetry.json` and `scale.<namespace>.*` MLflow metrics.
 
-**Parameters**: ``run_id``; ``namespace``; ``evidence``; ``measurements``.
+**Parameters**: `run_id`; `namespace`; `evidence`; `measurements`.
 
 **Devices**: Device-independent.
 
@@ -90,23 +94,23 @@ True
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
-### `dsio.experimental.telemetry:measure_phase`
+#### `dsio.experimental.telemetry:measure_phase`
 
-Measure one phase without introducing a DSIO telemetry abstraction. — **experimental**; real uses: 2 (child-mind, parkinsons-fog).
+Measure one phase without introducing a DSIO telemetry abstraction. — **experimental**; real uses: 2 (child_mind, parkinsons_fog).
 
-**Consumes**: A phase name; the ``with`` block is the measured work.
+**Consumes**: A phase name; the `with` block is the measured work.
 
-**Produces**: A dict filled on exit: ``phase``, ``elapsed_seconds``,
-``peak_process_tree_rss_bytes`` (sampled over all threads' child processes),
-``cuda`` (peak allocated/reserved bytes and utilization when requested),
-``measurement_method`` and ``cache_state``.
+**Produces**: A dict filled on exit: `phase`, `elapsed_seconds`,
+`peak_process_tree_rss_bytes` (sampled over all threads' child processes),
+`cuda` (peak allocated/reserved bytes and utilization when requested),
+`measurement_method` and `cache_state`.
 
-**Parameters**: ``phase``; ``cuda_device`` (None for CPU-only); ``sample_interval_seconds`` (0.1);
-``proc_root`` (``"/proc"``).
+**Parameters**: `phase`; `cuda_device` (None for CPU-only); `sample_interval_seconds` (0.1);
+`proc_root` (`"/proc"`).
 
-**Devices**: CPU always; CUDA when ``cuda_device`` is given, failing closed if unavailable.
+**Devices**: CPU always; CUDA when `cuda_device` is given, failing closed if unavailable.
 
-**Limitations**: Linux ``/proc`` RSS sampling only; the OS page cache is uncontrolled.
+**Limitations**: Linux `/proc` RSS sampling only; the OS page cache is uncontrolled.
 
 **Example**
 
@@ -122,35 +126,76 @@ Measure one phase without introducing a DSIO telemetry abstraction. — **experi
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
-### `dsio.experimental.training:calibrate_training_execution`
+### `dsio.experimental.training`
 
-Calibrate the real loader/model/objective while keeping the effective batch fixed. — **experimental**; real uses: 2 (child-mind, parkinsons-fog).
+#### `dsio.experimental.training:calibrate_training_execution`
 
-**Consumes**: ``module_factory()`` returning a fresh ``DsioModule`` and
-``data_module_factory(batch_size, num_workers, pin_memory, prefetch_factor)``
-returning a ``DsioDataModule``: the project's real model, objective and data.
+Calibrate the real loader/model/objective while keeping the effective batch fixed. — **experimental**; real uses: 2 (child_mind, parkinsons_fog).
+
+**Consumes**: `module_factory()` returning a fresh `DsioModule` whose `configure_optimizers`
+returns a bare optimizer, and `data_module_factory(candidate)` taking one candidate
+mapping (`batch_size`, `num_workers`, `pin_memory`, `prefetch_factor`) and
+returning an object with `setup(stage)` and a `train_dataloader()` over a sized
+dataset whose batches carry `sample_id`: the project's real model, objective and
+data.
 
 **Produces**: The :func:`~dsio.experimental.execution.calibrate_execution` evidence, measured by
-short warm-up and timed optimizer steps on the real training path.
+short warm-up and timed optimizer steps on the real training path; each trial's
+measurement adds `projected_examples_per_second`, `startup_seconds`,
+`peak_process_tree_rss_bytes` and GPU utilization.
 
-**Parameters**: ``seed``; ``accelerator`` (``"cpu"`` or ``"cuda"``); ``expected_epochs``;
-``configuration`` with ``target_effective_batch_size`` and optional
-``warmup_effective_batches`` (1), ``measure_effective_batches`` (10), ``candidates``
-and memory budgets.
+**Parameters**: `seed`; `accelerator` (`"cpu"`, `"cuda"` or `"auto"`);
+`expected_epochs`; `configuration` with `target_effective_batch_size` and
+optional `warmup_effective_batches` (1), `measure_effective_batches` (10),
+`candidates` (derived from the target when omitted),
+`max_device_memory_fraction` (0.8) and `max_host_memory_fraction` (0.5).
 
 **Devices**: CPU or CUDA; fails closed when CUDA is requested but unavailable.
 
-**Limitations**: Loader workers import the full training stack, so worker count trades host memory
-against throughput; benchmarks are seconds long, not full epochs.
+**Limitations**: Requires an optimizer without a scheduler; loader workers import the full training
+stack, so worker count trades host memory against throughput; benchmarks are
+seconds long, not full epochs, and selection is timing-sensitive within the
+tolerance band.
 
 **Example**
 
 ```python
->>> configuration = {"target_effective_batch_size": 64, "measure_effective_batches": 10}
->>> calibrate_training_execution(  # doctest: +SKIP
-...     build_module, build_data_module,
-...     seed=7, accelerator="cuda", expected_epochs=2, configuration=configuration,
+>>> import torch
+>>> from torch.utils.data import DataLoader
+>>> from dsio.experimental.model import LossObjective
+>>> from dsio.model.module import DsioModule
+>>> rows = [
+...     {"sample_id": f"s{i}", "x": torch.ones(4), "y": torch.ones(1)} for i in range(32)
+... ]
+>>> class Rows:
+...     def __init__(self, candidate):
+...         self.candidate = candidate
+...     def setup(self, stage):
+...         pass
+...     def train_dataloader(self):
+...         return DataLoader(rows, batch_size=self.candidate["batch_size"])
+>>> def build_module():
+...     return DsioModule(
+...         model=torch.nn.Linear(4, 1),
+...         objective=LossObjective(torch.nn.MSELoss()),
+...         optimizer_factory=torch.optim.SGD,
+...         optimizer_parameters={"lr": 0.01},
+...     )
+>>> evidence = calibrate_training_execution(
+...     build_module,
+...     Rows,
+...     seed=7,
+...     accelerator="cpu",
+...     expected_epochs=1,
+...     configuration={
+...         "target_effective_batch_size": 8,
+...         "measure_effective_batches": 2,
+...         "candidates": [{"batch_size": 8}, {"batch_size": 4}],
+...     },
 ... )
+>>> selected = evidence["selected"]
+>>> selected["batch_size"] * selected["accumulate_grad_batches"]
+8
 ```
 
 **Evidence**:
@@ -158,20 +203,20 @@ against throughput; benchmarks are seconds long, not full epochs.
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
-### `dsio.experimental.training:log_calibration`
+#### `dsio.experimental.training:log_calibration`
 
-Record the complete calibration artifact and dashboard-friendly MLflow series. — **experimental**; real uses: 2 (child-mind, parkinsons-fog).
+Record the complete calibration artifact and dashboard-friendly MLflow series. — **experimental**; real uses: 2 (child_mind, parkinsons_fog).
 
 **Consumes**: An active MLflow run ID and the evidence returned by
 :func:`calibrate_training_execution`, whose trial measurements carry
-``examples_per_second``, ``projected_examples_per_second``,
-``peak_device_memory_bytes``, ``peak_process_tree_rss_bytes`` and
-``gpu_utilization_mean_percent``.
+`examples_per_second`, `projected_examples_per_second`,
+`peak_device_memory_bytes`, `peak_process_tree_rss_bytes` and
+`gpu_utilization_mean_percent`.
 
-**Produces**: ``execution/calibration.json``, ``calibration.selected.*`` and
-``calibration.environment_digest`` params, and one metric step per trial.
+**Produces**: `execution/calibration.json`, `calibration.selected.*` and
+`calibration.environment_digest` params, and one metric step per trial.
 
-**Parameters**: ``run_id``; ``evidence``.
+**Parameters**: `run_id`; `evidence`.
 
 **Devices**: Device-independent.
 
@@ -189,7 +234,6 @@ Record the complete calibration artifact and dashboard-friendly MLflow series. �
 ...         "examples_per_second": float(candidate["batch_size"]),
 ...         "projected_examples_per_second": float(candidate["batch_size"]),
 ...         "peak_device_memory_bytes": 0,
-...         "peak_host_memory_bytes": 0,
 ...         "peak_process_tree_rss_bytes": 0,
 ...         "gpu_utilization_mean_percent": 0.0,
 ...     }
@@ -220,6 +264,7 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.data.samples:StoredSamples` | Decode whole canonical-store samples into identity-bearing tensor items. | — |
 | `dsio.experimental.data.samples:stored_samples` | Whole-sample factory: one item per persisted sample. | — |
 | `dsio.experimental.data.windows:WindowDataset` | Read selected index positions as raw, identity-bearing tensor windows. | — |
+| `dsio.experimental.eval.ess:autocorrelation` | Sample autocorrelation at lags 0..max_lag. Lag 0 is 1 by definition. | — |
 | `dsio.experimental.eval.ess:effective_sample_size` | How many independent observations a correlated series is worth. | — |
 | `dsio.experimental.inference.outputs:TensorOutput` | Name one native tensor model output without changing it. | supervised |
 | `dsio.experimental.inference.outputs:validate_tensor_prediction` | Require the standard prediction field to be a finite tensor. | self_supervised, supervised |
@@ -228,26 +273,26 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.model.chain:export_encoder` | Export the encoder portion of a DSio module configured with `ComponentChain`. | — |
 | `dsio.experimental.model.components:Conv1dEncoder` | Strided dilated convolutions with global pooling. | — |
 | `dsio.experimental.model.components:CrossEntropy` | Cross-entropy that accepts either hard integer labels or soft ratios. | — |
-| `dsio.experimental.model.components:EmbeddingEncoder` | Token ids to a pooled representation. The baseline any sequence model over text | — |
+| `dsio.experimental.model.components:EmbeddingEncoder` | Token ids to a pooled representation. The baseline any sequence model over text must beat, and the reason a token corpus needs a backbone of its own at all. | — |
 | `dsio.experimental.model.components:FixedStandardize` | Standardise by statistics supplied from outside — fitted on the train fold only. | — |
 | `dsio.experimental.model.components:IdentityAugmentation` | Generator-aware identity for an explicitly configured two-view baseline. | — |
 | `dsio.experimental.model.components:InstanceStandardize` | Per-window, per-channel standardisation. | — |
 | `dsio.experimental.model.components:Jitter` | Additive Gaussian noise, scaled per channel by that channel's own spread. | self_supervised |
 | `dsio.experimental.model.components:MLP1d` | Flatten and project. The baseline every other backbone must beat. | — |
 | `dsio.experimental.model.components:MaskedMSE` | Reconstruction loss for a target that carries NaN outside masked positions. | — |
-| `dsio.experimental.model.components:NTXent` | SimCLR's contrastive loss over a batch built by | self_supervised |
+| `dsio.experimental.model.components:NTXent` | SimCLR's contrastive loss over a batch built by :class:`~dsio.experimental.train.augmentation.TwoView`. | self_supervised |
 | `dsio.experimental.model.components:RandomScale` | Multiply each channel by a random gain, for amplitude-invariant features. | — |
-| `dsio.experimental.model.components:VICReg` | Variance-Invariance-Covariance regularisation: no negatives, no momentum encoder — | — |
+| `dsio.experimental.model.components:VICReg` | Variance-Invariance-Covariance regularisation: no negatives, no momentum encoder — collapse is prevented by an explicit variance term instead. | — |
 | `dsio.experimental.model.components:bce_loss` |  | — |
 | `dsio.experimental.model.components:identity_head` | For pretraining, where the loss consumes features directly. | — |
 | `dsio.experimental.model.components:identity_transform` |  | — |
 | `dsio.experimental.model.components:linear_head` |  | — |
-| `dsio.experimental.model.components:mae_decoder_head` | MAE's reconstruction head: predict every position of the original window, back in | — |
+| `dsio.experimental.model.components:mae_decoder_head` | MAE's reconstruction head: predict every position of the original window, back in the ``[channels, length]`` shape the input arrived in. | — |
 | `dsio.experimental.model.components:mlp_head` |  | — |
 | `dsio.experimental.model.components:mse_loss` |  | — |
 | `dsio.experimental.model.components:no_augmentation` |  | — |
-| `dsio.experimental.model.components:simclr_projector_head` | SimCLR's projection head: NT-Xent compares windows in this space, not the encoder's | — |
-| `dsio.experimental.model.components:vicreg_projector_head` | VICReg's projection head, moved here from the deleted ``ssl.methods.VICReg. | — |
+| `dsio.experimental.model.components:simclr_projector_head` | SimCLR's projection head: NT-Xent compares windows in this space, not the encoder's own feature space — moved here from the deleted ``ssl.methods.SimCLR.build_head``. | — |
+| `dsio.experimental.model.components:vicreg_projector_head` | VICReg's projection head, moved here from the deleted ``ssl.methods.VICReg. build_head``. The ``BatchNorm1d`` matters: :class:`VICReg`'s variance term assumes a projector that does not itself normalise away the collapse it exists to detect. | — |
 | `dsio.experimental.model.masking:CausalMask` | Hide the final fraction of the window: forecasting as a pretext task. | — |
 | `dsio.experimental.model.masking:PatchMask` | Mask whole non-overlapping patches, the MAE shape. | — |
 | `dsio.experimental.model.masking:RandomMask` | Mask individual timesteps uniformly at random. | — |
@@ -255,13 +300,35 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.model.masking:apply_mask` | Return ``x`` with hidden positions replaced, broadcasting ``hidden`` over channels. | — |
 | `dsio.experimental.train.augmentation:MaskedReconstruction` | Create a masked input and NaN-sentinel reconstruction target on the input device. | — |
 | `dsio.experimental.train.augmentation:TwoView` | Create two reproducible augmented views and their symmetric pair indices. | self_supervised |
+| `dsio.experimental.train.callbacks:Encodable` | What a probe needs from a module: features, a device, and a training flag. | — |
 | `dsio.experimental.train.callbacks:OnlineProbe` | Fit a linear model on frozen features and report what it scores. | — |
 | `dsio.experimental.train.callbacks:RankMeMonitor` | Log effective rank without needing labels, so it works on any pretraining corpus. | — |
+| `dsio.experimental.train.callbacks:embed` | Encode a loader into features and labels, leaving the module as it was found. | — |
 | `dsio.experimental.train.callbacks:rankme` | Effective rank of an embedding matrix, from the entropy of its singular values. | — |
 
 ## Spine
 
-Composition roots and evidence machinery every block plugs into.
+Composition roots, data infrastructure and evidence machinery every block plugs into.
+
+### `dsio.config`
+
+| Name | Summary |
+|---|---|
+| `dsio.config.components:ComponentConfig` | The plain serializable shape accepted by resolution and provenance. |
+| `dsio.config.components:resolve_component` | Import, construct, and type-check one configured native component. |
+
+### `dsio.contracts`
+
+| Name | Summary |
+|---|---|
+| `dsio.contracts.base:DsioModel` | Immutable, strictly-validated base for configs and value objects. |
+| `dsio.contracts.hashing:canonical_json` | Return a deterministic JSON encoding of ``value``. |
+| `dsio.contracts.hashing:sha256_of` | Return the full hex sha256 of ``value``'s canonical encoding. |
+| `dsio.contracts.hashing:sha256_of_bytes` | Return the hex sha256 of raw bytes (artifacts, lockfiles, patches). |
+| `dsio.contracts.hashing:sha256_of_file` | Return the hex sha256 of a file, read incrementally so large artifacts stream. |
+| `dsio.contracts.hashing:short_digest` | Return a short, human-quotable digest for cache directories and run ids. |
+| `dsio.contracts.io:atomic_write` | Write ``payload`` to ``path`` atomically and durably. |
+| `dsio.contracts.io:fsync_dir` | Flush a directory entry so a rename or create survives a crash. |
 
 ### `dsio.data`
 
@@ -273,7 +340,16 @@ Composition roots and evidence machinery every block plugs into.
 | `dsio.data.loading.loaders:build_loader` | Build one seeded loader; workers use spawn so threaded orchestrators stay safe. |
 | `dsio.data.loading.module:DsioDataModule` | Replay one governed fold through deterministic, identity-preserving loaders. |
 | `dsio.data.splits.generate:generate` | Generate one normalized manifest through a known, non-registerable algorithm. |
+| `dsio.data.splits.models.fold:SplitFold` | One division of a corpus into named roles. |
+| `dsio.data.splits.models.manifest:SplitFile` | Every fold and all provenance for one governed split family. |
 | `dsio.data.splits.validation:validate` | Fail unless ``manifest`` is an exact, leakage-safe division of ``examples``. |
+| `dsio.data.store.builder:SignalStoreBuilder` | Write one store; read behavior is deliberately unavailable while building. |
+| `dsio.data.store.layout:Entity` | One stable storage sample occupying contiguous rows in the payload. |
+| `dsio.data.store.layout:StoreManifest` | Committed description of one immutable store. |
+| `dsio.data.store.layout:StoredSample` | The stable public value returned for one persisted sample. |
+| `dsio.data.store.reader:SignalStore` | The single public read interface for immutable numeric samples and row windows. |
+| `dsio.data.store.reader:data_root` | Return the configured store root without creating it. |
+| `dsio.data.store.reader:list_stores` |  |
 
 ### `dsio.eval`
 
@@ -298,6 +374,31 @@ Composition roots and evidence machinery every block plugs into.
 | `dsio.model.module:DsioModule` | Compose one PyTorch model and objective behind native Lightning lifecycle hooks. |
 | `dsio.model.module:Objective` | One task step: execute a model on a batch and return loss plus metrics. |
 
+### `dsio.testing`
+
+| Name | Summary |
+|---|---|
+| `dsio.testing.examples_contract:check_examples_contract` | Assert ``examples`` satisfies every obligation the split layer relies on. |
+| `dsio.testing.reader_contract:check_reader_contract` | Assert ``open_reader`` is safe to hand to a DataLoader worker. |
+
+### `dsio.tracking`
+
+| Name | Summary |
+|---|---|
+| `dsio.tracking.attempt:attempt` | Create one top-level MLflow Run for the current Prefect task attempt. |
+| `dsio.tracking.cache:prefect_cache_key` | Derive a Prefect cache key from pure serializable task parameters. |
+| `dsio.tracking.evidence.references:evidence_uri` | Build an immutable MLflow Runs artifact URI from exact identifiers. |
+| `dsio.tracking.evidence.resolution:require_evidence` | Validate and return one exact immutable MLflow Run reference. |
+| `dsio.tracking.evidence.resolution:resolve_evidence` | Return the newest verified native Run for an identity, or a cache miss. |
+| `dsio.tracking.evidence.splits:canonical_dataset_digest` | Return DSIO's full digest while validating MLflow's shortened identity. |
+| `dsio.tracking.evidence.splits:load_split_evidence` | Verify a split artifact and link its native dataset into a consumer Run. |
+| `dsio.tracking.evidence.splits:record_split_evidence` | Log one native dataset input and its content-addressed split manifest. |
+| `dsio.tracking.execution.capture:capture_execution` | Return identity-bearing execution facts and an optional reconstructible patch. |
+| `dsio.tracking.experiment:resolve_experiment` | Resolve or create a native MLflow Experiment without creating a Run. |
+| `dsio.tracking.provenance:execution_identity` | Hash the complete safe identity document for one experiment node. |
+| `dsio.tracking.provenance:normalize` | Return canonical JSON-safe configuration with declared fields removed. |
+| `dsio.tracking.provenance:record_provenance` | Record one safe identity document on an explicit native MLflow Run. |
+
 ### `dsio.train`
 
 | Name | Summary |
@@ -311,7 +412,7 @@ Composition roots and evidence machinery every block plugs into.
 | `dsio.train.capabilities:representative_batch` | Read one real batch through a throwaway loader, leaving training untouched. |
 | `dsio.train.capabilities:resolve_training_capabilities` | Describe Lightning's resolved execution path within the stable matrix. |
 | `dsio.train.trainer:TrainerConfig` | Lightning trainer settings, restricted to what changes a result or its cost. |
-| `dsio.train.trainer:build_callbacks` | Construct the checkpoint/early-stopping callbacks a fold needs, letting any |
+| `dsio.train.trainer:build_callbacks` | Construct the checkpoint/early-stopping callbacks a fold needs, letting any construction failure propagate. |
 | `dsio.train.trainer:build_trainer` | Construct Lightning's trainer from the shared runner configuration. |
 | `dsio.train.trainer:sanitise_metric` | Make a metric name safe inside a checkpoint filename template. |
 
@@ -345,19 +446,19 @@ Composition roots and evidence machinery every block plugs into.
 Consumer-local code that a warehouse block is planned to replace, or that stays
 local on purpose.
 
-| Candidate | Consumers | Reason |
-|---|---|---|
-| Evaluation array builders | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Array assembly from the training collation (#5), Story 7.6. |
-| Hash-bucket tokenizer | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
-| Labelled-example attribute filter | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
-| Local nn.Module models | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Backbones, heads, adapters and compositions (#7-#17), Stories 7.3, 8.3-8.5, 9.4. |
-| Local objectives | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Supervised, masked dense and reconstruction objectives (#18-#20), Stories 7.4, 8.2. |
-| Pad collate functions | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii` | Pad collator (#3), Story 8.1. |
-| Prediction normalizers and validators | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6. |
-| Stored-sample Dataset classes | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Field-mapping dataset (#1), Story 7.1. |
-| Streaming evaluation with participant aggregation | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
-| Train and export task wiring | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |
-| Train-fold statistics and weight fitting | `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Training-role fitters (#4a-#4c), Stories 7.2, 9.2, 9.3. |
-| Verified encoder handoff | `reference_projects/kaggle/digit_recognizer` | Stays local - pretrained-weights path is deferred to v2. |
-| Well feature engineering | `reference_projects/kaggle/rogii` | Stays local - domain feature mapping. |
-| Window Dataset class | `reference_projects/kaggle/child_mind/sequence` | Window dataset with weights and groups (#2), Story 9.1. |
+| Candidate | Uses | Consumers | Reason |
+|---|---|---|---|
+| Evaluation array builders | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Array assembly from the training collation (#5), Story 7.6. |
+| Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
+| Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
+| Local nn.Module models | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Backbones, heads, adapters and compositions (#7-#17), Stories 7.3, 8.3-8.5, 9.4. |
+| Local objectives | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Supervised, masked dense and reconstruction objectives (#18-#20), Stories 7.4, 8.2. |
+| Pad collate functions | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii` | Pad collator (#3), Story 8.1. |
+| Prediction normalizers and validators | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6. |
+| Stored-sample Dataset classes | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Field-mapping dataset (#1), Story 7.1. |
+| Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
+| Train and export task wiring | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |
+| Train-fold statistics and weight fitting | 3 | `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Training-role fitters (#4a-#4c), Stories 7.2, 9.2, 9.3. |
+| Verified encoder handoff | 1 | `reference_projects/kaggle/digit_recognizer` | Stays local - pretrained-weights path is deferred to v2. |
+| Well feature engineering | 1 | `reference_projects/kaggle/rogii` | Stays local - domain feature mapping. |
+| Window Dataset class | 1 | `reference_projects/kaggle/child_mind/sequence` | Window dataset with weights and groups (#2), Story 9.1. |

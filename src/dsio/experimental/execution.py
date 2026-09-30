@@ -36,9 +36,10 @@ def calibrate_execution(
 
     Consumes:
         A ``benchmark(candidate) -> measurement`` callable whose measurement reports the
-        objective metric plus ``peak_device_memory_bytes`` and ``peak_host_memory_bytes``,
-        and execution-only candidate mappings (``batch_size``, ``num_workers``,
-        ``pin_memory``, ``prefetch_factor``); each ``batch_size`` must divide
+        positive objective metric and ``peak_device_memory_bytes`` (plus
+        ``peak_process_tree_rss_bytes`` when ``max_host_memory_bytes`` is set), and
+        execution-only candidate mappings (``batch_size``, ``num_workers``, ``pin_memory``,
+        ``prefetch_factor``); each ``batch_size`` must divide
         ``target_effective_batch_size``.
 
     Produces:
@@ -64,7 +65,6 @@ def calibrate_execution(
         ...     return {
         ...         "examples_per_second": 100.0 * candidate["batch_size"],
         ...         "peak_device_memory_bytes": 0,
-        ...         "peak_host_memory_bytes": 0,
         ...     }
         >>> evidence = calibrate_execution(
         ...     benchmark,

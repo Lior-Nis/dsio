@@ -44,6 +44,24 @@ so that I can compose from what exists instead of re-implementing it.
 - [x] Task 5: `tests/test_component_catalog.py`: rules hold, the catalog is current, all three kinds are present, Examples execute, and each validator rule has a negative test.
 - [x] Task 6: Public surface. `dsio.train.trainer`, `dsio.train.artifacts` and `dsio.experimental.telemetry` declare `__all__`. The README gains "Find a component before writing one", linking the catalog, conventions and admission process.
 
+- [x] Task 7: Review follow-ups. The review's critical finding: the stable rule never saw real code, because `collect()` only walked the spine list and experimental. Fixes:
+  - [x] 7.1 `collect()` walks **every** `dsio` module. Stable modules are spine only if listed in `SPINE_MODULES`, and everything else is a component, so a promoted block cannot skip the stable rules. A test drops a spine module and asserts its names become checked components.
+  - [x] 7.2 Legacy is **frozen**. Only the `LEGACY` set in `tools/catalog.py` may be legacy, and a legacy component with a real use fails until it drops legacy and gains sections.
+  - [x] 7.3 Real uses must be Kaggle consumers (`reference_projects/kaggle/...`). The unrelated-use group is **derived from the path**, so both CMI consumers count once. The consumer must reference the component, or its `via`. Only uses that pass every check count toward groups.
+  - [x] 7.4 Every experimental module declares `__all__`, and any public class or function missing from it is reported. The missing `autocorrelation`, `embed` and `Encodable` are now catalogued, as legacy.
+  - [x] 7.5 Examples must execute a statement that calls the component itself. `calibrate_training_execution` now has a runnable Example (a real `DsioModule` and a small data module), which is also its first direct test.
+  - [x] 7.6 Docstrings corrected against the code:
+    - `calibrate_execution`'s measurement keys (`peak_process_tree_rss_bytes` only when a host budget is set; there is no `peak_host_memory_bytes`);
+    - `calibrate_training_execution` takes `data_module_factory(candidate)`, memory budgets are fractions (0.8/0.5), it accepts `accelerator="auto"`, and requires a bare optimizer, a sized dataset and `sample_id`.
+  - [x] 7.7 Rendering:
+    - components are grouped by package;
+    - candidates show a use count;
+    - summaries use the first paragraph;
+    - reST backticks are converted for Markdown;
+    - `--check` prints a diff of a stale catalog;
+    - repeated section headers are reported;
+    - `tools/` is type-checked by mypy.
+
 ## Dev Notes
 
 - **Section scope, a deliberate decision.** Full sections are required only for non-legacy components. The 42 legacy components are catalogued with summary and status, and gain sections when a warehouse story reshapes them for their first real use. Writing sections now for components Epics 7–9 will replace would be waste, which is why Story 6.5 went first. Spine entries are catalogued for discovery; they are not warehouse components (`CONTEXT.md`).

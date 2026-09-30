@@ -23,3 +23,8 @@ def entity_attribute_labels(store: SignalStore, attribute: str) -> np.ndarray:
             ) from None
         labels[entity.start_row : entity.end_row] = value
     return labels
+
+
+__all__ = [
+    "entity_attribute_labels",
+]

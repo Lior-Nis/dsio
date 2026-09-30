@@ -208,3 +208,12 @@ class RankMeMonitor(Callback):
 def _hard(labels: np.ndarray) -> np.ndarray:
     """Binarise soft window labels for a probe, which needs classes rather than ratios."""
     return (labels > 0.5).astype(np.int64) if labels.dtype.kind == "f" else labels.astype(np.int64)
+
+
+__all__ = [
+    "Encodable",
+    "OnlineProbe",
+    "RankMeMonitor",
+    "embed",
+    "rankme",
+]

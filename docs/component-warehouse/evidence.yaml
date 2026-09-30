@@ -2,11 +2,14 @@
 #
 # One entry per public component callable. Lives outside src/dsio because the admission
 # audit rejects consumer names in DSio source. Rules (tools/catalog.py --check):
-# - legacy: true  -> pre-1.0 legacy experimental (docs/component-admission.md); must live
-#   in dsio.experimental; no docstring sections required yet.
+# - legacy: true  -> pre-1.0 legacy experimental (docs/component-admission.md); only the
+#   frozen tools/catalog.py LEGACY list may be legacy, never with a real use.
 # - otherwise experimental needs >= 1 real use; stable needs >= 2 real uses in distinct
-#   `group`s plus `approval`. kind: real (a consumer experiment) | fixture (synthetic).
-# - consumer/test paths must exist; runs must be immutable MLflow run URIs.
+#   groups plus `approval`. A real use's group is derived from its Kaggle consumer path
+#   (reference_projects/kaggle/<group>/...), so both CMI consumers count once.
+#   kind: real (a Kaggle consumer) | fixture (synthetic reference).
+# - consumer/test paths must exist, the consumer must reference the component (or `via`),
+#   and runs must be immutable MLflow run URIs.
 # - `via` names the component through which a use reaches this one.
 
 dsio.experimental.data.labels:entity_attribute_labels:
@@ -21,6 +24,9 @@ dsio.experimental.data.samples:stored_samples:
 dsio.experimental.data.windows:WindowDataset:
   legacy: true
   uses: []
+dsio.experimental.eval.ess:autocorrelation:
+  legacy: true
+  uses: []
 dsio.experimental.eval.ess:effective_sample_size:
   legacy: true
   uses: []
@@ -29,14 +35,12 @@ dsio.experimental.execution:calibrate_execution:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
-    group: parkinsons-fog
     via: dsio.experimental.training:calibrate_training_execution
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
-    group: child-mind
     via: dsio.experimental.training:calibrate_training_execution
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d
@@ -156,13 +160,11 @@ dsio.experimental.telemetry:log_phase_evidence:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
-    group: parkinsons-fog
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
-    group: child-mind
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d
 dsio.experimental.telemetry:measure_phase:
@@ -170,13 +172,11 @@ dsio.experimental.telemetry:measure_phase:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
-    group: parkinsons-fog
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
-    group: child-mind
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d
 dsio.experimental.train.augmentation:MaskedReconstruction:
@@ -188,10 +188,16 @@ dsio.experimental.train.augmentation:TwoView:
   - consumer: reference_projects/self_supervised
     test: tests/reference_flows/test_self_supervised_flow.py
     kind: fixture
+dsio.experimental.train.callbacks:Encodable:
+  legacy: true
+  uses: []
 dsio.experimental.train.callbacks:OnlineProbe:
   legacy: true
   uses: []
 dsio.experimental.train.callbacks:RankMeMonitor:
+  legacy: true
+  uses: []
+dsio.experimental.train.callbacks:embed:
   legacy: true
   uses: []
 dsio.experimental.train.callbacks:rankme:
@@ -202,13 +208,11 @@ dsio.experimental.training:calibrate_training_execution:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
-    group: parkinsons-fog
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
-    group: child-mind
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d
 dsio.experimental.training:log_calibration:
@@ -216,12 +220,10 @@ dsio.experimental.training:log_calibration:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
-    group: parkinsons-fog
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
-    group: child-mind
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d
