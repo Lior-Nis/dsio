@@ -32,26 +32,26 @@ def test_true_means_hidden(strategy, signal: torch.Tensor) -> None:
     the positions it was meant to predict — a leak whose only symptom is a suspiciously
     good reconstruction loss.
     """
-    mask = strategy(signal)
-    masked = apply_mask(signal, mask, value=0.0)
-    assert (masked[:, :, mask[0]][0] == 0).all() or not mask[0].any()
-    kept = ~mask
+    hidden = strategy(signal)
+    masked = apply_mask(signal, hidden, value=0.0)
+    assert (masked[:, :, hidden[0]][0] == 0).all() or not hidden[0].any()
+    kept = ~hidden
     assert torch.equal(masked[0][:, kept[0]], signal[0][:, kept[0]])
 
 
 @pytest.mark.parametrize("strategy", ALL, ids=lambda s: type(s).__name__)
 def test_mask_shape_is_per_sample_over_time(strategy, signal: torch.Tensor) -> None:
-    mask = strategy(signal)
-    assert mask.shape == (8, 256)
-    assert mask.dtype == torch.bool
+    hidden = strategy(signal)
+    assert hidden.shape == (8, 256)
+    assert hidden.dtype == torch.bool
 
 
 @pytest.mark.parametrize("strategy", ALL[:3], ids=lambda s: type(s).__name__)
 def test_masks_differ_between_samples(strategy, signal: torch.Tensor) -> None:
-    """A batch-wide mask correlates what every sample must infer, which quietly lowers the
+    """A batch-wide hidden correlates what every sample must infer, which quietly lowers the
     difficulty and makes batch size a hyperparameter of the objective."""
-    mask = strategy(signal)
-    assert not torch.equal(mask[0], mask[1])
+    hidden = strategy(signal)
+    assert not torch.equal(hidden[0], hidden[1])
 
 
 @pytest.mark.parametrize(
@@ -66,8 +66,8 @@ def test_span_mask_produces_contiguous_runs(signal: torch.Tensor) -> None:
     """Contiguity is the point: a randomly hidden timestep on an oversampled signal is
     recoverable by interpolation, so the model learns a smoother rather than a
     representation."""
-    mask = SpanMask(0.3, span=32)(signal)
-    row = mask[0]
+    hidden = SpanMask(0.3, span=32)(signal)
+    row = hidden[0]
     transitions = (row[1:] != row[:-1]).sum().item()
     assert transitions <= 2 * (256 // 32), "too many boundaries to be spans"
     assert row.any()
@@ -75,19 +75,19 @@ def test_span_mask_produces_contiguous_runs(signal: torch.Tensor) -> None:
 
 def test_patch_mask_hides_whole_patches(signal: torch.Tensor) -> None:
     """Masking at a finer granularity than the model's tokens leaks each token's target."""
-    mask = PatchMask(0.5, patch=32)(signal)
-    for patch in mask[0].split(32):
+    hidden = PatchMask(0.5, patch=32)(signal)
+    for patch in hidden[0].split(32):
         assert patch.all() or not patch.any()
 
 
 def test_causal_mask_hides_only_the_tail(signal: torch.Tensor) -> None:
-    mask = CausalMask(0.25)(signal)
-    assert not mask[:, :192].any()
-    assert mask[:, 192:].all()
+    hidden = CausalMask(0.25)(signal)
+    assert not hidden[:, :192].any()
+    assert hidden[:, 192:].all()
 
 
 def test_causal_mask_is_deterministic(signal: torch.Tensor) -> None:
-    """The one strategy whose mask does not depend on the generator."""
+    """The one strategy whose hidden does not depend on the generator."""
     strategy = CausalMask(0.25)
     assert torch.equal(strategy(signal), strategy(signal))
 
@@ -101,9 +101,9 @@ def test_apply_mask_never_mutates_its_input(signal: torch.Tensor) -> None:
 
 
 def test_apply_mask_broadcasts_over_channels(signal: torch.Tensor) -> None:
-    mask = torch.zeros(8, 256, dtype=torch.bool)
-    mask[:, :10] = True
-    masked = apply_mask(signal, mask)
+    hidden = torch.zeros(8, 256, dtype=torch.bool)
+    hidden[:, :10] = True
+    masked = apply_mask(signal, hidden)
     assert (masked[:, :, :10] == 0).all()
 
 

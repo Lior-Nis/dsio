@@ -32,6 +32,11 @@ class BatchInputs(TypedDict):
     x: Tensor
     row: Tensor
     view_id: NotRequired[list[str]]
+    # Reserved warehouse fields (docs/component-warehouse/conventions.md). `mask` is
+    # True = valid and is read by objectives and evaluation, never by the model.
+    mask: NotRequired[Tensor]
+    sample_weight: NotRequired[Tensor]
+    group: NotRequired[list[str]]
 
 
 class WindowBatch(BatchInputs):

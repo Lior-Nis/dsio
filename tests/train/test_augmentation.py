@@ -289,3 +289,21 @@ def test_masked_reconstruction_never_emits_or_overwrites_a_batch_mask() -> None:
     assert set(result) == set(batch)
     assert result["mask"] is valid
     assert "hidden" not in result
+
+
+def test_masked_reconstruction_hides_exactly_what_the_strategy_hides() -> None:
+    """Internal polarity: CausalMask hides the tail, so the tail is zeroed in ``x`` and is
+    the only finite part of ``y``; every visible position is NaN in ``y``."""
+    batch = {
+        "sample_id": ["a", "b"],
+        "x": torch.arange(1.0, 17.0).reshape(2, 1, 8),
+        "row": torch.tensor([0, 1]),
+    }
+    result = MaskedReconstruction(CausalMask(ratio=0.5), normalize_target=False)(
+        batch, seed=3, epoch=0, step=0, identity={"component": "causal"}
+    )
+
+    assert torch.equal(result["x"][..., 4:], torch.zeros(2, 1, 4))
+    assert torch.equal(result["x"][..., :4], batch["x"][..., :4])
+    assert torch.isnan(result["y"][..., :4]).all()
+    assert torch.equal(result["y"][..., 4:], batch["x"][..., 4:])

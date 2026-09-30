@@ -13,9 +13,12 @@ The table's type and shape column gives the target dtype and tensor shape for ea
 | `sample_id` | ordered identities | Required. Order is guarded by `DsioDataModule`. |
 | `x` | tensor | The **only** model input (Predictor, export and `predict_step` accept only `x`). |
 | `y` | tensor | Target. Absent for unlabelled items. |
-| `mask` | `bool`, broadcastable to the target's leading axes | **True = valid** (observed/scoreable). Consumed by objectives and evaluation, never by the model. Same polarity as `dsio.eval.evaluate(mask=...)`. |
+| `mask` | `bool` | **True = valid** (observed/scoreable). Consumed by objectives and evaluation, never by the model. `dsio.eval.evaluate(mask=...)` requires the target's exact shape, or every target axis except a final axis named by `target_names`; implicit broadcasting is rejected. |
+| `hidden` | `bool` `[B, T]` | **True = hidden**. A self-supervised corruption tensor, produced only by masking strategies. |
 | `sample_weight` | float `[B]` | Per-sample loss weight (see weighting rule). |
 | `group` | identities | Optional group membership used by group-weight fitting. |
+| `row` | integer `[B]` | Optional window/entity row index. Always present on `WindowDataset` items, and copied into predictions by `DsioModule.predict_step` when present. |
+| `view_id` | identities | Optional view identity set by two-view augmentation. |
 
 Rules:
 

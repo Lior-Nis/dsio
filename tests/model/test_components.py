@@ -155,7 +155,7 @@ def test_masked_mse_diagnostics_flags_a_copying_model() -> None:
 def test_masked_mse_rejects_a_target_with_nothing_to_reconstruct() -> None:
     prediction = torch.zeros(2, 1, 4)
     target = torch.full((2, 1, 4), float("nan"))
-    with pytest.raises(ValueError, match="no masked positions"):
+    with pytest.raises(ValueError, match="no hidden positions"):
         MaskedMSE()(prediction, target)
 
 
