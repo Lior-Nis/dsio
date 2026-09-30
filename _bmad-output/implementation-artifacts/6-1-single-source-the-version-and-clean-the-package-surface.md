@@ -1,6 +1,6 @@
 # Story 6.1: Single-source the version and clean the package surface
 
-Status: review
+Status: done
 
 ## Story
 

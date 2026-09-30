@@ -11,6 +11,7 @@ from tests.kaggle_portfolio.assertions import (
     assert_execution_evidence,
     assert_replay_run_ids_differ,
 )
+from tests.replay import assert_same_identities
 
 from dsio.contracts import sha256_of_bytes
 from dsio.data.loading import DsioDataModule
@@ -350,9 +351,16 @@ def test_child_mind_flow_trains_tabular_and_fused_models_with_replayable_evidenc
         return original(trainer, model, *args, **kwargs)
 
     monkeypatch.setattr(Trainer, "fit", record)
+    checkout_before = _checkout_status()
     with prefect_test_harness():
         result = child_mind_flow(str(child_mind_data), str(tmp_path / "work"), seed=17)
         replay = child_mind_flow(str(child_mind_data), str(tmp_path / "work"), seed=17)
+    # A flow that writes into the consumer checkout changes every later execution identity.
+    checkout_after = _checkout_status()
+    assert checkout_after == checkout_before, (
+        "the checkout changed while the flows ran (a flow wrote into it, or files were edited "
+        f"during the test):\nbefore:\n{checkout_before}\nafter:\n{checkout_after}"
+    )
 
     assert result["dataset_digest"] == replay["dataset_digest"]
     assert result["split_digest"] == replay["split_digest"]
@@ -367,7 +375,7 @@ def test_child_mind_flow_trains_tabular_and_fused_models_with_replayable_evidenc
         model = result["models"][mode]
         replay_model = replay["models"][mode]
         assert_replay_run_ids_differ(model, replay_model)
-        assert model["identities"] == replay_model["identities"]
+        assert_same_identities(model, replay_model)
         assert model["metrics"] == replay_model["metrics"]
         assert model["prediction"] == replay_model["prediction"]
         assert model["submission_bytes"] == replay_model["submission_bytes"]
@@ -401,3 +409,15 @@ def test_child_mind_flow_trains_tabular_and_fused_models_with_replayable_evidenc
             num_workers=0,
         )
         assert_downstream_evidence(model, tmp_path / f"{mode}-downstream")
+
+
+def _checkout_status() -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=Path(__file__).parents[2],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout

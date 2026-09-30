@@ -10,6 +10,7 @@ from tests.kaggle_portfolio.assertions import (
     assert_execution_evidence,
     assert_replay_run_ids_differ,
 )
+from tests.replay import assert_same_identities
 
 from dsio.contracts import sha256_of_bytes
 from dsio.data.loading import DsioDataModule
@@ -103,7 +104,7 @@ def test_store_sales_flow_trains_a_causal_multi_horizon_forecaster(
     assert np.isfinite(result["metrics"]["seasonal_naive_rmsle"])
     assert_replay_run_ids_differ(result, replay)
     assert result["split_digest"] == replay["split_digest"]
-    assert result["identities"] == replay["identities"]
+    assert_same_identities(result, replay)
     assert result["metrics"] == replay["metrics"]
     assert result["prediction"] == replay["prediction"]
     assert result["submission_bytes"] == replay["submission_bytes"]

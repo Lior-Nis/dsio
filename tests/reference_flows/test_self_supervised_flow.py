@@ -12,6 +12,7 @@ import pytest
 import torch
 from lightning import Trainer
 from mlflow import MlflowClient
+from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
@@ -265,7 +266,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         assert torch.equal(left["y"], right["y"])
         assert left["source_x"].shape[0] == 4
 
-    assert first["identities"] == second["identities"]
+    assert_same_identities(first, second)
     assert first["assignments"] == second["assignments"]
     np.testing.assert_array_equal(first["prediction"], second["prediction"])
     assert first["prediction"].shape == (len(first["test_sample_id"]), 1)

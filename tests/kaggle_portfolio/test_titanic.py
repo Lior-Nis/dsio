@@ -9,6 +9,7 @@ from tests.kaggle_portfolio.assertions import (
     assert_execution_evidence,
     assert_replay_run_ids_differ,
 )
+from tests.replay import assert_same_identities
 
 from dsio.contracts import sha256_of_bytes
 from dsio.data.loading import DsioDataModule
@@ -90,7 +91,7 @@ def test_titanic_flow_is_replayable_and_ticket_groups_do_not_leak(
     assert observed[0][3] == sorted(first["assignments"]["validate"])
     assert first["split_digest"] == second["split_digest"]
     assert first["assignments"] == second["assignments"]
-    assert first["identities"] == second["identities"]
+    assert_same_identities(first, second)
     assert first["metrics"] == second["metrics"]
     assert first["prediction"] == second["prediction"]
     assert first["submission_bytes"] == second["submission_bytes"]
