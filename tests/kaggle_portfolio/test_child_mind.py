@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
     assert_execution_evidence,
@@ -376,6 +377,7 @@ def test_child_mind_flow_trains_tabular_and_fused_models_with_replayable_evidenc
         replay_model = replay["models"][mode]
         assert_replay_run_ids_differ(model, replay_model)
         assert_same_identities(model, replay_model)
+        assert_golden_metrics(f"child_mind:{mode}", model["metrics"])
         assert model["metrics"] == replay_model["metrics"]
         assert model["prediction"] == replay_model["prediction"]
         assert model["submission_bytes"] == replay_model["submission_bytes"]

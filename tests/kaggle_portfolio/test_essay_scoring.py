@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import torch
 from mlflow import MlflowClient
+from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
     assert_execution_evidence,
@@ -111,6 +112,7 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
     assert_replay_run_ids_differ(result, replay)
     assert result["split_digest"] == replay["split_digest"]
     assert_same_identities(result, replay)
+    assert_golden_metrics("essay_scoring", result["metrics"])
     assert result["metrics"] == replay["metrics"]
     assert result["prediction"] == replay["prediction"]
     assert result["submission_bytes"] == replay["submission_bytes"]

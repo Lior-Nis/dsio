@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlparse
 import pytest
 import torch
 from mlflow import MlflowClient
+from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
     assert_execution_evidence,
@@ -208,6 +209,7 @@ def test_digit_flow_verifies_label_free_encoder_then_trains_a_frozen_classifier(
     assert result["split_digest"] == replay["split_digest"]
     assert result["encoder_digest"] == replay["encoder_digest"]
     assert_same_identities(result, replay)
+    assert_golden_metrics("digit_recognizer", result["metrics"])
     assert result["metrics"] == replay["metrics"]
     assert result["prediction"] == replay["prediction"]
     assert result["submission_bytes"] == replay["submission_bytes"]
