@@ -97,9 +97,7 @@ def test_admission_package_passes_its_own_static_policy() -> None:
         "from . import _private\n",
     ],
 )
-def test_from_import_cannot_hide_private_dsio_dependency(
-    tmp_path: Path, source: str
-) -> None:
+def test_from_import_cannot_hide_private_dsio_dependency(tmp_path: Path, source: str) -> None:
     assert any(message.startswith("stable-contract:") for message in _audit(tmp_path, source))
 
 
@@ -220,9 +218,7 @@ def test_project_identity_only_fails_when_it_controls_execution(tmp_path: Path) 
     ],
 )
 def test_aliases_cannot_hide_closed_dispatcher_mutation(tmp_path: Path, source: str) -> None:
-    assert any(
-        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
-    )
+    assert any(message.startswith("runtime-registration:") for message in _audit(tmp_path, source))
 
 
 @pytest.mark.parametrize(
@@ -235,9 +231,7 @@ def test_aliases_cannot_hide_closed_dispatcher_mutation(tmp_path: Path, source: 
 )
 def test_literal_dynamic_imports_follow_dependency_rules(tmp_path: Path, source: str) -> None:
     failures = _audit(tmp_path, source)
-    assert any(
-        message.startswith(("dependency:", "stable-contract:")) for message in failures
-    )
+    assert any(message.startswith(("dependency:", "stable-contract:")) for message in failures)
 
 
 def test_unrelated_register_method_is_not_a_registry_mutation(tmp_path: Path) -> None:
@@ -252,13 +246,9 @@ def test_unrelated_register_method_is_not_a_registry_mutation(tmp_path: Path) ->
         "METRICS.add('x', score)",
     ],
 )
-def test_known_registry_mutation_forms_are_rejected(
-    tmp_path: Path, mutation: str
-) -> None:
+def test_known_registry_mutation_forms_are_rejected(tmp_path: Path, mutation: str) -> None:
     source = f"from dsio.eval.metrics import METRICS\n{mutation}\n"
-    assert any(
-        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
-    )
+    assert any(message.startswith("runtime-registration:") for message in _audit(tmp_path, source))
 
 
 def test_importing_closed_registry_api_is_itself_rejected(tmp_path: Path) -> None:
@@ -268,9 +258,7 @@ def mutate(target):
     target.add('x', score)
 mutate(METRICS)
 """
-    assert any(
-        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
-    )
+    assert any(message.startswith("runtime-registration:") for message in _audit(tmp_path, source))
 
 
 def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path) -> None:
@@ -279,28 +267,24 @@ def test_registry_reexports_and_candidate_registries_are_rejected(tmp_path: Path
         "COMPONENTS = {}\ndef register(name):\n    COMPONENTS[name] = component\n",
         "HANDLERS = {}\ndef enroll(name):\n    HANDLERS[name] = component\n",
         "FACTORIES = {}\ndef add(name, factory):\n    FACTORIES[name] = factory\n",
-        "TRANSFORMS = {}\ndef add_transform(name, transform):\n"
-        "    TRANSFORMS[name] = transform\n",
+        "TRANSFORMS = {}\ndef add_transform(name, transform):\n    TRANSFORMS[name] = transform\n",
         "HANDLERS = {}\ndef enroll(table, name, component):\n"
         "    table[name] = component\nenroll(HANDLERS, name, component)\n",
         "DISPATCH = {}\nDISPATCH['x'] = component\n",
         "HANDLERS = []\nHANDLERS.append(component)\n",
         "HANDLERS = set()\nHANDLERS.add(component)\n",
         "REGISTRY = Registry()\nREGISTRY.register('x', component)\n",
-        "CATALOG = {}\ndef add(name, transform):\n"
-        "    CATALOG.update({name: transform})\n",
+        "CATALOG = {}\ndef add(name, transform):\n    CATALOG.update({name: transform})\n",
         "class Catalog:\n    FACTORIES = {}\n    @classmethod\n"
         "    def add(cls, name, factory):\n        cls.FACTORIES[name] = factory\n",
-        "FACTORIES = {name: value for name, value in entries}\n"
-        "FACTORIES[name] = factory\n",
+        "FACTORIES = {name: value for name, value in entries}\nFACTORIES[name] = factory\n",
         "HANDLERS = {}\nHANDLERS |= {'x': component}\n",
         "HANDLERS = {}\nHANDLERS.__setitem__('x', component)\n",
         "import collections\nHANDLERS = collections.defaultdict(dict)\n"
         "table = HANDLERS\ntable['x'] = component\n",
     ):
         assert any(
-            message.startswith("runtime-registration:")
-            for message in _audit(tmp_path, source)
+            message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
         )
 
 
@@ -311,8 +295,7 @@ def test_registry_descendants_and_reflection_are_rejected(tmp_path: Path) -> Non
     ):
         source = f"import dsio.eval.metrics as metrics\n{mutation}\n"
         assert any(
-            message.startswith("runtime-registration:")
-            for message in _audit(tmp_path, source)
+            message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
         )
 
 
@@ -328,9 +311,7 @@ def test_closed_registry_references_cannot_be_passed_indirectly(
     tmp_path: Path, reference: str
 ) -> None:
     source = f"import dsio.eval.metrics as metrics\n{reference}\n"
-    assert any(
-        message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
-    )
+    assert any(message.startswith("runtime-registration:") for message in _audit(tmp_path, source))
 
 
 def test_reflective_dsio_registry_access_is_rejected(tmp_path: Path) -> None:
@@ -345,8 +326,7 @@ def test_reflective_dsio_registry_access_is_rejected(tmp_path: Path) -> None:
     ):
         source = f"import dsio.eval.metrics as metrics\n{reference}\n"
         assert any(
-            message.startswith("runtime-registration:")
-            for message in _audit(tmp_path, source)
+            message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
         )
 
 
@@ -378,16 +358,13 @@ def apply_plugins(value, plugins):
         "import sys\nsys.modules['builtins'].eval(source)\n",
         "import pydoc\npydoc.locate('math.sqrt')\n",
         "import pkgutil\npkgutil.resolve_name('math:sqrt')\n",
-        "import functools, builtins\n"
-        "functools.partial(getattr, builtins, 'eval')()(source)\n",
+        "import functools, builtins\nfunctools.partial(getattr, builtins, 'eval')()(source)\n",
         "import importlib, operator\n"
         "operator.attrgetter('import_module')(importlib)('consumer_x.private')\n",
         "eval(source)\n",
     ],
 )
-def test_dynamic_import_and_code_evaluation_apis_are_rejected(
-    tmp_path: Path, source: str
-) -> None:
+def test_dynamic_import_and_code_evaluation_apis_are_rejected(tmp_path: Path, source: str) -> None:
     assert any(message.startswith("dependency:") for message in _audit(tmp_path, source))
 
 
@@ -472,9 +449,7 @@ def test_one_project_name_string_is_normalized(tmp_path: Path) -> None:
     path = tmp_path / "candidate.py"
     path.write_text("if client == 'consumer_x':\n    value = 1\n")
 
-    failures = audit_source(
-        path, module="dsio.experimental.candidate", project_names="consumer_x"
-    )
+    failures = audit_source(path, module="dsio.experimental.candidate", project_names="consumer_x")
 
     assert any(message.startswith("genericity:") for message in failures)
 
@@ -572,14 +547,9 @@ def test_definition_time_and_assignment_expression_project_control_is_rejected(
 
 def test_project_control_inside_contexts_and_assertions_is_rejected(tmp_path: Path) -> None:
     for source in (
-        "def run(project, context):\n"
-        "    with context:\n"
-        "        if project:\n"
-        "            train()\n",
+        "def run(project, context):\n    with context:\n        if project:\n            train()\n",
         "def validate(project):\n    assert project != 'pulse'\n",
-        "with project_context(project) as selected:\n"
-        "    if selected:\n"
-        "        run()\n",
+        "with project_context(project) as selected:\n    if selected:\n        run()\n",
     ):
         assert any(message.startswith("genericity:") for message in _audit(tmp_path, source))
 
@@ -614,9 +584,7 @@ def test_function_local_working_collections_are_not_registries(tmp_path: Path) -
 
 def test_descriptive_candidate_registry_names_are_rejected(tmp_path: Path) -> None:
     for source in (
-        "def component(): pass\n"
-        "COMPONENT_REGISTRY = {}\n"
-        "COMPONENT_REGISTRY['x'] = component\n",
+        "def component(): pass\nCOMPONENT_REGISTRY = {}\nCOMPONENT_REGISTRY['x'] = component\n",
         "CATALOG = {}\nCATALOG['x'] = component\n",
         "CATALOG = {}\nCATALOG |= {'x': component}\n",
         "def component(): pass\nCOMPONENT_REGISTRY = {'x': component}\n",
@@ -624,8 +592,7 @@ def test_descriptive_candidate_registry_names_are_rejected(tmp_path: Path) -> No
         "FACTORIES = {'linear': build_linear}\n",
     ):
         assert any(
-            message.startswith("runtime-registration:")
-            for message in _audit(tmp_path, source)
+            message.startswith("runtime-registration:") for message in _audit(tmp_path, source)
         )
 
 
@@ -697,11 +664,7 @@ def test_dynamic_import_aliases_follow_order_and_parameter_shadowing(tmp_path: P
     )
     assert any(message.startswith("dependency:") for message in _audit(tmp_path, unsafe))
 
-    safe = (
-        "import importlib as loader\n"
-        "def inspect(loader):\n"
-        "    return loader.import_module\n"
-    )
+    safe = "import importlib as loader\ndef inspect(loader):\n    return loader.import_module\n"
     assert _audit(tmp_path, safe) == ()
 
     conditional = (
@@ -737,8 +700,7 @@ def test_dynamic_import_aliases_follow_order_and_parameter_shadowing(tmp_path: P
 
 def test_builtin_api_names_can_be_lexically_shadowed(tmp_path: Path) -> None:
     for source in (
-        "def choose(train, eval):\n"
-        "    return eval if eval is not None else train\n",
+        "def choose(train, eval):\n    return eval if eval is not None else train\n",
         "import torch\n"
         "def prepare(model, compile: bool = False):\n"
         "    return torch.compile(model) if compile else model\n",
@@ -760,10 +722,7 @@ def test_registry_owner_module_imports_are_safe_until_dispatcher_access(
 
 
 def test_policy_namespace_does_not_exempt_candidate_modules(tmp_path: Path) -> None:
-    source = (
-        "if project == 'pulse':\n    value = 1\n"
-        "HANDLERS = {}\nHANDLERS['x'] = component\n"
-    )
+    source = "if project == 'pulse':\n    value = 1\nHANDLERS = {}\nHANDLERS['x'] = component\n"
     failures = _audit(tmp_path, source, module="dsio.experimental.admission.candidate")
     assert any(message.startswith("genericity:") for message in failures)
     assert any(message.startswith("runtime-registration:") for message in failures)
@@ -811,8 +770,7 @@ def test_named_audit_translates_import_time_failure(
     monkeypatch.setattr(admission, "resolve_reference", fail)
 
     assert audit_component("dsio.experimental.candidate:Component") == (
-        "importability: could not resolve component "
-        "'dsio.experimental.candidate:Component': boom",
+        "importability: could not resolve component 'dsio.experimental.candidate:Component': boom",
     )
 
 

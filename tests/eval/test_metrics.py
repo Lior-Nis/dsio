@@ -150,9 +150,7 @@ def test_accuracy_matches_sklearn() -> None:
         ),
     ],
 )
-def test_quadratic_weighted_kappa_matches_sklearn(
-    truth: np.ndarray, predicted: np.ndarray
-) -> None:
+def test_quadratic_weighted_kappa_matches_sklearn(truth: np.ndarray, predicted: np.ndarray) -> None:
     expected = sklearn_metrics.cohen_kappa_score(truth, predicted, weights="quadratic")
     assert quadratic_weighted_kappa(truth, predicted) == pytest.approx(expected, abs=TOL)
     assert compute(["quadratic_weighted_kappa"], truth, predicted) == {

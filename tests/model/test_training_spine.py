@@ -85,9 +85,7 @@ class InvalidOptimizerFactory:
 
 
 class SchedulerMappingFactory:
-    def __call__(
-        self, optimizer: torch.optim.Optimizer
-    ) -> Mapping[str, object]:
+    def __call__(self, optimizer: torch.optim.Optimizer) -> Mapping[str, object]:
         return {
             "scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1),
             "interval": "epoch",
@@ -96,9 +94,7 @@ class SchedulerMappingFactory:
 
 
 class InvalidSchedulerMappingFactory:
-    def __call__(
-        self, optimizer: torch.optim.Optimizer
-    ) -> Mapping[str, object]:
+    def __call__(self, optimizer: torch.optim.Optimizer) -> Mapping[str, object]:
         del optimizer
         return {"interval": "epoch"}
 
@@ -111,9 +107,7 @@ class BarePlateauSchedulerFactory:
 
 
 class PlateauSchedulerMappingFactory:
-    def __call__(
-        self, optimizer: torch.optim.Optimizer
-    ) -> Mapping[str, object]:
+    def __call__(self, optimizer: torch.optim.Optimizer) -> Mapping[str, object]:
         return {
             "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
             "monitor": "val/loss",
@@ -121,16 +115,12 @@ class PlateauSchedulerMappingFactory:
 
 
 class PlateauSchedulerWithoutMonitorFactory:
-    def __call__(
-        self, optimizer: torch.optim.Optimizer
-    ) -> Mapping[str, object]:
+    def __call__(self, optimizer: torch.optim.Optimizer) -> Mapping[str, object]:
         return {"scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)}
 
 
 class DisabledPlateauSchedulerFactory:
-    def __call__(
-        self, optimizer: torch.optim.Optimizer
-    ) -> Mapping[str, object]:
+    def __call__(self, optimizer: torch.optim.Optimizer) -> Mapping[str, object]:
         return {
             "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
             "monitor": "val/loss",

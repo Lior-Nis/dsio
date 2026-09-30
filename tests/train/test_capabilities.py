@@ -45,25 +45,19 @@ class _BatchDataset(Dataset[dict[str, Any]]):
 
 
 class UnavailableObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: dict[str, Any], stage: str
-    ) -> dict[str, Tensor]:
+    def forward(self, model: nn.Module, batch: dict[str, Any], stage: str) -> dict[str, Tensor]:
         del model, batch, stage
         raise RuntimeError("imaginary_fft is unavailable")
 
 
 class DetachedObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: dict[str, Any], stage: str
-    ) -> dict[str, Tensor]:
+    def forward(self, model: nn.Module, batch: dict[str, Any], stage: str) -> dict[str, Tensor]:
         del model, batch, stage
         return {"loss": torch.tensor(1.0)}
 
 
 class StatefulObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: dict[str, Any], stage: str
-    ) -> dict[str, Tensor]:
+    def forward(self, model: nn.Module, batch: dict[str, Any], stage: str) -> dict[str, Tensor]:
         del stage
         random.random()
         np.random.random()
@@ -74,9 +68,7 @@ class StatefulObjective(nn.Module):
 
 
 class InvalidExtraOutputObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: dict[str, Any], stage: str
-    ) -> dict[str, Tensor]:
+    def forward(self, model: nn.Module, batch: dict[str, Any], stage: str) -> dict[str, Tensor]:
         del stage
         return {"loss": model(batch["x"]).sum(), "vector": torch.ones(2)}
 
@@ -119,9 +111,7 @@ def _trainer(*, precision: Any = "32-true") -> Trainer:
 
 def test_supported_path_is_proved_on_the_resolved_device_without_changing_mode() -> None:
     normalizer = nn.BatchNorm1d(8)
-    module = _module(
-        backbone=nn.Sequential(nn.Flatten(), normalizer, nn.Dropout(p=0.5))
-    )
+    module = _module(backbone=nn.Sequential(nn.Flatten(), normalizer, nn.Dropout(p=0.5)))
     module.train()
     rng = torch.random.get_rng_state().clone()
     assert normalizer.running_mean is not None
@@ -334,12 +324,8 @@ def test_the_probe_isolates_parameters_lazy_modules_and_seeded_rngs() -> None:
 def test_representative_batch_does_not_advance_the_training_order() -> None:
     left_generator = torch.Generator().manual_seed(41)
     right_generator = torch.Generator().manual_seed(41)
-    loader = DataLoader(
-        _BatchDataset(), batch_size=3, shuffle=True, generator=left_generator
-    )
-    control = DataLoader(
-        _BatchDataset(), batch_size=3, shuffle=True, generator=right_generator
-    )
+    loader = DataLoader(_BatchDataset(), batch_size=3, shuffle=True, generator=left_generator)
+    control = DataLoader(_BatchDataset(), batch_size=3, shuffle=True, generator=right_generator)
 
     probed = representative_batch(loader)
 

@@ -36,9 +36,7 @@ def check_requested_capabilities(requested: TrainerConfig) -> None:
     if requested.devices not in {1, "auto"}:
         errors.append(f"devices={requested.devices} is outside the stable single-device matrix")
     if requested.precision != "32-true":
-        errors.append(
-            f"precision {requested.precision!r} is outside the stable 32-true matrix"
-        )
+        errors.append(f"precision {requested.precision!r} is outside the stable 32-true matrix")
     if errors:
         raise CapabilityError(_message(errors))
 
@@ -231,9 +229,7 @@ def _evidence(
     device_name = torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu"
     deterministic = "false"
     if torch.are_deterministic_algorithms_enabled():
-        deterministic = (
-            "warn" if torch.is_deterministic_algorithms_warn_only_enabled() else "true"
-        )
+        deterministic = "warn" if torch.is_deterministic_algorithms_warn_only_enabled() else "true"
     return {
         "requested_accelerator": requested.accelerator,
         "requested_devices": str(requested.devices),

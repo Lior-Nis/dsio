@@ -168,9 +168,7 @@ def _await_result(process: Any, out: Any) -> tuple[str, Any]:
     )
 
 
-def _check_reads_after_spawn(
-    open_reader: Callable[[], SignalReader], expected: np.ndarray
-) -> None:
+def _check_reads_after_spawn(open_reader: Callable[[], SignalReader], expected: np.ndarray) -> None:
     """The real thing: a process that inherits nothing must still read the right rows."""
     n_rows = min(128, len(expected))
     context = multiprocessing.get_context("spawn")

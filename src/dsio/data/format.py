@@ -121,9 +121,7 @@ class IndexHeader:
             raw[: _HEADER_STRUCT.size]
         )
         if magic != MAGIC:
-            raise IndexFormatError(
-                f"not a dsio index: magic is {magic!r}, expected {MAGIC!r}"
-            )
+            raise IndexFormatError(f"not a dsio index: magic is {magic!r}, expected {MAGIC!r}")
         if version != FORMAT_VERSION:
             raise IndexFormatError(
                 f"index format version {version} is not supported by this build "
@@ -159,9 +157,7 @@ def write_index(path: Path, header: IndexHeader, entity_offsets: np.ndarray) -> 
     if offsets.size and offsets[0] != 0:
         raise IndexFormatError(f"first entity offset must be 0, got {offsets[0]}")
     if offsets.size and offsets[-1] != header.n_rows:
-        raise IndexFormatError(
-            f"final offset {offsets[-1]} does not match n_rows {header.n_rows}"
-        )
+        raise IndexFormatError(f"final offset {offsets[-1]} does not match n_rows {header.n_rows}")
     if np.any(np.diff(offsets) < 0):
         raise IndexFormatError("entity offsets must be non-decreasing")
 

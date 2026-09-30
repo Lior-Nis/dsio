@@ -5,9 +5,7 @@ from __future__ import annotations
 import ast
 
 
-def initialized_registration(
-    statement: ast.Assign | ast.AnnAssign, tables: set[str]
-) -> bool:
+def initialized_registration(statement: ast.Assign | ast.AnnAssign, tables: set[str]) -> bool:
     value = statement.value
     if value is None or not isinstance(value, ast.Dict | ast.List | ast.Set):
         return False

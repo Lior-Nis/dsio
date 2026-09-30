@@ -77,9 +77,7 @@ def test_cyclic_component_parameters_fail_at_the_configuration_boundary() -> Non
     parameters["cycle"] = parameters
 
     with pytest.raises(ComponentError, match="canonical"):
-        validate_component_config(
-            {"reference": "torch.nn:Linear", "parameters": parameters}
-        )
+        validate_component_config({"reference": "torch.nn:Linear", "parameters": parameters})
 
 
 def test_resolved_component_must_match_the_requested_native_contract() -> None:

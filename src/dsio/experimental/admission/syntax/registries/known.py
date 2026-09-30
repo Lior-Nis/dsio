@@ -25,14 +25,19 @@ def registry_mutation(call: ast.Call, known_aliases: dict[str, str]) -> bool:
     if name in {"setattr", "delattr"} and call.args:
         return _is_registry_receiver(expression_name(call.args[0], known_aliases))
     receiver, separator, method = name.rpartition(".")
-    return bool(separator) and _is_registry_receiver(receiver) and method in {
-        "add",
-        "clear",
-        "pop",
-        "register",
-        "setdefault",
-        "update",
-    }
+    return (
+        bool(separator)
+        and _is_registry_receiver(receiver)
+        and method
+        in {
+            "add",
+            "clear",
+            "pop",
+            "register",
+            "setdefault",
+            "update",
+        }
+    )
 
 
 def registry_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
@@ -56,13 +61,17 @@ def registry_reference(node: ast.AST, known_aliases: dict[str, str]) -> bool:
         return bool(node.args) and expression_name(node.args[0], known_aliases).startswith("dsio.")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Call):
         reflector = expression_name(node.func.func, known_aliases)
-        return reflector in {"operator.attrgetter", "operator.methodcaller"} and bool(
-            node.args
-        ) and expression_name(node.args[0], known_aliases).startswith("dsio.")
+        return (
+            reflector in {"operator.attrgetter", "operator.methodcaller"}
+            and bool(node.args)
+            and expression_name(node.args[0], known_aliases).startswith("dsio.")
+        )
     if isinstance(node, ast.Subscript):
-        return expression_name(node.value, known_aliases).startswith("dsio.") and isinstance(
-            node.value, ast.Attribute
-        ) and node.value.attr == "__dict__"
+        return (
+            expression_name(node.value, known_aliases).startswith("dsio.")
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "__dict__"
+        )
     return False
 
 

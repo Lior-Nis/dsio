@@ -161,6 +161,7 @@ def test_live_round_trip_against_the_compose_stack() -> None:
     experiment_id = client.create_experiment(f"live-artifact-{time.time_ns()}")
     run_id = client.create_run(experiment_id=experiment_id).info.run_id
 
-    ref = save_artifact(b"live payload", run_id=run_id, name="enc",
-                        tracking_uri="http://localhost:5000")
+    ref = save_artifact(
+        b"live payload", run_id=run_id, name="enc", tracking_uri="http://localhost:5000"
+    )
     assert load_artifact(ref, tracking_uri="http://localhost:5000") == b"live payload"

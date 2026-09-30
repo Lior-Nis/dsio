@@ -55,10 +55,7 @@ class TimeMajorToChannelFirst(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         if x.ndim != 3:
-            raise ValueError(
-                "expected [batch, time, channels], "
-                f"got shape {tuple(x.shape)}"
-            )
+            raise ValueError(f"expected [batch, time, channels], got shape {tuple(x.shape)}")
         if x.shape[1] != self.time:
             raise ValueError(
                 f"expected time extent {self.time}, got {x.shape[1]} in shape {tuple(x.shape)}"

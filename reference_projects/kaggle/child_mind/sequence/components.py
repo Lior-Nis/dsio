@@ -113,9 +113,7 @@ class CmiSequenceClassifier(nn.Module):
         self.register_buffer(
             "tabular_scale", _scale(tabular_scale, TABULAR_FEATURES, "tabular_scale")
         )
-        self.tabular_encoder = nn.Sequential(
-            nn.Linear(TABULAR_FEATURES * 2, hidden), nn.GELU()
-        )
+        self.tabular_encoder = nn.Sequential(nn.Linear(TABULAR_FEATURES * 2, hidden), nn.GELU())
         self.temporal_encoder = nn.Sequential(
             nn.Conv1d(sensor_features * 2, hidden, kernel_size=9, stride=4, padding=4),
             nn.GELU(),
@@ -138,9 +136,7 @@ class CmiSequenceClassifier(nn.Module):
         tabular_values = x[:, :TABULAR_FEATURES]
         tabular_mask = x[:, TABULAR_FEATURES : TABULAR_FEATURES * 2]
         signal_start = TABULAR_FEATURES * 2
-        signal = x[:, signal_start:-1].reshape(
-            -1, self.window_length, self.sensor_features
-        )
+        signal = x[:, signal_start:-1].reshape(-1, self.window_length, self.sensor_features)
         present = x[:, -1:]
         finite = torch.isfinite(signal)
         absent = present[:, None, :].eq(0)
@@ -154,9 +150,7 @@ class CmiSequenceClassifier(nn.Module):
         safe_tabular = torch.where(tabular_mask.bool(), tabular_values, self.tabular_center)
         normalized_tabular = (safe_tabular - self.tabular_center) / self.tabular_scale
         normalized_tabular = normalized_tabular * tabular_mask
-        tabular_encoded = self.tabular_encoder(
-            torch.cat((normalized_tabular, tabular_mask), dim=1)
-        )
+        tabular_encoded = self.tabular_encoder(torch.cat((normalized_tabular, tabular_mask), dim=1))
 
         normalized_signal = _normalize_window(signal, observed)
         temporal = self.temporal_encoder(
@@ -172,10 +166,7 @@ class CmiSequenceObjective(nn.Module):
         self.class_weights: Tensor
         self.register_buffer("class_weights", _scale(class_weights, CLASSES, "class_weights"))
         self.metrics = nn.ModuleDict(
-            {
-                f"{stage}_accuracy": MeanMetric()
-                for stage in ("train", "validate", "test")
-            }
+            {f"{stage}_accuracy": MeanMetric() for stage in ("train", "validate", "test")}
         )
 
     def forward(
@@ -186,9 +177,7 @@ class CmiSequenceObjective(nn.Module):
         weights = batch["sample_weight"].float().reshape(-1)
         if not bool(torch.isfinite(weights).all()) or not bool((weights > 0).all()):
             raise ValueError("CMI sequence sample weights must be finite and positive")
-        losses = F.cross_entropy(
-            logits, target, weight=self.class_weights, reduction="none"
-        )
+        losses = F.cross_entropy(logits, target, weight=self.class_weights, reduction="none")
         try:
             accuracy = self.metrics[f"{stage}_accuracy"]
         except KeyError:
@@ -261,9 +250,7 @@ def _scale(values: Sequence[float], length: int, name: str) -> Tensor:
 
 
 def _binary(values: Tensor, name: str) -> None:
-    if not bool(torch.isfinite(values).all()) or not bool(
-        ((values == 0) | (values == 1)).all()
-    ):
+    if not bool(torch.isfinite(values).all()) or not bool(((values == 0) | (values == 1)).all()):
         raise ValueError(f"CMI {name} must contain only zero or one")
 
 

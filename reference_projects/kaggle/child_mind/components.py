@@ -76,13 +76,9 @@ class CmiFusionClassifier(nn.Module):
         self.register_buffer(
             "sensor_center", _vector(sensor_center, SENSOR_FEATURES, "sensor_center")
         )
-        self.register_buffer(
-            "sensor_scale", _scale(sensor_scale, SENSOR_FEATURES, "sensor_scale")
-        )
+        self.register_buffer("sensor_scale", _scale(sensor_scale, SENSOR_FEATURES, "sensor_scale"))
         self.use_sensor = use_sensor
-        self.tabular_encoder = nn.Sequential(
-            nn.Linear(TABULAR_FEATURES * 2, hidden), nn.ReLU()
-        )
+        self.tabular_encoder = nn.Sequential(nn.Linear(TABULAR_FEATURES * 2, hidden), nn.ReLU())
         self.sensor_encoder = nn.Sequential(nn.Linear(SENSOR_FEATURES * 2, hidden), nn.ReLU())
         self.head = nn.Sequential(
             nn.Linear(hidden * 2 + 1, hidden),

@@ -201,9 +201,7 @@ def test_undeclared_form_produces_no_model() -> None:
     )
 
     assert set(models) == {"pyfunc"}
-    logged = mlflow.search_logged_models(
-        experiment_ids=[experiment_id], output_format="list"
-    )
+    logged = mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list")
     assert len(logged) == 1
     assert logged[0].tags["dsio.export_form"] == "pyfunc"
 
@@ -222,9 +220,7 @@ def test_invalid_form_declaration_fails_before_logging(
             forms=forms,
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_invalid_fixture_fails_before_logging() -> None:
@@ -241,9 +237,7 @@ def test_invalid_fixture_fails_before_logging() -> None:
             forms=("pyfunc",),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_incompatible_requested_form_fails_before_logging() -> None:
@@ -259,9 +253,7 @@ def test_incompatible_requested_form_fails_before_logging() -> None:
             forms=("pyfunc",),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_export_requires_an_active_running_source_run() -> None:
@@ -276,9 +268,7 @@ def test_export_requires_an_active_running_source_run() -> None:
             forms=("pyfunc",),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_each_failed_preflight_names_its_actual_form() -> None:
@@ -294,9 +284,7 @@ def test_each_failed_preflight_names_its_actual_form() -> None:
             forms=("pytorch", "pyfunc"),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_native_preflight_proves_deserialization_and_execution() -> None:
@@ -312,9 +300,7 @@ def test_native_preflight_proves_deserialization_and_execution() -> None:
             forms=("pytorch",),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_native_preflight_does_not_remap_the_predictor_device(
@@ -360,9 +346,7 @@ def test_numpy_incompatible_dtype_names_form_and_field() -> None:
             forms=("pyfunc",),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_lossy_sequence_output_fails_before_logging() -> None:
@@ -376,9 +360,7 @@ def test_lossy_sequence_output_fails_before_logging() -> None:
         checkpoint_digest="c" * 64,
     )
 
-    with pytest.raises(
-        ValueError, match="pyfunc export form.*prediction.*losslessly"
-    ):
+    with pytest.raises(ValueError, match="pyfunc export form.*prediction.*losslessly"):
         log_predictor(
             predictor,
             run_id=run_id,
@@ -386,9 +368,7 @@ def test_lossy_sequence_output_fails_before_logging() -> None:
             forms=("pyfunc",),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 def test_homogeneous_numpy_scalar_output_is_lossless() -> None:
@@ -456,6 +436,4 @@ def test_source_run_is_refreshed_after_preflight(
             forms=("pyfunc",),
         )
 
-    assert (
-        mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
-    )
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []

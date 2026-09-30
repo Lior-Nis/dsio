@@ -30,9 +30,7 @@ _COMPONENT_ROLES = frozenset(
 def parameterized_registration(tree: ast.Module, tables: set[str]) -> bool:
     parameter_mutators: set[str] = set()
     functions = (
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     )
     for function in functions:
         parameters = {

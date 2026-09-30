@@ -68,9 +68,7 @@ def identify_dataset(dataset: dict[str, object], experiment_id: str) -> tuple[st
 @flow
 def train_experiment() -> tuple[str, str]:
     resolved = resolve_experiment("algae-training")
-    digest, run_id = identify_dataset(
-        {"name": "algae", "revision": 1}, resolved.experiment_id
-    )
+    digest, run_id = identify_dataset({"name": "algae", "revision": 1}, resolved.experiment_id)
     if not digest:
         raise ValueError("dataset identity is required")
     return digest, run_id
@@ -306,14 +304,15 @@ from dsio.data.store import SignalStore
 from dsio.data.views import WindowSpec, build_index
 
 with SignalStore.builder("stores/scans", channels=3, dtype="uint8") as builder:
-    for name, image, patient in scans():          # image is (8, 8, 3)
+    for name, image, patient in scans():  # image is (8, 8, 3)
         builder.add(name, image.reshape(64, 3), group=patient)
 
 store = SignalStore("stores/scans")
-index = build_index(store, WindowSpec(length=64, stride=64),
-                    one_window_per_entity=True)                 # 16 images -> 16 windows
+index = build_index(
+    store, WindowSpec(length=64, stride=64), one_window_per_entity=True
+)  # 16 images -> 16 windows
 batch = next(iter(build_loader(WindowDataset(store, index), batch_size=4)))
-batch["x"].reshape(4, 3, 8, 8)                                  # (B, C, H*W) -> (B, C, H, W)
+batch["x"].reshape(4, 3, 8, 8)  # (B, C, H*W) -> (B, C, H, W)
 ```
 
 `WindowDataset` is `channels_first=True` by default, so a batch arrives as `(B, C, H*W)` and
@@ -356,10 +355,10 @@ evaluate(
     model_uri=model_uri,
     dataset_run_id=split_run_id,
     inputs=inputs,
-    targets=targets,                    # [batch, time, 3]
+    targets=targets,  # [batch, time, 3]
     metrics=("average_precision",),
     score_field="probability",
-    mask=valid,                         # [batch, time]
+    mask=valid,  # [batch, time]
     target_names=("start", "turn", "walking"),
 )
 ```

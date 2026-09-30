@@ -31,9 +31,7 @@ def test_equivalent_supported_representations_have_one_identity() -> None:
 def test_ordered_sequence_and_unordered_set_do_not_share_an_identity() -> None:
     from dsio.tracking import execution_identity
 
-    assert execution_identity({"values": [1, 2]}) != execution_identity(
-        {"values": {1, 2}}
-    )
+    assert execution_identity({"values": [1, 2]}) != execution_identity({"values": {1, 2}})
 
 
 @pytest.mark.parametrize(

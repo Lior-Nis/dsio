@@ -177,9 +177,7 @@ def test_sequence_flow_trains_raw_windows_and_scores_participants(
     assert result["sensor_missing_participants"] == 24
     assert result["raw_sensor_rows"] == 144
     assert result["window_count"] == 72
-    assert set(result["split_groups"]["train"]).isdisjoint(
-        result["split_groups"]["validate"]
-    )
+    assert set(result["split_groups"]["train"]).isdisjoint(result["split_groups"]["validate"])
     assert set(result["metrics"]) == {
         "accuracy",
         "quadratic_weighted_kappa",
@@ -227,9 +225,7 @@ def test_sequence_flow_replays_data_split_weights_and_metrics(
         "calibrate": False,
     }
     with prefect_test_harness():
-        first = child_mind_sequence_flow(
-            str(child_mind_data), str(tmp_path / "work"), **parameters
-        )
+        first = child_mind_sequence_flow(str(child_mind_data), str(tmp_path / "work"), **parameters)
         replay = child_mind_sequence_flow(
             str(child_mind_data), str(tmp_path / "work"), **parameters
         )

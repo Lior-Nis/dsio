@@ -66,9 +66,7 @@ def export(
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
-                "normalizer": (
-                    "reference_projects.kaggle.child_mind.components:CmiPrediction"
-                ),
+                "normalizer": ("reference_projects.kaggle.child_mind.components:CmiPrediction"),
                 "validator": (
                     "reference_projects.kaggle.child_mind.components:validate_cmi_prediction"
                 ),
@@ -135,9 +133,7 @@ def evaluate_model(
             components={
                 "evaluation": "dsio.eval.execution:evaluate",
                 "qwk": "dsio.eval.metrics:quadratic_weighted_kappa",
-                "ablation": (
-                    "reference_projects.kaggle.child_mind.components:ablate_sensor"
-                ),
+                "ablation": ("reference_projects.kaggle.child_mind.components:ablate_sensor"),
             },
         )
         metrics = evaluate(

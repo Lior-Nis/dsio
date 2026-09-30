@@ -35,9 +35,7 @@ def predict(
             f"predictor device must be 'cpu'; requested device {device!r} is unsupported"
         )
     if not isinstance(inputs, Mapping):
-        raise InferenceError(
-            f"predictor inputs must be a mapping, got {type(inputs).__name__}"
-        )
+        raise InferenceError(f"predictor inputs must be a mapping, got {type(inputs).__name__}")
     loaded, model_id = _load_predictor(model_uri)
     input_schema = loaded.metadata.get_input_schema()
     output_schema = loaded.metadata.get_output_schema()
@@ -62,8 +60,7 @@ def _load_predictor(model_uri: str) -> tuple[PyFuncModel, str]:
     matched = _LOGGED_MODEL_URI.fullmatch(model_uri)
     if matched is None:
         raise InferenceError(
-            "model_uri must be an immutable MLflow Logged Model URI "
-            "in the form 'models:/m-<id>'"
+            "model_uri must be an immutable MLflow Logged Model URI in the form 'models:/m-<id>'"
         )
     model_id = matched.group(1)
     _require_logged_predictor(model_id, model_uri)
@@ -85,13 +82,8 @@ def _require_logged_predictor(model_id: str, model_uri: str) -> None:
             f"immutable Logged Model {model_id!r} cannot be resolved: {error}"
         ) from error
     if logged.model_uri != model_uri or logged.status != LoggedModelStatus.READY:
-        raise InferenceError(
-            f"immutable Logged Model {model_id!r} is not ready for inference"
-        )
-    if (
-        logged.model_type != "dsio.predictor"
-        or logged.tags.get("dsio.export_form") != "pyfunc"
-    ):
+        raise InferenceError(f"immutable Logged Model {model_id!r} is not ready for inference")
+    if logged.model_type != "dsio.predictor" or logged.tags.get("dsio.export_form") != "pyfunc":
         raise InferenceError(
             f"immutable Logged Model {model_id!r} must be a DSIO pyfunc export form"
         )
@@ -114,18 +106,15 @@ def _validate_arrays(values: Mapping[str, Any], schema: Schema | None, role: str
         value = values[name]
         if not isinstance(value, np.ndarray):
             raise InferenceError(
-                f"predictor {role} field {name!r} must be a NumPy array; "
-                f"got {type(value).__name__}"
+                f"predictor {role} field {name!r} must be a NumPy array; got {type(value).__name__}"
             )
         if not _same_dtype(value.dtype, spec.type):
             raise InferenceError(
-                f"predictor {role} field {name!r} has dtype {value.dtype}; "
-                f"expected {spec.type}"
+                f"predictor {role} field {name!r} has dtype {value.dtype}; expected {spec.type}"
             )
         if not _same_shape(value.shape, spec.shape):
             raise InferenceError(
-                f"predictor {role} field {name!r} has shape {value.shape}; "
-                f"expected {spec.shape}"
+                f"predictor {role} field {name!r} has shape {value.shape}; expected {spec.shape}"
             )
     try:
         assert schema is not None
@@ -140,25 +129,17 @@ def _tensor_specs(schema: Schema | None, role: str) -> list[TensorSpec]:
     specs: list[TensorSpec] = []
     field_names: list[str] = []
     for spec in schema.inputs:
-        if (
-            not isinstance(spec, TensorSpec)
-            or not isinstance(spec.name, str)
-            or not spec.name
-        ):
+        if not isinstance(spec, TensorSpec) or not isinstance(spec.name, str) or not spec.name:
             raise InferenceError(
                 f"logged predictor {role} signature must contain non-empty named tensor fields"
             )
         specs.append(spec)
         field_names.append(spec.name)
     if len(set(field_names)) != len(field_names):
-        raise InferenceError(
-            f"logged predictor {role} signature contains duplicate field names"
-        )
+        raise InferenceError(f"logged predictor {role} signature contains duplicate field names")
     names = set(field_names)
     if "sample_id" not in names:
-        raise InferenceError(
-            f"logged predictor {role} signature must declare sample_id identity"
-        )
+        raise InferenceError(f"logged predictor {role} signature must declare sample_id identity")
     identity = next(spec for spec in specs if spec.name == "sample_id")
     if identity.type.kind != "U" or len(identity.shape) != 1:
         raise InferenceError(

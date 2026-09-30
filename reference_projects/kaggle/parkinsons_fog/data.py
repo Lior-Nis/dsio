@@ -132,9 +132,7 @@ def iter_recording_windows(
         )
     labelled = bool(recording["labelled"])
     kind = str(recording["kind"])
-    expected: tuple[str, ...] = (
-        DEFOG_COLUMNS if labelled and kind == "defog" else TRAIN_COLUMNS
-    )
+    expected: tuple[str, ...] = DEFOG_COLUMNS if labelled and kind == "defog" else TRAIN_COLUMNS
     if not labelled:
         expected = BASE_COLUMNS
     buffer: list[list[float]] = []

@@ -100,9 +100,7 @@ def ingest(data_dir: str, workspace: str, experiment_id: str) -> dict[str, Any]:
             configuration,
             components={
                 "loader": "reference_projects.kaggle.child_mind.data:load_competition_data",
-                "sensor_summary": (
-                    "reference_projects.kaggle.child_mind.data:summarize_partition"
-                ),
+                "sensor_summary": ("reference_projects.kaggle.child_mind.data:summarize_partition"),
             },
         )
         client = MlflowClient()

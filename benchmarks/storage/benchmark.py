@@ -107,8 +107,7 @@ def run_benchmark(
         random = _random_starts(len(source), window, reads, seed)
         worker_starts = {
             count: [
-                _random_starts(len(source), window, reads, seed + worker)
-                for worker in range(count)
+                _random_starts(len(source), window, reads, seed + worker) for worker in range(count)
             ]
             for count in workers
         }
@@ -119,8 +118,7 @@ def run_benchmark(
                 {
                     "workers": count,
                     "checksums": [
-                        _source_checksum(source, starts, window)
-                        for starts in worker_starts[count]
+                        _source_checksum(source, starts, window) for starts in worker_starts[count]
                     ],
                 }
                 for count in workers
@@ -289,9 +287,7 @@ def _measure_workers(
                     f"early failures: {failures}"
                 ) from None
             if len(set(pids)) != workers:
-                raise RuntimeError(
-                    f"requested {workers} workers but observed PIDs {sorted(pids)}"
-                )
+                raise RuntimeError(f"requested {workers} workers but observed PIDs {sorted(pids)}")
             started = time.perf_counter()
             start.set()
             raw = [future.result() for future in futures]
@@ -429,6 +425,5 @@ def _git(*args: str) -> str:
 
 def _safe_name(value: str) -> str:
     return "".join(
-        character if character.isalnum() or character in "-_" else "-"
-        for character in value
+        character if character.isalnum() or character in "-_" else "-" for character in value
     )

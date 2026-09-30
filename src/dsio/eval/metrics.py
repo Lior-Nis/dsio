@@ -132,14 +132,10 @@ def quadratic_weighted_kappa(
     rating_span = labels[-1] - labels[0]
     if rating_span == 0:
         raise MetricError(
-            "quadratic_weighted_kappa is undefined when expected weighted "
-            "disagreement is zero"
+            "quadratic_weighted_kappa is undefined when expected weighted disagreement is zero"
         )
     weights = np.asarray(
-        [
-            [((left - right) / rating_span) ** 2 for right in labels]
-            for left in labels
-        ],
+        [[((left - right) / rating_span) ** 2 for right in labels] for left in labels],
         dtype=np.float64,
     )
     expected = np.outer(confusion.sum(axis=1), confusion.sum(axis=0)) / truth.size
@@ -194,9 +190,7 @@ def f1_binary(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None
 
 
 @metric("precision")
-def precision(
-    y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None
-) -> float:
+def precision(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = None) -> float:
     truth, predicted = _binary(y_true), (np.asarray(y_pred) > 0).astype(np.int64)
     hits = float(np.sum((truth == 1) & (predicted == 1)))
     denominator = float(np.sum(predicted == 1))
@@ -320,7 +314,9 @@ def smape(y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None = N
     truth = np.asarray(y_true, dtype=np.float64)
     predicted = np.asarray(y_pred, dtype=np.float64)
     denominator = np.abs(truth) + np.abs(predicted)
-    ratio = np.where(denominator == 0.0, 0.0, np.abs(truth - predicted) / np.where(
-        denominator == 0.0, 1.0, denominator
-    ))
+    ratio = np.where(
+        denominator == 0.0,
+        0.0,
+        np.abs(truth - predicted) / np.where(denominator == 0.0, 1.0, denominator),
+    )
     return float(2.0 * np.mean(ratio))

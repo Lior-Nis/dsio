@@ -156,9 +156,7 @@ def _running_run(run_id: str) -> Run:
     except (MlflowException, OSError) as error:
         raise ExportError(f"MLflow Run {run_id!r} cannot be loaded: {error}") from error
     if run.info.lifecycle_stage != "active" or run.info.status != "RUNNING":
-        raise ExportError(
-            f"MLflow Run {run_id!r} must be active and RUNNING for predictor export"
-        )
+        raise ExportError(f"MLflow Run {run_id!r} must be active and RUNNING for predictor export")
     return run
 
 
@@ -177,9 +175,7 @@ def _input_arrays(
     }
 
 
-def _arrays(
-    values: Mapping[str, Any], role: str
-) -> dict[str, np.ndarray[Any, Any]]:
+def _arrays(values: Mapping[str, Any], role: str) -> dict[str, np.ndarray[Any, Any]]:
     arrays: dict[str, np.ndarray[Any, Any]] = {}
     for field, value in values.items():
         if isinstance(value, Tensor):
@@ -189,9 +185,7 @@ def _arrays(
                 array = np.asarray(value)
             except (TypeError, ValueError) as error:
                 raise ExportError(f"{role} field {field!r} is not array-compatible") from error
-            if isinstance(value, Sequence) and not _losslessly_converted(
-                value, array.tolist()
-            ):
+            if isinstance(value, Sequence) and not _losslessly_converted(value, array.tolist()):
                 raise ExportError(
                     f"{role} field {field!r} cannot be converted to an array losslessly"
                 )
@@ -279,9 +273,7 @@ def _preflight(
             raise ExportError(f"pyfunc export form is incompatible: {error}") from error
 
 
-def _tensor_array(
-    value: Tensor, role: str, field: str
-) -> np.ndarray[Any, Any]:
+def _tensor_array(value: Tensor, role: str, field: str) -> np.ndarray[Any, Any]:
     try:
         return value.detach().cpu().numpy()
     except (RuntimeError, TypeError) as error:
@@ -300,9 +292,7 @@ def _require_equivalent(
     for field, expected_value in expected.items():
         actual = observed[field]
         if actual.dtype != expected_value.dtype or actual.shape != expected_value.shape:
-            raise ExportError(
-                f"{form} export form changed output field {field!r} shape or dtype"
-            )
+            raise ExportError(f"{form} export form changed output field {field!r} shape or dtype")
         try:
             equal = np.array_equal(actual, expected_value, equal_nan=True)
         except TypeError:

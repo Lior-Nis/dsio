@@ -103,9 +103,7 @@ def resolve_official_inventory(
         json.dumps(digest_input, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     result["source_files"] = sum(len(result[lane]) for lane in digest_input)
-    result["source_bytes"] = sum(
-        item["bytes"] for lane in digest_input for item in result[lane]
-    )
+    result["source_bytes"] = sum(item["bytes"] for lane in digest_input for item in result[lane])
     return result
 
 
@@ -114,8 +112,7 @@ def _validate_expected_counts(expected_counts: Mapping[str, int]) -> None:
     actual_lanes = set(expected_counts)
     if actual_lanes != expected_lanes:
         raise ValueError(
-            "expected_counts must define exactly the supported lanes: "
-            f"{list(SUPPORTED_LANES)}"
+            f"expected_counts must define exactly the supported lanes: {list(SUPPORTED_LANES)}"
         )
     for lane in SUPPORTED_LANES:
         value = expected_counts[lane]
@@ -139,9 +136,7 @@ def _metadata_ids(path: Path, expected: tuple[str, ...]) -> set[str]:
             for column in expected:
                 value = row[column]
                 if not value or value != value.strip():
-                    raise ValueError(
-                        f"{path.name} row {row_number} has invalid {column}={value!r}"
-                    )
+                    raise ValueError(f"{path.name} row {row_number} has invalid {column}={value!r}")
             identifiers.append(row["Id"])
     if not identifiers:
         raise ValueError(f"{path.name} contains no identities")
@@ -168,9 +163,7 @@ def _require_exact_members(lane: str, expected: set[str], observed: set[str]) ->
         raise ValueError(f"{lane} identity {missing[0]} is missing ({len(missing)} missing)")
 
 
-def _entries(
-    lane: str, paths: Mapping[str, Path], official_ids: set[str]
-) -> list[dict[str, Any]]:
+def _entries(lane: str, paths: Mapping[str, Path], official_ids: set[str]) -> list[dict[str, Any]]:
     kind = "tdcsfog" if "tdcsfog" in lane else "defog" if "defog" in lane else lane
     result: list[dict[str, Any]] = []
     for identity in sorted(set(paths) & official_ids):

@@ -196,7 +196,5 @@ def test_an_unshuffled_loader_covers_every_position_once(store: SignalStore, ind
 
 
 def test_workers_read_the_store_independently(store: SignalStore, index) -> None:  # type: ignore[no-untyped-def]
-    loader = build_loader(
-        WindowDataset(store, index, np.arange(20)), batch_size=4, num_workers=2
-    )
+    loader = build_loader(WindowDataset(store, index, np.arange(20)), batch_size=4, num_workers=2)
     assert sum(batch["x"].shape[0] for batch in loader) == 20
