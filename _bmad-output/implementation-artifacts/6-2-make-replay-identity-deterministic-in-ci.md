@@ -1,6 +1,6 @@
 # Story 6.2: Make replay identity deterministic in CI
 
-Status: review
+Status: done
 
 ## Story
 
