@@ -212,6 +212,14 @@ def render(baseline: Mapping[str, Any]) -> str:
             f"| `{name}` | `{record['commit'][:12]}`{dirty} | {device} | {record['seconds']} | "
             f"{metrics} | {', '.join(f'`{run}`' for run in evaluation)} |"
         )
+    missing = sorted(set(CONSUMERS) - set(baseline))
+    if missing:
+        lines += [
+            "",
+            "Contract tier only (no representative data under `~/Datasets`): "
+            + ", ".join(f"`{name}`" for name in missing)
+            + ".",
+        ]
     return "\n".join(lines) + "\n"
 
 
