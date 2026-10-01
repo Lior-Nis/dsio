@@ -107,7 +107,7 @@ def test_predictor_preprocessing_matches_the_training_dataset_tensor(
     reference_services: None,
 ) -> None:
     del reference_services
-    from reference_projects.self_supervised.components import UnlabelledSamples
+    from reference_projects.self_supervised.components import DATASET
     from reference_projects.supervised.components import TimeMajorToChannelFirst, evaluation_arrays
 
     from dsio.data.store import SignalStore
@@ -124,7 +124,13 @@ def test_predictor_preprocessing_matches_the_training_dataset_tensor(
 
     prepared = TimeMajorToChannelFirst(channels=2, time=3)(torch.from_numpy(raw["x"]))
 
-    torch.testing.assert_close(prepared[0], UnlabelledSamples(store, ["sample"])[0]["x"])
+    from dsio.config.components import resolve_component
+    from dsio.data.adapters import entity_examples
+
+    items = resolve_component(DATASET)
+    torch.testing.assert_close(
+        prepared[0], items(store, entity_examples(store), ["sample"])[0]["x"]
+    )
 
 
 def test_embedding_rejects_time_major_input(reference_services: None) -> None:

@@ -1,10 +1,10 @@
-"""Data-side components not yet proven by real downstream use.
+"""Experimental data-side components: reviewed, without a compatibility promise.
 
-Legacy experimental under the pre-1.0 clause in docs/component-admission.md: these
-components have no real downstream use yet, carry no compatibility promise, and are
-deleted at 1.0 if still unproven.
+Which ones are proven by real consumers and which are pre-1.0 legacy (no real use yet,
+deleted at 1.0 if still unproven) is recorded in docs/component-warehouse/catalog.md.
 """
 
+from dsio.experimental.data.items import StoredItems
 from dsio.experimental.data.labels import (
     entity_attribute_labels,
 )
@@ -17,6 +17,7 @@ from dsio.experimental.data.windows import (
 )
 
 __all__ = [
+    "StoredItems",
     "StoredSamples",
     "WindowDataset",
     "entity_attribute_labels",

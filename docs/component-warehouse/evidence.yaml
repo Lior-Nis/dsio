@@ -12,6 +12,36 @@
 #   and runs must be immutable MLflow run URIs.
 # - `via` names the component through which a use reaches this one.
 
+dsio.experimental.data.items:StoredItems:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/titanic
+    test: tests/kaggle_portfolio/test_titanic.py
+    kind: real
+  - consumer: reference_projects/kaggle/bike_sharing
+    test: tests/kaggle_portfolio/test_bike_sharing.py
+    kind: real
+  - consumer: reference_projects/kaggle/store_sales
+    test: tests/kaggle_portfolio/test_store_sales.py
+    kind: real
+  - consumer: reference_projects/kaggle/digit_recognizer
+    test: tests/kaggle_portfolio/test_digit_recognizer.py
+    kind: real
+  - consumer: reference_projects/kaggle/essay_scoring
+    test: tests/kaggle_portfolio/test_essay_scoring.py
+    kind: real
+  - consumer: reference_projects/kaggle/rogii
+    test: tests/kaggle_portfolio/test_rogii.py
+    kind: real
+  - consumer: reference_projects/kaggle/child_mind
+    test: tests/kaggle_portfolio/test_child_mind.py
+    kind: real
+  - consumer: reference_projects/supervised
+    test: tests/reference_flows/test_supervised_flow.py
+    kind: fixture
+  - consumer: reference_projects/self_supervised
+    test: tests/reference_flows/test_self_supervised_flow.py
+    kind: fixture
 dsio.experimental.data.labels:entity_attribute_labels:
   legacy: true
   uses: []

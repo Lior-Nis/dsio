@@ -16,6 +16,7 @@ from prefect import task
 from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
+from dsio.experimental.data import StoredItems
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -27,9 +28,9 @@ from dsio.train.capabilities import (
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.child_mind.components import (
     CLASSES,
+    DATASET,
     CmiFusionClassifier,
     CmiObjective,
-    cmi_samples,
 )
 from reference_projects.kaggle.child_mind.data import (
     SENSOR_FEATURES,
@@ -100,7 +101,7 @@ def train(
             manifest,
             fold=0,
             roles=ROLES,
-            dataset_factory=cmi_samples,
+            dataset_factory=resolve_component(DATASET, expected=StoredItems),
             batch_size=BATCH_SIZE,
             num_workers=NUM_WORKERS,
             seed=seed,
@@ -148,7 +149,7 @@ def train(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
-                "dataset_factory": ("reference_projects.kaggle.child_mind.components:cmi_samples"),
+                "dataset_factory": DATASET,
                 "model": model_config,
                 "objective": objective_config,
                 "optimizer": "torch.optim:AdamW",

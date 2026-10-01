@@ -4,15 +4,8 @@
 
 Stored-sample Dataset classes:
   consumers:
-    - reference_projects/kaggle/titanic
-    - reference_projects/kaggle/bike_sharing
-    - reference_projects/kaggle/digit_recognizer
-    - reference_projects/kaggle/essay_scoring
     - reference_projects/kaggle/parkinsons_fog
-    - reference_projects/kaggle/rogii
-    - reference_projects/kaggle/store_sales
-    - reference_projects/kaggle/child_mind
-  reason: Field-mapping dataset (#1), Story 7.1.
+  reason: Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3.
 Window Dataset class:
   consumers:
     - reference_projects/kaggle/child_mind/sequence

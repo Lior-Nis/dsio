@@ -2,45 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
-import numpy as np
 import torch
 from torch import Tensor, nn
-from torch.utils.data import Dataset
 
-from dsio.data.store import SignalStore
+from dsio.config.components import ComponentConfig
 from dsio.experimental.inference import validate_tensor_prediction
 from dsio.experimental.model.components import NTXent
 from reference_projects.supervised.components import (
     TimeMajorToChannelFirst as TimeMajorToChannelFirst,
 )
 
-
-class UnlabelledSamples(Dataset[Mapping[str, Any]]):
-    """Expose stored time-series in the channel-first shape augmentors expect."""
-
-    def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
-        self.store = store
-        self.sample_ids = tuple(sample_ids)
-
-    def __len__(self) -> int:
-        return len(self.sample_ids)
-
-    def __getitem__(self, position: int) -> Mapping[str, Any]:
-        sample = self.store.read_sample(self.sample_ids[position])
-        data = np.array(sample["data"].T, copy=True)
-        return {"sample_id": sample["sample_id"], "x": torch.from_numpy(data)}
-
-
-def unlabelled_samples(
-    store: SignalStore,
-    examples: object,
-    sample_ids: Sequence[str],
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return UnlabelledSamples(store, sample_ids)
+DATASET: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "layout": "channel_first"},
+    },
+}
 
 
 class TinyEmbedding(nn.Module):

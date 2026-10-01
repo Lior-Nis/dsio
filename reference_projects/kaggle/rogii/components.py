@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -10,9 +10,8 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import Dataset
 
-from dsio.data.store import SignalStore
+from dsio.config.components import ComponentConfig
 
 FEATURES = 13
 TARGET_SCALE = 20_000.0
@@ -62,28 +61,13 @@ def pad_wells(items: list[Mapping[str, Any]]) -> Mapping[str, Any]:
     }
 
 
-class WellSamples(Dataset[Mapping[str, Any]]):
-    def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
-        self.store, self.sample_ids = store, tuple(sample_ids)
-
-    def __len__(self) -> int:
-        return len(self.sample_ids)
-
-    def __getitem__(self, position: int) -> Mapping[str, Any]:
-        sample = self.store.read_sample(self.sample_ids[position])
-        data = np.asarray(sample["data"], dtype=np.float32)
-        return {
-            "sample_id": sample["sample_id"],
-            "x": torch.from_numpy(np.array(data[:, :FEATURES], copy=True)),
-            "y": torch.from_numpy(np.array(data[:, FEATURES], copy=True)),
-        }
-
-
-def well_samples(
-    store: SignalStore, examples: object, sample_ids: Sequence[str]
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return WellSamples(store, sample_ids)
+DATASET: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "columns": [0, FEATURES]},
+        "y": {"from": "data", "columns": [FEATURES, FEATURES + 1], "shape": [-1]},
+    },
+}
 
 
 class TvtRegressor(nn.Module):
