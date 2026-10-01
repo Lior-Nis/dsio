@@ -133,3 +133,6 @@ def load_artifact(ref: ArtifactRef, *, tracking_uri: str | None = None) -> bytes
             f"{ref.digest[:12]}; the artifact has been corrupted or replaced"
         )
     return payload
+
+
+__all__ = ["ArtifactIntegrityError", "ArtifactRef", "load_artifact", "save_artifact"]

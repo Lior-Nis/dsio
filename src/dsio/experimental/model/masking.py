@@ -146,3 +146,12 @@ def apply_mask(x: torch.Tensor, hidden: torch.Tensor, value: float = 0.0) -> tor
     learns nothing, and which looks like spectacular convergence.
     """
     return x.masked_fill(hidden.unsqueeze(1), value)
+
+
+__all__ = [
+    "CausalMask",
+    "PatchMask",
+    "RandomMask",
+    "SpanMask",
+    "apply_mask",
+]

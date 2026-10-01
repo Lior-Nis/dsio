@@ -80,3 +80,8 @@ class WindowDataset(Dataset[WindowItem]):
     def groups(self) -> np.ndarray:
         """Group per item, for verifying a loader never crosses a split boundary."""
         return self.index.groups[self.positions]
+
+
+__all__ = [
+    "WindowDataset",
+]

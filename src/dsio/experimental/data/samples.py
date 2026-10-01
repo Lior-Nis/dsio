@@ -60,3 +60,9 @@ def stored_samples(
             f"{digest!r}, but examples describe {examples.name!r} with {examples.digest!r}"
         )
     return StoredSamples(store, sample_ids)
+
+
+__all__ = [
+    "StoredSamples",
+    "stored_samples",
+]

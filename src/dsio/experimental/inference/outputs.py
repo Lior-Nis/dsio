@@ -40,3 +40,9 @@ def validate_tensor_prediction(output: Mapping[str, Any]) -> None:
         raise PredictorError("prediction must be a tensor")
     if not bool(torch.isfinite(prediction).all()):
         raise PredictorError("prediction tensor must contain only finite values")
+
+
+__all__ = [
+    "TensorOutput",
+    "validate_tensor_prediction",
+]

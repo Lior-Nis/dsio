@@ -1,6 +1,6 @@
 # Story 6.5: Place every component where its evidence puts it
 
-Status: review
+Status: done
 
 ## Story
 

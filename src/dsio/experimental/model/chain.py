@@ -100,3 +100,10 @@ def export_encoder(module: Any) -> dict[str, Tensor]:
             for key, value in component.state_dict().items():
                 state[f"{name}.{key}"] = value
     return state
+
+
+__all__ = [
+    "ComponentChain",
+    "LossObjective",
+    "export_encoder",
+]

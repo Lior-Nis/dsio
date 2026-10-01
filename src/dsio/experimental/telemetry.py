@@ -22,7 +22,33 @@ def measure_phase(
     sample_interval_seconds: float = 0.1,
     proc_root: str | Path = "/proc",
 ) -> Iterator[dict[str, Any]]:
-    """Measure one phase without introducing a DSIO telemetry abstraction."""
+    """Measure one phase without introducing a DSIO telemetry abstraction.
+
+    Consumes:
+        A phase name; the ``with`` block is the measured work.
+
+    Produces:
+        A dict filled on exit: ``phase``, ``elapsed_seconds``,
+        ``peak_process_tree_rss_bytes`` (sampled over all threads' child processes),
+        ``cuda`` (peak allocated/reserved bytes and utilization when requested),
+        ``measurement_method`` and ``cache_state``.
+
+    Parameters:
+        ``phase``; ``cuda_device`` (None for CPU-only); ``sample_interval_seconds`` (0.1);
+        ``proc_root`` (``"/proc"``).
+
+    Devices:
+        CPU always; CUDA when ``cuda_device`` is given, failing closed if unavailable.
+
+    Limitations:
+        Linux ``/proc`` RSS sampling only; the OS page cache is uncontrolled.
+
+    Example:
+        >>> with measure_phase("demo") as evidence:
+        ...     total = sum(range(1000))
+        >>> evidence["phase"], evidence["elapsed_seconds"] >= 0
+        ('demo', True)
+    """
     if not phase:
         raise ValueError("phase must be non-empty")
     if (
@@ -128,7 +154,34 @@ def log_phase_evidence(
     evidence: dict[str, Any],
     measurements: dict[str, int | float],
 ) -> None:
-    """Log one phase's consumer-owned resource artifact and native MLflow metrics."""
+    """Log one phase's consumer-owned resource artifact and native MLflow metrics.
+
+    Consumes:
+        An active MLflow run ID, the :func:`measure_phase` evidence and the consumer's own
+        measurements (rows, bytes, examples).
+
+    Produces:
+        ``outputs/<namespace>-telemetry.json`` and ``scale.<namespace>.*`` MLflow metrics.
+
+    Parameters:
+        ``run_id``; ``namespace``; ``evidence``; ``measurements``.
+
+    Devices:
+        Device-independent.
+
+    Limitations:
+        Requires a writable MLflow run.
+
+    Example:
+        >>> from mlflow import MlflowClient
+        >>> client = MlflowClient()
+        >>> run = client.create_run(client.create_experiment("telemetry-example"))
+        >>> with measure_phase("scan") as evidence:
+        ...     rows = sum(range(1000))
+        >>> log_phase_evidence(run.info.run_id, "scan", evidence, {"rows": 1000})
+        >>> "scale.scan.elapsed_seconds" in client.get_run(run.info.run_id).data.metrics
+        True
+    """
     from mlflow import MlflowClient
 
     payload = {"resources": evidence, "measurements": measurements}

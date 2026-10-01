@@ -536,3 +536,29 @@ class IdentityAugmentation(nn.Module):
 
 def no_augmentation() -> nn.Module:
     return IdentityAugmentation()
+
+
+__all__ = [
+    "Conv1dEncoder",
+    "CrossEntropy",
+    "EmbeddingEncoder",
+    "FixedStandardize",
+    "IdentityAugmentation",
+    "InstanceStandardize",
+    "Jitter",
+    "MLP1d",
+    "MaskedMSE",
+    "NTXent",
+    "RandomScale",
+    "VICReg",
+    "bce_loss",
+    "identity_head",
+    "identity_transform",
+    "linear_head",
+    "mae_decoder_head",
+    "mlp_head",
+    "mse_loss",
+    "no_augmentation",
+    "simclr_projector_head",
+    "vicreg_projector_head",
+]

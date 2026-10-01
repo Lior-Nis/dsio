@@ -32,7 +32,76 @@ def calibrate_training_execution(
     expected_epochs: int,
     configuration: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Calibrate the real loader/model/objective while keeping the effective batch fixed."""
+    """Calibrate the real loader/model/objective while keeping the effective batch fixed.
+
+    Consumes:
+        ``module_factory()`` returning a fresh ``DsioModule`` whose ``configure_optimizers``
+        returns a bare optimizer, and ``data_module_factory(candidate)`` taking one candidate
+        mapping (``batch_size``, ``num_workers``, ``pin_memory``, ``prefetch_factor``) and
+        returning an object with ``setup(stage)`` and a ``train_dataloader()`` over a sized
+        dataset whose batches carry ``sample_id``: the project's real model, objective and
+        data.
+
+    Produces:
+        The :func:`~dsio.experimental.execution.calibrate_execution` evidence, measured by
+        short warm-up and timed optimizer steps on the real training path; each trial's
+        measurement adds ``projected_examples_per_second``, ``startup_seconds``,
+        ``peak_process_tree_rss_bytes`` and GPU utilization.
+
+    Parameters:
+        ``seed``; ``accelerator`` (``"cpu"``, ``"cuda"`` or ``"auto"``);
+        ``expected_epochs``; ``configuration`` with ``target_effective_batch_size`` and
+        optional ``warmup_effective_batches`` (1), ``measure_effective_batches`` (10),
+        ``candidates`` (derived from the target when omitted),
+        ``max_device_memory_fraction`` (0.8) and ``max_host_memory_fraction`` (0.5).
+
+    Devices:
+        CPU or CUDA; fails closed when CUDA is requested but unavailable.
+
+    Limitations:
+        Requires an optimizer without a scheduler; loader workers import the full training
+        stack, so worker count trades host memory against throughput; benchmarks are
+        seconds long, not full epochs, and selection is timing-sensitive within the
+        tolerance band.
+
+    Example:
+        >>> import torch
+        >>> from torch.utils.data import DataLoader
+        >>> from dsio.experimental.model import LossObjective
+        >>> from dsio.model.module import DsioModule
+        >>> rows = [
+        ...     {"sample_id": f"s{i}", "x": torch.ones(4), "y": torch.ones(1)} for i in range(32)
+        ... ]
+        >>> class Rows:
+        ...     def __init__(self, candidate):
+        ...         self.candidate = candidate
+        ...     def setup(self, stage):
+        ...         pass
+        ...     def train_dataloader(self):
+        ...         return DataLoader(rows, batch_size=self.candidate["batch_size"])
+        >>> def build_module():
+        ...     return DsioModule(
+        ...         model=torch.nn.Linear(4, 1),
+        ...         objective=LossObjective(torch.nn.MSELoss()),
+        ...         optimizer_factory=torch.optim.SGD,
+        ...         optimizer_parameters={"lr": 0.01},
+        ...     )
+        >>> evidence = calibrate_training_execution(
+        ...     build_module,
+        ...     Rows,
+        ...     seed=7,
+        ...     accelerator="cpu",
+        ...     expected_epochs=1,
+        ...     configuration={
+        ...         "target_effective_batch_size": 8,
+        ...         "measure_effective_batches": 2,
+        ...         "candidates": [{"batch_size": 8}, {"batch_size": 4}],
+        ...     },
+        ... )
+        >>> selected = evidence["selected"]
+        >>> selected["batch_size"] * selected["accumulate_grad_batches"]
+        8
+    """
     target = _positive_integer(
         "target_effective_batch_size", configuration.get("target_effective_batch_size")
     )
@@ -221,7 +290,51 @@ def _benchmark(
 
 
 def log_calibration(run_id: str, evidence: Mapping[str, Any]) -> None:
-    """Record the complete calibration artifact and dashboard-friendly MLflow series."""
+    """Record the complete calibration artifact and dashboard-friendly MLflow series.
+
+    Consumes:
+        An active MLflow run ID and the evidence returned by
+        :func:`calibrate_training_execution`, whose trial measurements carry
+        ``examples_per_second``, ``projected_examples_per_second``,
+        ``peak_device_memory_bytes``, ``peak_process_tree_rss_bytes`` and
+        ``gpu_utilization_mean_percent``.
+
+    Produces:
+        ``execution/calibration.json``, ``calibration.selected.*`` and
+        ``calibration.environment_digest`` params, and one metric step per trial.
+
+    Parameters:
+        ``run_id``; ``evidence``.
+
+    Devices:
+        Device-independent.
+
+    Limitations:
+        Requires a writable MLflow run; it logs, it does not select.
+
+    Example:
+        >>> from mlflow import MlflowClient
+        >>> from dsio.experimental.execution import calibrate_execution
+        >>> client = MlflowClient()
+        >>> run = client.create_run(client.create_experiment("calibration-example"))
+        >>> def benchmark(candidate):  # the measurement shape training calibration records
+        ...     return {
+        ...         "examples_per_second": float(candidate["batch_size"]),
+        ...         "projected_examples_per_second": float(candidate["batch_size"]),
+        ...         "peak_device_memory_bytes": 0,
+        ...         "peak_process_tree_rss_bytes": 0,
+        ...         "gpu_utilization_mean_percent": 0.0,
+        ...     }
+        >>> evidence = calibrate_execution(
+        ...     benchmark,
+        ...     target_effective_batch_size=8,
+        ...     candidates=[{"batch_size": 8}],
+        ...     device="cpu",
+        ... )
+        >>> log_calibration(run.info.run_id, evidence)
+        >>> client.get_run(run.info.run_id).data.params["calibration.selected.batch_size"]
+        '8'
+    """
     client = MlflowClient()
     client.log_dict(run_id, dict(evidence), "execution/calibration.json")
     selected = evidence["selected"]

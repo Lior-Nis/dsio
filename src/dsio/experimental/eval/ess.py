@@ -55,3 +55,10 @@ def effective_sample_size(values: np.ndarray, max_lag: int | None = None) -> flo
         total += value
     n = float(np.asarray(values).size)
     return float(n / (1.0 + 2.0 * total))
+
+
+__all__ = [
+    "EssError",
+    "autocorrelation",
+    "effective_sample_size",
+]
