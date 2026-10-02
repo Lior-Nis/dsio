@@ -57,7 +57,7 @@ def export(
                 "checkpoint_digest": reference.digest,
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
-                "scaler_fit_ids": training["scaler_fit_ids"],
+                "standardization_sample_ids": training["standardization_sample_ids"],
                 "export_form": "pyfunc",
             },
             components={

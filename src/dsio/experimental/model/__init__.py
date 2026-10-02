@@ -41,6 +41,7 @@ from dsio.experimental.model.masking import (
     SpanMask,
     apply_mask,
 )
+from dsio.experimental.model.standardization import Standardize
 
 __all__ = [
     "CausalMask",
@@ -60,6 +61,7 @@ __all__ = [
     "RandomMask",
     "RandomScale",
     "SpanMask",
+    "Standardize",
     "VICReg",
     "apply_mask",
     "bce_loss",

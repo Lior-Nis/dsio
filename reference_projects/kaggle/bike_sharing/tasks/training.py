@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import mlflow
-import numpy as np
 import torch
 from lightning import seed_everything
 from lightning.pytorch.loggers import MLFlowLogger
@@ -16,7 +15,7 @@ from prefect import task
 from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
-from dsio.experimental.data import StoredItems
+from dsio.experimental.data import StoredItems, fit_standardization, record_fitted
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -53,16 +52,6 @@ OPTIMIZER_PARAMETERS = {"lr": 0.005}
 PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters": {}}
 
 
-def _scaler(store: SignalStore, sample_ids: list[str]) -> tuple[list[float], list[float]]:
-    values = np.concatenate(
-        [store.read_sample(value)["data"] for value in sample_ids], axis=0
-    ).astype(np.float64)
-    mean = values.mean(axis=0)
-    scale = values.std(axis=0)
-    scale[scale == 0] = 1.0
-    return mean.tolist(), scale.tolist()
-
-
 @task(persist_result=False)
 def train(
     data: dict[str, Any], split: dict[str, Any], experiment_id: str, seed: int
@@ -74,11 +63,16 @@ def train(
         manifest = load_split_evidence(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
-        fit_ids = list(manifest.fold(0).assignments["train"])
-        mean, scale = _scaler(store, fit_ids)
+        standardization = fit_standardization(store, manifest, fold=FOLD)
+        standardization_artifact = record_fitted(
+            run.info.run_id, "standardization", standardization
+        )
         model_config: ComponentConfig = {
             "reference": "reference_projects.kaggle.bike_sharing.components:DemandRegressor",
-            "parameters": {"mean": mean, "scale": scale},
+            "parameters": {
+                "mean": standardization["mean"],
+                "scale": standardization["scale"],
+            },
         }
         seed_everything(seed, workers=True, verbose=False)
         data_module = DsioDataModule(
@@ -120,7 +114,8 @@ def train(
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
                 "seed": seed,
-                "scaler": {"fit_ids": fit_ids, "mean": mean, "scale": scale},
+                # Everything the fit used and produced, so provenance matches the artifact.
+                "standardization": {"artifact": standardization_artifact, **standardization},
                 "fold": FOLD,
                 "batch_size": BATCH_SIZE,
                 "num_workers": NUM_WORKERS,
@@ -154,6 +149,6 @@ def train(
         return {
             "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
-            "scaler_fit_ids": fit_ids,
+            "standardization_sample_ids": standardization["sample_ids"],
             "identity": identity,
         }

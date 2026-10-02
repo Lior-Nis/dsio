@@ -11,6 +11,80 @@ Conventions every block follows: [conventions.md](conventions.md).
 
 ### `dsio.experimental.data`
 
+#### `dsio.experimental.data.fitting:fit_standardization`
+
+Fit per-feature mean and scale over the samples one split role assigns. — **experimental**; real uses: 1 (bike_sharing).
+
+**Consumes**: A `SignalStore` of `[rows, features]` samples and the replayed split manifest.
+
+**Produces**: `{"mean", "scale", "role", "fold", "sample_ids", "observed"}`: float64 statistics
+over every row of the role's samples (`scale` is the population standard
+deviation, with zero-variance features mapped to 1) and the exact identities used.
+
+**Parameters**: `fold`; `role` (default `"train"`); `observed` (default `false`): ignore
+NaN values per feature instead of propagating them.
+
+**Devices**: CPU (NumPy); fitted once before training.
+
+**Limitations**: Loads the role's samples into memory together; a feature with no observed value
+raises rather than inventing statistics.
+
+**Example**
+
+```python
+>>> from pathlib import Path
+>>> from tempfile import mkdtemp
+>>> import numpy as np
+>>> from dsio.data.adapters import entity_examples
+>>> from dsio.data.splits import generate
+>>> path = Path(mkdtemp()) / "store"
+>>> with SignalStore.builder(path, channels=1) as builder:
+...     for index in range(4):
+...         _ = builder.add(f"s{index}", np.array([[float(index)]]), group=f"g{index}")
+>>> store = SignalStore(path)
+>>> examples = entity_examples(store)
+>>> manifest = generate(
+...     examples, "group_shuffle", name="demo", seed=1,
+...     parameters={"test_size": 0.25},
+... )
+>>> fitted = fit_standardization(store, manifest, fold=0)
+>>> sorted(fitted["sample_ids"]) == sorted(manifest.fold(0).assignments["train"])
+True
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+
+#### `dsio.experimental.data.fitting:record_fitted`
+
+Log fitted values as an MLflow evidence artifact and return its run-relative path. — **experimental**; real uses: 1 (bike_sharing).
+
+**Consumes**: An active MLflow run ID and a JSON-serializable fitted mapping, e.g. from
+:func:`fit_standardization`.
+
+**Produces**: `fitted/<name>.json` on the run; returns that path.
+
+**Parameters**: `run_id`; `name` (a plain file stem); `fitted`.
+
+**Devices**: Device-independent.
+
+**Limitations**: Requires a writable MLflow run.
+
+**Example**
+
+```python
+>>> from mlflow import MlflowClient
+>>> client = MlflowClient()
+>>> run = client.create_run(client.create_experiment("fitted-example"))
+>>> record_fitted(run.info.run_id, "standardization", {"mean": [0.0], "scale": [1.0]})
+'fitted/standardization.json'
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+
 #### `dsio.experimental.data.items:StoredItems`
 
 Map stored samples into identity-bearing training items, field by field. — **experimental**; real uses: 7 (bike_sharing, child_mind, digit_recognizer, essay_scoring, rogii, store_sales, titanic).
@@ -122,6 +196,42 @@ fixed. Selection is benchmark-noise sensitive inside the tolerance band.
 
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
+
+### `dsio.experimental.model`
+
+#### `dsio.experimental.model.standardization:Standardize`
+
+Subtract a fixed per-feature mean and divide by a fixed per-feature scale. — **experimental**; real uses: 2 (bike_sharing, digit_recognizer).
+
+**Consumes**: A tensor whose `axis` dimension holds the features; any other dimensions
+broadcast. A single-value `mean`/`scale` applies to every feature.
+
+**Produces**: A float32 tensor of the input's shape: `(x - mean) / scale`.
+
+**Parameters**: `mean` and `scale`: equal-length sequences of finite numbers (`scale` must be
+non-zero); `axis`: the feature axis (default `-1`, the last).
+
+**Devices**: CPU and accelerators; the statistics are buffers that move with the module.
+
+**Limitations**: Exact division, no epsilon: fitters map zero-variance features to scale 1.
+Missing values (NaN) propagate.
+
+**Example**
+
+```python
+>>> import torch
+>>> stage = Standardize(mean=[1.0, 10.0], scale=[2.0, 5.0])
+>>> stage(torch.tensor([[[3.0, 20.0]]])).tolist()
+[[[1.0, 2.0]]]
+>>> pixels = torch.tensor([[255]], dtype=torch.uint8)
+>>> Standardize(mean=[0.0], scale=[255.0])(pixels).tolist()
+[[1.0]]
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
 
 ### `dsio.experimental.telemetry`
 
@@ -522,7 +632,7 @@ local on purpose.
 | Stored-sample Dataset classes | 1 | `reference_projects/kaggle/parkinsons_fog` | Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
 | Train and export task wiring | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |
-| Train-fold statistics and weight fitting | 3 | `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Training-role fitters (#4a-#4c), Stories 7.2, 9.2, 9.3. |
+| Train-fold statistics and weight fitting | 2 | `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Observed-only statistics and class/group weights (#4a-#4c), Stories 9.2, 9.3. |
 | Verified encoder handoff | 1 | `reference_projects/kaggle/digit_recognizer` | Stays local - pretrained-weights path is deferred to v2. |
 | Well feature engineering | 1 | `reference_projects/kaggle/rogii` | Stays local - domain feature mapping. |
 | Window Dataset class | 1 | `reference_projects/kaggle/child_mind/sequence` | Window dataset with weights and groups (#2), Story 9.1. |

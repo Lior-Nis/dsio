@@ -59,9 +59,10 @@ CLASSIFIER: ComponentConfig = {
     "reference": ("reference_projects.kaggle.digit_recognizer.components:FrozenDigitClassifier"),
     "parameters": {},
 }
+# Raw 8-bit pixels become [0, 1] floats at inference, exactly as the dataset scales them.
 PREPROCESSOR: ComponentConfig = {
-    "reference": "reference_projects.kaggle.digit_recognizer.components:ScalePixels",
-    "parameters": {},
+    "reference": "dsio.experimental.model.standardization:Standardize",
+    "parameters": {"mean": [0.0], "scale": [255.0]},
 }
 
 
