@@ -46,6 +46,19 @@ so that I never write an `Objective` (cohort #18, #20).
   - "Local objectives" in the candidates register drops the four migrated consumers.
   - Legacy `LossObjective` says `SupervisedObjective` supersedes it.
   - The `dsio.experimental.model` package docstring no longer calls every block unproven.
+- [x] Task 6: Review follow-ups. The adversarial review found nothing critical. It confirmed bit parity, values and parameter gradients for all six configs. It also confirmed unchanged goldens and metric names, class-weight buffers following the module, and deterministic provenance.
+  - [x] 6.1 (important) The shape rule no longer lets a non-class loss broadcast. Only `CrossEntropyLoss`, `NLLLoss` and `MultiMarginLoss` drop the class axis for integer targets, so an int64 `[B]` count target against a `[B,1]` Poisson prediction fails. Same-shape integer targets (`MultiLabelMarginLoss`) are accepted.
+  - [x] 6.2 (important) Under `sample_weighted`, class weights scale per-sample losses (`mean(w_i · w_c[y_i] · l_i)`, the CMI sequence semantics) rather than taking the native weighted mean. This is documented and tested. Targets equal to the loss's `ignore_index` are refused, because they would still count in the mean.
+  - [x] 6.3 (important) Stateful TorchMetrics are refused as metrics. Called per batch, their state grew without reset and was shared across stages. A per-stage `update`/log path waits for a consumer that needs it.
+  - [x] 6.4 (important) The invariance claim is now precise:
+    - `DsioModule`'s logged epoch values (batch-size-weighted means) are partition-invariant.
+    - Accumulated gradients equal the full batch for equal-size micro-batches. A new gradient test shows this. Lightning averages accumulated micro-batches equally, so uneven partitions weight them differently.
+    - Epoch values are logged per process.
+  - [x] 6.5 Legacy `size_average` and `reduce` are owned like `reduction`.
+  - [x] 6.6 Metric names must be identifiers, not `loss`/`loss_step`/`loss_epoch`, and not a `ModuleDict` attribute.
+  - [x] 6.7 Scalar `pos_weight` works.
+  - [x] 6.8 Sample weights follow the loss values' dtype, and must be `[batch]` or `[batch, 1]`.
+  - [x] 6.9 A non-tensor model output raises a clear error.
 
 ## Dev Notes
 
@@ -55,7 +68,10 @@ so that I never write an `Objective` (cohort #18, #20).
   - Store's RMSLE was `sqrt(loss.detach())`; it is now `sqrt(mse)` over the same operands, which gives the same value.
   - No objective draws randomness, so construction order is irrelevant.
 - **Why native reduction without sample weights.** `CrossEntropyLoss(weight=...)` takes a class-weighted mean (divided by the sum of target-class weights), and a plain `nll` mean can sum in a different order than `reduction="none"` followed by `.mean()`. Keeping the native reduction preserves both semantics and bits.
-- **Why `mean(w * l)`.** `DsioModule` logs each micro-batch value weighted by its batch size. With mean-1 weights, the batch-size-weighted mean of the per-batch `mean(w * l)` values equals the full-batch value for any partition. Per-batch `/sum(w)` does not.
+- **Why `mean(w * l)`.**
+  - `DsioModule` logs each micro-batch value weighted by its batch size. With mean-1 weights, the batch-size-weighted mean of the per-batch `mean(w * l)` values equals the full-batch value for any partition. Per-batch `/sum(w)` does not.
+  - For optimization, accumulated equal-size micro-batches reproduce the full-batch gradient.
+  - AC 2's "optimized loss identical" holds for equal-size micro-batches, which is the partition DSio's loaders produce apart from a final partial batch.
 - **What stays local.**
   - The masked dense objectives of FoG and ROGII (Story 8.2).
   - The objectives of Essay and both CMI consumers, which move with their sequence and weighting stories.

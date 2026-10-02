@@ -346,23 +346,25 @@ Compute a native loss between the model's prediction and a declared batch field.
 `DsioModule` logs as `<stage>/<name>`.
 
 **Parameters**: `loss`: component configuration of a native loss module (`torch.nn:MSELoss`,
-`torch.nn:CrossEntropyLoss`, ...). Its parameters are native; list-valued
-`weight` and `pos_weight` become float32 tensors, and `reduction` is owned
-by the objective. `target`: the batch field to predict (default `y`; `x`
-makes a reconstruction objective). `target_dtype`: optional cast (`float32`,
-`float64`, `int64`). `target_shape`: optional per-sample reshape, e.g.
-`[]` turns a `[batch, 1]` class column into `[batch]`. `metrics`: named
-component configurations of `(prediction, target)` modules. `metric_stages`:
-the stages that compute metrics (default every stage). `sample_weighted`:
-weight each sample's loss and metrics (default `false`).
+`torch.nn:CrossEntropyLoss`, ...). Its parameters are native; numeric `weight`
+and `pos_weight` become float32 tensors, and `reduction` (with the legacy
+`size_average`/`reduce`) is owned by the objective. `target`: the batch
+field to predict (default `y`; `x` makes a reconstruction objective).
+`target_dtype`: optional cast (`float32`, `float64`, `int64`).
+`target_shape`: optional per-sample reshape, e.g. `[]` turns a `[batch, 1]`
+class column into `[batch]`. `metrics`: component configurations of stateless
+`(prediction, target)` modules, keyed by identifier names. `metric_stages`: the
+stages that compute metrics (default every stage). `sample_weighted`: weight each
+sample's loss and metrics (default `false`).
 
 **Devices**: CPU and accelerators; class weights are buffers of the loss and move with it.
 
-**Limitations**: After adaptation, a floating target must match the prediction's shape exactly and
-an integer target must match it without the class dimension, so a `[batch, 1]`
-target is never silently broadcast against a `[batch]` prediction. Sample
-weighting needs a loss and metrics that accept `reduction="none"`. Masked dense
-targets need a masked objective.
+**Limitations**: After adaptation, an integer target for a class-index loss (`CrossEntropyLoss`,
+`NLLLoss`, `MultiMarginLoss`) must match the prediction without its class
+dimension, and every other target must match the prediction's shape exactly, so a
+target is never silently broadcast. Sample weighting needs a loss and metrics that
+accept `reduction="none"`. Stateful TorchMetrics are refused as metrics. Masked
+dense targets need a masked objective. Epoch values are logged per process.
 
 **Example**
 

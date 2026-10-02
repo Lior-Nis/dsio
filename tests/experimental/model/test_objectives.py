@@ -74,8 +74,20 @@ def test_a_target_is_never_silently_broadcast_or_squeezed() -> None:
 
     classes = {"x": torch.randn(4, 3), "y": torch.tensor([[0], [1], [2], [1]])}
     cross_entropy = {"reference": "torch.nn:CrossEntropyLoss"}
-    with pytest.raises(ValueError, match="class-index target"):
+    with pytest.raises(ValueError, match=r"needs \(4,\)"):
         SupervisedObjective(loss=cross_entropy)(nn.Identity(), classes, "train")
+    # Only class-index losses drop the class axis: an integer count target must match exactly.
+    counts = {"x": torch.zeros(4, 1), "y": torch.tensor([1, 0, 2, 3])}
+    with pytest.raises(ValueError, match=r"needs \(4, 1\)"):
+        SupervisedObjective(loss={"reference": "torch.nn:PoissonNLLLoss"})(
+            nn.Identity(), counts, "train"
+        )
+    labels = {"x": torch.randn(2, 3), "y": torch.tensor([[0, 2, -1], [1, -1, 0]])}
+    multilabel = SupervisedObjective(loss={"reference": "torch.nn:MultiLabelMarginLoss"})
+    assert torch.equal(
+        multilabel(nn.Identity(), labels, "train")["loss"],
+        F.multilabel_margin_loss(labels["x"], labels["y"]),
+    )
     adapted = SupervisedObjective(loss=cross_entropy, target_shape=[], target_dtype="int64")
     assert torch.equal(
         adapted(nn.Identity(), classes, "train")["loss"],
@@ -124,7 +136,7 @@ def test_metrics_follow_the_configured_stages() -> None:
 
 
 def test_configuration_and_batches_are_validated() -> None:
-    with pytest.raises(ValueError, match="reduction is owned by the objective"):
+    with pytest.raises(ValueError, match=r"\[.reduction.\] owned by the objective"):
         SupervisedObjective(
             loss={"reference": "torch.nn:MSELoss", "parameters": {"reduction": "sum"}}
         )
@@ -132,7 +144,7 @@ def test_configuration_and_batches_are_validated() -> None:
         SupervisedObjective(loss=MSE, target_dtype="float16")
     with pytest.raises(ValueError, match="metric_stages"):
         SupervisedObjective(loss=MSE, metric_stages=["predict"])
-    with pytest.raises(ValueError, match="not 'loss'"):
+    with pytest.raises(ValueError, match="metric names must be identifiers"):
         SupervisedObjective(loss=MSE, metrics={"loss": MAE})
     with pytest.raises(ComponentError, match=r"metric 'rmse'.*reduction='none'"):
         SupervisedObjective(
@@ -153,3 +165,65 @@ def test_configuration_and_batches_are_validated() -> None:
     with pytest.raises(ValueError, match="3 values for 2 samples"):
         _weighted({**batch, "sample_weight": torch.ones(3)})
     assert RootMeanSquaredError()(torch.ones(2), torch.ones(2)).item() == 0.0
+
+
+def test_equal_micro_batches_accumulate_the_full_batch_gradient() -> None:
+    torch.manual_seed(2)
+    model = nn.Linear(2, 1)
+    x, y = torch.randn(8, 2), torch.randn(8, 1)
+    weights = torch.rand(8) + 0.5
+    weights = weights / weights.mean()
+    objective = SupervisedObjective(loss=MSE, sample_weighted=True)
+
+    objective(model, {"x": x, "y": y, "sample_weight": weights}, "train")["loss"].backward()
+    full = [parameter.grad.clone() for parameter in model.parameters()]
+    model.zero_grad()
+    for part in range(2):  # Lightning divides each accumulated loss by the micro-batch count
+        rows = slice(4 * part, 4 * part + 4)
+        batch = {"x": x[rows], "y": y[rows], "sample_weight": weights[rows]}
+        (objective(model, batch, "train")["loss"] / 2).backward()
+    for expected, parameter in zip(full, model.parameters(), strict=True):
+        assert torch.allclose(parameter.grad, expected)
+
+
+def test_sample_weights_scale_class_weighted_losses_and_refuse_ignored_targets() -> None:
+    logits, labels = torch.randn(4, 3), torch.tensor([0, 1, 2, 1])
+    weights = torch.tensor([0.5, 1.5, 1.0, 1.0])
+    objective = SupervisedObjective(
+        loss={"reference": "torch.nn:CrossEntropyLoss", "parameters": {"weight": [1.0, 2.0, 0.5]}},
+        sample_weighted=True,
+    )
+    batch = {"x": logits, "y": labels, "sample_weight": weights}
+    per_sample = F.cross_entropy(
+        logits, labels, weight=torch.tensor([1.0, 2.0, 0.5]), reduction="none"
+    )
+    assert torch.equal(
+        objective(nn.Identity(), batch, "train")["loss"], (per_sample * weights).mean()
+    )
+    with pytest.raises(ValueError, match="ignore_index -100"):
+        objective(nn.Identity(), {**batch, "y": torch.tensor([0, -100, 2, 1])}, "train")
+
+
+def test_owned_parameters_names_and_stateful_metrics_are_refused() -> None:
+    for parameters in ({"size_average": False}, {"reduce": False}):
+        with pytest.raises(ValueError, match="owned by the objective"):
+            SupervisedObjective(loss={"reference": "torch.nn:MSELoss", "parameters": parameters})
+    for name in ("train", "top.1", "loss_step"):
+        with pytest.raises(ValueError, match="metric names must be identifiers"):
+            SupervisedObjective(loss=MSE, metrics={name: MAE})
+    with pytest.raises(ValueError, match="stateful TorchMetrics"):
+        SupervisedObjective(
+            loss=MSE, metrics={"auc": {"reference": "torchmetrics.classification:BinaryAUROC"}}
+        )
+    scalar = SupervisedObjective(
+        loss={"reference": "torch.nn:BCEWithLogitsLoss", "parameters": {"pos_weight": 2.0}}
+    )
+    batch = {"x": torch.zeros(2, 1), "y": torch.ones(2, 1)}
+    assert torch.equal(
+        scalar(nn.Identity(), batch, "train")["loss"],
+        F.binary_cross_entropy_with_logits(batch["x"], batch["y"], pos_weight=torch.tensor([2.0])),
+    )
+    double = {**batch, "sample_weight": torch.ones(2, dtype=torch.float64)}
+    assert _weighted(double)["loss"].dtype == torch.float32
+    with pytest.raises(ValueError, match=r"\[batch\] or \[batch, 1\]"):
+        _weighted({**batch, "sample_weight": torch.ones(1, 2)})

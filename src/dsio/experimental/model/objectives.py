@@ -8,6 +8,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+from torchmetrics import Metric
 
 from dsio.config.components import (
     ComponentError,
@@ -17,19 +18,28 @@ from dsio.config.components import (
 
 _DTYPES = {"float32": torch.float32, "float64": torch.float64, "int64": torch.int64}
 _STAGES = ("train", "validate", "test")
-# Native loss parameters that take a tensor; configuration carries them as number lists.
+# Native loss parameters that take a tensor; configuration carries them as numbers.
 _TENSOR_PARAMETERS = ("weight", "pos_weight")
+# The objective decides how per-element values reduce.
+_OWNED_PARAMETERS = ("reduction", "size_average", "reduce")
+# Native losses whose integer target is one class index per sample, without the class axis.
+_CLASS_INDEX_LOSSES = (nn.CrossEntropyLoss, nn.NLLLoss, nn.MultiMarginLoss)
+_RESERVED_NAMES = frozenset({"loss", "loss_step", "loss_epoch"})
 
 
 class SupervisedObjective(nn.Module):
     """Compute a native loss between the model's prediction and a declared batch field.
 
-    The loss keeps its native semantics: class weights given as ``weight`` behave exactly
-    as in PyTorch (``CrossEntropyLoss`` takes their weighted mean). With
-    ``sample_weighted``, the loss is built with ``reduction="none"`` and reduced as
-    ``mean(w * loss)``. Sample weights must already have training-role mean 1; they are
-    never renormalized per micro-batch, so the loss does not depend on how samples are
-    partitioned into batches.
+    Without sample weights the loss keeps its native reduction, so class weights given as
+    ``weight`` behave exactly as in PyTorch (``CrossEntropyLoss`` takes their weighted
+    mean). With ``sample_weighted``, the loss is built with ``reduction="none"`` and
+    reduced as ``mean(w * loss)``: a class weight then scales its samples' losses with no
+    per-batch renormalization, and targets equal to the loss's ``ignore_index`` are
+    refused, since they would still count in the mean. Sample weights must already have
+    training-role mean 1 and are never renormalized per micro-batch, so ``DsioModule``'s
+    logged epoch values (batch-size-weighted means) do not depend on how samples are
+    partitioned, and accumulated gradients match the full batch for equal-size
+    micro-batches.
 
     Consumes:
         A batch with ``x`` (the model input), the target field, and, when
@@ -41,25 +51,27 @@ class SupervisedObjective(nn.Module):
 
     Parameters:
         ``loss``: component configuration of a native loss module (``torch.nn:MSELoss``,
-        ``torch.nn:CrossEntropyLoss``, ...). Its parameters are native; list-valued
-        ``weight`` and ``pos_weight`` become float32 tensors, and ``reduction`` is owned
-        by the objective. ``target``: the batch field to predict (default ``y``; ``x``
-        makes a reconstruction objective). ``target_dtype``: optional cast (``float32``,
-        ``float64``, ``int64``). ``target_shape``: optional per-sample reshape, e.g.
-        ``[]`` turns a ``[batch, 1]`` class column into ``[batch]``. ``metrics``: named
-        component configurations of ``(prediction, target)`` modules. ``metric_stages``:
-        the stages that compute metrics (default every stage). ``sample_weighted``:
-        weight each sample's loss and metrics (default ``false``).
+        ``torch.nn:CrossEntropyLoss``, ...). Its parameters are native; numeric ``weight``
+        and ``pos_weight`` become float32 tensors, and ``reduction`` (with the legacy
+        ``size_average``/``reduce``) is owned by the objective. ``target``: the batch
+        field to predict (default ``y``; ``x`` makes a reconstruction objective).
+        ``target_dtype``: optional cast (``float32``, ``float64``, ``int64``).
+        ``target_shape``: optional per-sample reshape, e.g. ``[]`` turns a ``[batch, 1]``
+        class column into ``[batch]``. ``metrics``: component configurations of stateless
+        ``(prediction, target)`` modules, keyed by identifier names. ``metric_stages``: the
+        stages that compute metrics (default every stage). ``sample_weighted``: weight each
+        sample's loss and metrics (default ``false``).
 
     Devices:
         CPU and accelerators; class weights are buffers of the loss and move with it.
 
     Limitations:
-        After adaptation, a floating target must match the prediction's shape exactly and
-        an integer target must match it without the class dimension, so a ``[batch, 1]``
-        target is never silently broadcast against a ``[batch]`` prediction. Sample
-        weighting needs a loss and metrics that accept ``reduction="none"``. Masked dense
-        targets need a masked objective.
+        After adaptation, an integer target for a class-index loss (``CrossEntropyLoss``,
+        ``NLLLoss``, ``MultiMarginLoss``) must match the prediction without its class
+        dimension, and every other target must match the prediction's shape exactly, so a
+        target is never silently broadcast. Sample weighting needs a loss and metrics that
+        accept ``reduction="none"``. Stateful TorchMetrics are refused as metrics. Masked
+        dense targets need a masked objective. Epoch values are logged per process.
 
     Example:
         >>> import torch
@@ -115,6 +127,17 @@ class SupervisedObjective(nn.Module):
             )
         target = self._target(batch, prediction)
         weights = self._weights(batch, prediction) if self.sample_weighted else None
+        ignored = getattr(self.loss, "ignore_index", None)
+        if (
+            weights is not None
+            and ignored is not None
+            and not target.is_floating_point()
+            and bool((target == ignored).any())
+        ):
+            raise ValueError(
+                f"sample-weighted targets cannot use ignore_index {ignored}: "
+                "ignored samples would still count in the weighted mean"
+            )
         result = {"loss": _reduce(self.loss(prediction, target), weights)}
         if stage in self.metric_stages:
             detached = prediction.detach()
@@ -133,14 +156,13 @@ class SupervisedObjective(nn.Module):
             target = target.reshape(target.shape[0], *self.target_shape)
         if self.target_dtype is not None:
             target = target.to(self.target_dtype)
-        if target.is_floating_point():
-            expected = tuple(prediction.shape)
-        else:
+        if isinstance(self.loss, _CLASS_INDEX_LOSSES) and not target.is_floating_point():
             expected = (prediction.shape[0], *prediction.shape[2:])
+        else:
+            expected = tuple(prediction.shape)
         if tuple(target.shape) != expected:
-            kind = "floating" if target.is_floating_point() else "class-index"
             raise ValueError(
-                f"{kind} target {self.target!r} has shape {tuple(target.shape)}; prediction "
+                f"target {self.target!r} has shape {tuple(target.shape)}; prediction "
                 f"{tuple(prediction.shape)} needs {expected} (declare target_shape to adapt)"
             )
         return target
@@ -149,6 +171,10 @@ class SupervisedObjective(nn.Module):
         weights = batch.get("sample_weight")
         if not isinstance(weights, Tensor):
             raise ValueError("a sample-weighted objective needs a sample_weight tensor")
+        if weights.ndim not in (1, 2) or (weights.ndim == 2 and weights.shape[1] != 1):
+            raise ValueError(
+                f"sample_weight must be [batch] or [batch, 1], got {tuple(weights.shape)}"
+            )
         weights = weights.reshape(-1)
         if weights.shape[0] != prediction.shape[0]:
             raise ValueError(
@@ -192,26 +218,37 @@ class RootMeanSquaredError(nn.Module):
 
 def _metric_configs(metrics: Mapping[str, Mapping[str, Any]] | None) -> dict[str, Any]:
     configs = dict(metrics or {})
+    probe = nn.ModuleDict()
     for name in configs:
-        if not isinstance(name, str) or not name or "/" in name or name == "loss":
-            raise ValueError(f"metric names must be non-empty, without '/', not 'loss': {name!r}")
+        if (
+            not isinstance(name, str)
+            or not name.isidentifier()
+            or name in _RESERVED_NAMES
+            or hasattr(probe, name)
+        ):
+            raise ValueError(
+                f"metric names must be identifiers, not {sorted(_RESERVED_NAMES)} or a "
+                f"module attribute: {name!r}"
+            )
     return configs
 
 
 def _build(role: str, config: Mapping[str, Any], sample_weighted: bool) -> nn.Module:
     validated = validate_component_config(config)
     parameters = dict(validated["parameters"])
-    if "reduction" in parameters:
-        raise ValueError(f"{role}: reduction is owned by the objective")
+    owned = sorted(set(parameters) & set(_OWNED_PARAMETERS))
+    if owned:
+        raise ValueError(f"{role}: {owned} owned by the objective")
     runtime: dict[str, Any] = {
-        name: torch.as_tensor(parameters.pop(name), dtype=torch.float32)
+        name: torch.atleast_1d(torch.as_tensor(parameters.pop(name), dtype=torch.float32))
         for name in _TENSOR_PARAMETERS
-        if isinstance(parameters.get(name), list)
+        if isinstance(parameters.get(name), list | int | float)
+        and not isinstance(parameters.get(name), bool)
     }
     if sample_weighted:
         runtime["reduction"] = "none"
     try:
-        return resolve_component(
+        module = resolve_component(
             {"reference": validated["reference"], "parameters": parameters},
             expected=nn.Module,
             **runtime,
@@ -219,6 +256,9 @@ def _build(role: str, config: Mapping[str, Any], sample_weighted: bool) -> nn.Mo
     except ComponentError as error:
         hint = " (sample weighting needs reduction='none')" if sample_weighted else ""
         raise ComponentError(f"{role}: {error}{hint}") from error
+    if isinstance(module, Metric):
+        raise ValueError(f"{role}: stateful TorchMetrics are not supported as metrics")
+    return module
 
 
 def _reduce(values: Tensor, weights: Tensor | None) -> Tensor:
@@ -228,7 +268,8 @@ def _reduce(values: Tensor, weights: Tensor | None) -> Tensor:
         raise ValueError(
             f"a sample-weighted loss must return per-sample values, got {tuple(values.shape)}"
         )
-    return (values * weights.reshape(-1, *([1] * (values.ndim - 1)))).mean()
+    weights = weights.to(values.dtype).reshape(-1, *([1] * (values.ndim - 1)))
+    return (values * weights).mean()
 
 
 def _shape(shape: Sequence[int]) -> tuple[int, ...]:
