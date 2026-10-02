@@ -48,26 +48,6 @@ class TimeMajorToChannelFirst(nn.Module):
         return x.transpose(1, 2).contiguous()
 
 
-class TinyRegressor(nn.Module):
-    input_shape = (1, 4)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(self.input_shape[0] * self.input_shape[1], 1),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or tuple(x.shape[1:]) != self.input_shape:
-            raise ValueError(
-                "TinyRegressor expects [batch, channels, time] shape "
-                f"(batch, {self.input_shape[0]}, {self.input_shape[1]}), "
-                f"got {tuple(x.shape)}"
-            )
-        return self.network(x.float())
-
-
 class RegressionObjective(nn.Module):
     def forward(
         self,

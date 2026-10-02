@@ -16,6 +16,7 @@ from tests.golden import assert_golden_metrics
 from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
+from dsio.experimental.model import MLP
 from dsio.experimental.train.augmentation import TwoView
 from dsio.model.module import DsioModule
 from dsio.tracking import canonical_dataset_digest
@@ -135,10 +136,12 @@ def test_predictor_preprocessing_matches_the_training_dataset_tensor(
 
 def test_embedding_rejects_time_major_input(reference_services: None) -> None:
     del reference_services
-    from reference_projects.self_supervised.components import TinyEmbedding
+    from reference_projects.self_supervised.tasks.training import _MODEL
 
-    with pytest.raises(ValueError, match=r"\[batch, channels, time\].*\(batch, 1, 4\)"):
-        TinyEmbedding()(torch.ones(2, 4, 1))
+    from dsio.config.components import resolve_component
+
+    with pytest.raises(ValueError, match=r"expects \[batch, 1, 4\], got \(2, 4, 1\)"):
+        resolve_component(_MODEL)(torch.ones(2, 4, 1))
 
 
 def test_self_supervised_reference_replays_accelerator_views_and_evidence(
@@ -150,7 +153,6 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
     from prefect.testing.utilities import prefect_test_harness
     from reference_projects.self_supervised.components import (
         ContrastiveObjective,
-        TinyEmbedding,
     )
     from reference_projects.self_supervised.flow import self_supervised_flow
 
@@ -225,7 +227,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         (DsioModule, DsioDataModule),
         (DsioModule, DsioDataModule),
     ]
-    assert all(isinstance(model, TinyEmbedding) for _, _, model, _ in fits)
+    assert all(isinstance(model, MLP) for _, _, model, _ in fits)
     assert all(isinstance(objective, ContrastiveObjective) for _, _, _, objective in fits)
     assert (
         runtime_configuration

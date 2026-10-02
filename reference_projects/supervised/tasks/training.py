@@ -29,7 +29,6 @@ from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.supervised.components import (
     DATASET,
     RegressionObjective,
-    TinyRegressor,
 )
 
 _SHUFFLE = {"train": True, "validate": False, "test": False, "predict": False}
@@ -45,15 +44,16 @@ _TRAINER = TrainerConfig(
     num_sanity_val_steps=0,
 )
 
+INPUT_SHAPE = (1, 4)  # [channels, time] after the channel-first preprocessor
 _MODEL: ComponentConfig = {
-    "reference": "reference_projects.supervised.components:TinyRegressor",
-    "parameters": {},
+    "reference": "dsio.experimental.model.compositions:MLP",
+    "parameters": {"input_shape": list(INPUT_SHAPE), "output": 1},
 }
 _PREPROCESSOR: ComponentConfig = {
     "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
     "parameters": {
-        "channels": TinyRegressor.input_shape[0],
-        "time": TinyRegressor.input_shape[1],
+        "channels": INPUT_SHAPE[0],
+        "time": INPUT_SHAPE[1],
     },
 }
 

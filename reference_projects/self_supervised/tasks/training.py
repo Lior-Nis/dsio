@@ -29,7 +29,6 @@ from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.self_supervised.components import (
     DATASET,
     ContrastiveObjective,
-    TinyEmbedding,
 )
 
 _AUGMENTOR: ComponentConfig = {
@@ -55,15 +54,21 @@ _TRAINER = TrainerConfig(
     log_every_n_steps=1,
     limit_val_batches=0,
 )
+INPUT_SHAPE = (1, 4)  # [channels, time] after the channel-first preprocessor
 _MODEL: ComponentConfig = {
-    "reference": "reference_projects.self_supervised.components:TinyEmbedding",
-    "parameters": {},
+    "reference": "dsio.experimental.model.compositions:MLP",
+    "parameters": {
+        "input_shape": list(INPUT_SHAPE),
+        "hidden": [4],
+        "output": 2,
+        "activation": "tanh",
+    },
 }
 _PREPROCESSOR: ComponentConfig = {
     "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
     "parameters": {
-        "channels": TinyEmbedding.input_shape[0],
-        "time": TinyEmbedding.input_shape[1],
+        "channels": INPUT_SHAPE[0],
+        "time": INPUT_SHAPE[1],
     },
 }
 _COMPONENTS = {

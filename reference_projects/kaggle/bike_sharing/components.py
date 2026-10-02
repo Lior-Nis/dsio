@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 import torch
@@ -10,7 +10,6 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
-from dsio.experimental.model import Standardize
 
 FEATURES = 9
 
@@ -22,20 +21,6 @@ DATASET: ComponentConfig = {
         "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "shape": [1]},
     },
 }
-
-
-class DemandRegressor(nn.Module):
-    def __init__(self, mean: Sequence[float], scale: Sequence[float]) -> None:
-        super().__init__()
-        if len(mean) != FEATURES or len(scale) != FEATURES:
-            raise ValueError(f"mean and scale must each contain {FEATURES} values")
-        self.standardize = Standardize(mean, scale)
-        self.network = nn.Sequential(nn.Flatten(), nn.Linear(FEATURES, 1))
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or tuple(x.shape[1:]) != (1, FEATURES):
-            raise ValueError(f"expected [batch, 1, {FEATURES}], got {tuple(x.shape)}")
-        return F.softplus(self.network(self.standardize(x.float())))
 
 
 class DemandObjective(nn.Module):

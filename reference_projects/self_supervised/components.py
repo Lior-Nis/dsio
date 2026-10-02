@@ -23,30 +23,6 @@ DATASET: ComponentConfig = {
 }
 
 
-class TinyEmbedding(nn.Module):
-    """A tiny deterministic embedding network for the synthetic signal."""
-
-    input_shape = (1, 4)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(self.input_shape[0] * self.input_shape[1], 4),
-            nn.Tanh(),
-            nn.Linear(4, 2),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or tuple(x.shape[1:]) != self.input_shape:
-            raise ValueError(
-                "TinyEmbedding expects [batch, channels, time] shape "
-                f"(batch, {self.input_shape[0]}, {self.input_shape[1]}), "
-                f"got {tuple(x.shape)}"
-            )
-        return self.network(x.float())
-
-
 class ContrastiveObjective(nn.Module):
     """Apply the named NT-Xent objective to the two-view training batch."""
 

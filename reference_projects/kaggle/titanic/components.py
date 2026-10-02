@@ -23,17 +23,6 @@ DATASET: ComponentConfig = {
 }
 
 
-class PassengerClassifier(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.network = nn.Sequential(nn.Flatten(), nn.Linear(FEATURES, 1))
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or tuple(x.shape[1:]) != (1, FEATURES):
-            raise ValueError(f"expected [batch, 1, {FEATURES}], got {tuple(x.shape)}")
-        return self.network(x.float())
-
-
 class PassengerObjective(nn.Module):
     def forward(
         self, model: nn.Module, batch: Mapping[str, Any], stage: str

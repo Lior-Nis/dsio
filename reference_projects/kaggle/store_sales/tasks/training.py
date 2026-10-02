@@ -16,6 +16,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.experimental.data import StoredItems
+from dsio.experimental.model import MLP
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -29,7 +30,6 @@ from reference_projects.kaggle.store_sales.components import (
     DATASET,
     FEATURES,
     ForecastObjective,
-    ForecastRegressor,
 )
 from reference_projects.kaggle.store_sales.data import CONTEXT_DAYS, HORIZON_DAYS
 from reference_projects.kaggle.store_sales.tasks.data import labelled_examples
@@ -52,10 +52,10 @@ BATCH_SIZE = 64
 NUM_WORKERS = 0
 OPTIMIZER_PARAMETERS = {"lr": 0.01}
 MODEL_PARAMETERS = {
-    "context_days": CONTEXT_DAYS,
-    "horizon_days": HORIZON_DAYS,
-    "features": FEATURES,
-    "hidden": 32,
+    "input_shape": [CONTEXT_DAYS + HORIZON_DAYS, FEATURES],
+    "hidden": [32],
+    "output": HORIZON_DAYS,
+    "output_activation": "softplus",
 }
 PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters": {}}
 
@@ -72,7 +72,7 @@ def train(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         model_config: ComponentConfig = {
-            "reference": "reference_projects.kaggle.store_sales.components:ForecastRegressor",
+            "reference": "dsio.experimental.model.compositions:MLP",
             "parameters": MODEL_PARAMETERS,
         }
         seed_everything(seed, workers=True, verbose=False)
@@ -90,7 +90,7 @@ def train(
             drop_last=DROP_LAST,
         )
         module = DsioModule(
-            model=resolve_component(model_config, expected=ForecastRegressor),
+            model=resolve_component(model_config, expected=MLP),
             objective=ForecastObjective(),
             optimizer_factory=torch.optim.Adam,
             optimizer_parameters=OPTIMIZER_PARAMETERS,

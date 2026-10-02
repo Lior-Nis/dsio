@@ -18,6 +18,7 @@ from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
 from dsio.experimental.data import StoredItems
+from dsio.experimental.model import Chain
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance, require_evidence
 from dsio.train.artifacts import ArtifactRef, load_artifact, save_artifact
@@ -28,11 +29,11 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.digit_recognizer.components import (
+    AUTOENCODER,
+    CLASSIFIER,
     LABELLED_DATASET,
     UNLABELLED_DATASET,
     ClassificationObjective,
-    DigitAutoencoder,
-    FrozenDigitClassifier,
     ReconstructionObjective,
 )
 from reference_projects.kaggle.digit_recognizer.tasks.data import labelled_examples
@@ -55,10 +56,6 @@ BATCH_SIZE = 4
 NUM_WORKERS = 0
 PRETRAIN_OPTIMIZER_PARAMETERS = {"lr": 0.001}
 CLASSIFIER_OPTIMIZER_PARAMETERS = {"lr": 0.002}
-CLASSIFIER: ComponentConfig = {
-    "reference": ("reference_projects.kaggle.digit_recognizer.components:FrozenDigitClassifier"),
-    "parameters": {},
-}
 # Raw 8-bit pixels become [0, 1] floats at inference, exactly as the dataset scales them.
 PREPROCESSOR: ComponentConfig = {
     "reference": "dsio.experimental.model.standardization:Standardize",
@@ -119,7 +116,7 @@ def pretrain_encoder(
             store, manifest, seed, resolve_component(UNLABELLED_DATASET, expected=StoredItems)
         )
         module = DsioModule(
-            model=DigitAutoencoder(),
+            model=resolve_component(AUTOENCODER, expected=Chain),
             objective=ReconstructionObjective(),
             optimizer_factory=torch.optim.Adam,
             optimizer_parameters=PRETRAIN_OPTIMIZER_PARAMETERS,
@@ -148,7 +145,7 @@ def pretrain_encoder(
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": UNLABELLED_DATASET,
-                "model": "reference_projects.kaggle.digit_recognizer.components:DigitAutoencoder",
+                "model": AUTOENCODER,
                 "objective": (
                     "reference_projects.kaggle.digit_recognizer.components:ReconstructionObjective"
                 ),
@@ -158,7 +155,7 @@ def pretrain_encoder(
         log_capabilities(trainer.logger, execution)
         trainer.fit(module, datamodule=data_module)
         buffer = io.BytesIO()
-        torch.save(module.model.encoder.state_dict(), buffer)
+        torch.save(module.model.backbone.state_dict(), buffer)
         encoder = save_artifact(buffer.getvalue(), run_id=run.info.run_id, name="encoder")
         MlflowClient().log_dict(
             run.info.run_id, encoder.model_dump(mode="json"), "outputs/encoder.json"
@@ -236,9 +233,8 @@ def train_classifier(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         seed_everything(seed, workers=True, verbose=False)
-        model = resolve_component(CLASSIFIER, expected=FrozenDigitClassifier)
-        model.encoder.load_state_dict(state)
-        model.freeze_encoder()
+        model = resolve_component(CLASSIFIER, expected=Chain)
+        model.backbone.load_state_dict(state)
         data_module = _data_module(
             store, manifest, seed, resolve_component(LABELLED_DATASET, expected=StoredItems)
         )

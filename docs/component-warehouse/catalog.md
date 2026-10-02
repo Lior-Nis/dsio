@@ -199,6 +199,112 @@ fixed. Selection is benchmark-noise sensitive inside the tolerance band.
 
 ### `dsio.experimental.model`
 
+#### `dsio.experimental.model.compositions:Chain`
+
+Preprocessor, backbone and head as one model that can also `encode`. — **experimental**; real uses: 1 (digit_recognizer).
+
+**Consumes**: What the preprocessor (or, without one, the backbone) consumes.
+
+**Produces**: The head's output; `encode` returns the backbone's.
+
+**Parameters**: `backbone` and `head`: component configurations; `preprocessor`: optional
+configuration (e.g. a `Standardize` stage); `frozen_backbone`: default
+`false`.
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: Loading pretrained backbone weights is the consumer's handoff for now; a verified
+load-and-freeze path is planned with pretrained weights (roadmap v2).
+
+**Example**
+
+```python
+>>> import torch
+>>> _ = torch.manual_seed(0)
+>>> model = Chain(
+...     backbone={"reference": "dsio.experimental.model.compositions:MLP",
+...               "parameters": {"input_shape": [4], "output": 3}},
+...     head={"reference": "torch.nn:Linear",
+...           "parameters": {"in_features": 3, "out_features": 1}},
+... )
+>>> tuple(model(torch.ones(2, 4)).shape), tuple(model.encode(torch.ones(2, 4)).shape)
+((2, 1), (2, 3))
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
+
+#### `dsio.experimental.model.compositions:MLP`
+
+Flatten a fixed-shape input, then Linear layers with activations between them. — **experimental**; real uses: 4 (bike_sharing, digit_recognizer, store_sales, titanic).
+
+**Consumes**: A tensor `[batch, *input_shape]`; integer inputs are cast to float32.
+
+**Produces**: `[batch, output]` after the optional output activation.
+
+**Parameters**: `input_shape`: the per-sample shape, checked on every call; `output`: output
+width; `hidden`: hidden widths (default none: a single linear layer);
+`activation`: between layers (`relu`, `gelu`, `tanh`, `sigmoid`,
+`softplus`; default `relu`); `output_activation`: optional, same choices
+(`softplus` bounds a non-negative regression output).
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: Fixed-shape inputs only; variable-length sequences need a sequence encoder.
+
+**Example**
+
+```python
+>>> import torch
+>>> _ = torch.manual_seed(0)
+>>> model = MLP(input_shape=[1, 4], hidden=[8], output=2, output_activation="softplus")
+>>> tuple(model(torch.ones(3, 1, 4)).shape), bool((model(torch.ones(3, 1, 4)) > 0).all())
+((3, 2), True)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; runs —)
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+- real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs —)
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
+- fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
+- fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
+
+#### `dsio.experimental.model.compositions:Stages`
+
+Run configured components one after another. — **experimental**; real uses: 2 (bike_sharing, digit_recognizer).
+
+**Consumes**: Whatever the first stage consumes.
+
+**Produces**: Whatever the last stage produces.
+
+**Parameters**: `stages`: a non-empty list of component configurations, built in order.
+
+**Devices**: CPU and accelerators, as the stages allow.
+
+**Limitations**: Strictly sequential; branching models need a dedicated composition. An error raised
+inside a stage carries a note naming that stage's position and class.
+
+**Example**
+
+```python
+>>> import torch
+>>> unflatten = {"dim": 1, "unflattened_size": [2, 2]}
+>>> stages = Stages(stages=[
+...     {"reference": "torch.nn:ReLU"},
+...     {"reference": "torch.nn:Unflatten", "parameters": unflatten},
+... ])
+>>> stages(torch.tensor([[-1.0, 2.0, -3.0, 4.0]])).tolist()
+[[[0.0, 2.0], [0.0, 4.0]]]
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
+
 #### `dsio.experimental.model.standardization:Standardize`
 
 Subtract a fixed per-feature mean and divide by a fixed per-feature scale. — **experimental**; real uses: 2 (bike_sharing, digit_recognizer).
@@ -442,17 +548,17 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.eval.ess:effective_sample_size` | How many independent observations a correlated series is worth. | — |
 | `dsio.experimental.inference.outputs:TensorOutput` | Name one native tensor model output without changing it. | supervised |
 | `dsio.experimental.inference.outputs:validate_tensor_prediction` | Require the standard prediction field to be a finite tensor. | self_supervised, supervised |
-| `dsio.experimental.model.chain:ComponentChain` | Compose optional preprocessing with a transform, backbone, and task head. | — |
+| `dsio.experimental.model.chain:ComponentChain` | Compose preprocessing, transform, backbone and head; superseded by ``compositions.Chain``. | — |
 | `dsio.experimental.model.chain:LossObjective` | Adapt an established `(prediction, target)` loss to the generic objective contract. | — |
 | `dsio.experimental.model.chain:export_encoder` | Export the encoder portion of a DSio module configured with `ComponentChain`. | — |
 | `dsio.experimental.model.components:Conv1dEncoder` | Strided dilated convolutions with global pooling. | — |
 | `dsio.experimental.model.components:CrossEntropy` | Cross-entropy that accepts either hard integer labels or soft ratios. | — |
 | `dsio.experimental.model.components:EmbeddingEncoder` | Token ids to a pooled representation. The baseline any sequence model over text must beat, and the reason a token corpus needs a backbone of its own at all. | — |
-| `dsio.experimental.model.components:FixedStandardize` | Standardise by statistics supplied from outside — fitted on the train fold only. | — |
+| `dsio.experimental.model.components:FixedStandardize` | Standardise by outside statistics; superseded by ``standardization.Standardize``. | — |
 | `dsio.experimental.model.components:IdentityAugmentation` | Generator-aware identity for an explicitly configured two-view baseline. | — |
 | `dsio.experimental.model.components:InstanceStandardize` | Per-window, per-channel standardisation. | — |
 | `dsio.experimental.model.components:Jitter` | Additive Gaussian noise, scaled per channel by that channel's own spread. | self_supervised |
-| `dsio.experimental.model.components:MLP1d` | Flatten and project. The baseline every other backbone must beat. | — |
+| `dsio.experimental.model.components:MLP1d` | Flatten and project; superseded by ``compositions.MLP``. | — |
 | `dsio.experimental.model.components:MaskedMSE` | Reconstruction loss for a target that carries NaN outside masked positions. | — |
 | `dsio.experimental.model.components:NTXent` | SimCLR's contrastive loss over a batch built by :class:`~dsio.experimental.train.augmentation.TwoView`. | self_supervised |
 | `dsio.experimental.model.components:RandomScale` | Multiply each channel by a random gain, for amplitude-invariant features. | — |
@@ -625,7 +731,7 @@ local on purpose.
 | Evaluation array builders | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Array assembly from the training collation (#5), Story 7.6. |
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
-| Local nn.Module models | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Backbones, heads, adapters and compositions (#7-#17), Stories 7.3, 8.3-8.5, 9.4. |
+| Local nn.Module models | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10-#13, |
 | Local objectives | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Supervised, masked dense and reconstruction objectives (#18-#20), Stories 7.4, 8.2. |
 | Pad collate functions | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii` | Pad collator (#3), Story 8.1. |
 | Prediction normalizers and validators | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6. |
