@@ -78,13 +78,6 @@ class ClassificationObjective(nn.Module):
         return {"loss": F.cross_entropy(model(batch["x"]), batch["y"].long())}
 
 
-class ScalePixels(nn.Module):
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or tuple(x.shape[1:]) != (28, 28):
-            raise ValueError(f"expected [batch, 28, 28], got {tuple(x.shape)}")
-        return x.float() / 255.0
-
-
 class DigitPrediction(nn.Module):
     def forward(self, logits: Tensor) -> Mapping[str, Tensor]:
         if logits.ndim != 2 or logits.shape[1] != 10 or not bool(torch.isfinite(logits).all()):

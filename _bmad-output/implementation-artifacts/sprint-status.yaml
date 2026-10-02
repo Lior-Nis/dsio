@@ -91,7 +91,7 @@ development_status:
 
   epic-7: in-progress
   7-1-map-stored-samples-into-training-items: done
-  7-2-fit-standardization-on-training-role-samples: backlog
+  7-2-fit-standardization-on-training-role-samples: review
   7-3-compose-mlp-models-from-backbones-and-heads: backlog
   7-4-train-with-dsio-objectives: backlog
   7-5-declare-prediction-outputs-without-writing-validators: backlog

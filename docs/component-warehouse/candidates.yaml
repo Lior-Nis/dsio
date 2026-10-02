@@ -65,10 +65,9 @@ Evaluation array builders:
   reason: Array assembly from the training collation (#5), Story 7.6.
 Train-fold statistics and weight fitting:
   consumers:
-    - reference_projects/kaggle/bike_sharing
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: Training-role fitters (#4a-#4c), Stories 7.2, 9.2, 9.3.
+  reason: Observed-only statistics and class/group weights (#4a-#4c), Stories 9.2, 9.3.
 Train and export task wiring:
   consumers:
     - reference_projects/kaggle/titanic
