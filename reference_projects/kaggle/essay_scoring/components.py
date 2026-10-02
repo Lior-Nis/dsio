@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
-import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import Dataset
 
-from dsio.data.store import SignalStore
+from dsio.config.components import ComponentConfig
 
 MAX_TOKENS = 512
 VOCAB_SIZE = 4096
@@ -47,29 +45,18 @@ def pad_essays(items: list[Mapping[str, Any]]) -> Mapping[str, Any]:
     return result
 
 
-class EssaySamples(Dataset[Mapping[str, Any]]):
-    def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
-        self.store, self.sample_ids = store, tuple(sample_ids)
-
-    def __len__(self) -> int:
-        return len(self.sample_ids)
-
-    def __getitem__(self, position: int) -> Mapping[str, Any]:
-        sample = self.store.read_sample(self.sample_ids[position])
-        result: dict[str, Any] = {
-            "sample_id": sample["sample_id"],
-            "x": torch.from_numpy(np.array(sample["data"], dtype=np.int64, copy=True)),
-        }
-        if "target" in sample["attrs"]:
-            result["y"] = torch.tensor(int(sample["attrs"]["target"]) - 1)
-        return result
-
-
-def essay_samples(
-    store: SignalStore, examples: object, sample_ids: Sequence[str]
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return EssaySamples(store, sample_ids)
+DATASET: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "dtype": "int64"},
+        "y": {
+            "from": "attribute",
+            "attribute": "target",
+            "dtype": "int64",
+            "offset": -1,
+        },
+    },
+}
 
 
 class EssayRegressor(nn.Module):

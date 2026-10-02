@@ -16,6 +16,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
+from dsio.experimental.data import StoredItems
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -26,9 +27,9 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.supervised.components import (
+    DATASET,
     RegressionObjective,
     TinyRegressor,
-    regression_samples,
 )
 
 _SHUFFLE = {"train": True, "validate": False, "test": False, "predict": False}
@@ -59,7 +60,7 @@ _PREPROCESSOR: ComponentConfig = {
 _COMPONENTS = {
     "module": "dsio.model.module:DsioModule",
     "data_module": "dsio.data.loading.module:DsioDataModule",
-    "dataset_factory": "reference_projects.supervised.components:regression_samples",
+    "dataset_factory": DATASET,
     "model": _MODEL,
     "objective": "reference_projects.supervised.components:RegressionObjective",
     "optimizer": "torch.optim:SGD",
@@ -101,7 +102,7 @@ def train_model(
             manifest,
             fold=_TRAINING["fold"],
             roles=_TRAINING["roles"],
-            dataset_factory=regression_samples,
+            dataset_factory=resolve_component(DATASET, expected=StoredItems),
             batch_size=_TRAINING["batch_size"],
             num_workers=_TRAINING["num_workers"],
             seed=seed,

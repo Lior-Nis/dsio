@@ -17,6 +17,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
+from dsio.experimental.data import StoredItems
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance, require_evidence
 from dsio.train.artifacts import ArtifactRef, load_artifact, save_artifact
@@ -27,12 +28,12 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.digit_recognizer.components import (
+    LABELLED_DATASET,
+    UNLABELLED_DATASET,
     ClassificationObjective,
     DigitAutoencoder,
     FrozenDigitClassifier,
     ReconstructionObjective,
-    labelled_digit_samples,
-    unlabelled_digit_samples,
 )
 from reference_projects.kaggle.digit_recognizer.tasks.data import labelled_examples
 
@@ -113,7 +114,9 @@ def pretrain_encoder(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         seed_everything(seed, workers=True, verbose=False)
-        data_module = _data_module(store, manifest, seed, unlabelled_digit_samples)
+        data_module = _data_module(
+            store, manifest, seed, resolve_component(UNLABELLED_DATASET, expected=StoredItems)
+        )
         module = DsioModule(
             model=DigitAutoencoder(),
             objective=ReconstructionObjective(),
@@ -143,9 +146,7 @@ def pretrain_encoder(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
-                "dataset_factory": (
-                    "reference_projects.kaggle.digit_recognizer.components:unlabelled_digit_samples"
-                ),
+                "dataset_factory": UNLABELLED_DATASET,
                 "model": "reference_projects.kaggle.digit_recognizer.components:DigitAutoencoder",
                 "objective": (
                     "reference_projects.kaggle.digit_recognizer.components:ReconstructionObjective"
@@ -237,7 +238,9 @@ def train_classifier(
         model = resolve_component(CLASSIFIER, expected=FrozenDigitClassifier)
         model.encoder.load_state_dict(state)
         model.freeze_encoder()
-        data_module = _data_module(store, manifest, seed, labelled_digit_samples)
+        data_module = _data_module(
+            store, manifest, seed, resolve_component(LABELLED_DATASET, expected=StoredItems)
+        )
         module = DsioModule(
             model=model,
             objective=ClassificationObjective(),
@@ -268,9 +271,7 @@ def train_classifier(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
-                "dataset_factory": (
-                    "reference_projects.kaggle.digit_recognizer.components:labelled_digit_samples"
-                ),
+                "dataset_factory": LABELLED_DATASET,
                 "model": CLASSIFIER,
                 "objective": (
                     "reference_projects.kaggle.digit_recognizer.components:ClassificationObjective"

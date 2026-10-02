@@ -16,6 +16,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
+from dsio.experimental.data import StoredItems
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -26,9 +27,9 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.self_supervised.components import (
+    DATASET,
     ContrastiveObjective,
     TinyEmbedding,
-    unlabelled_samples,
 )
 
 _AUGMENTOR: ComponentConfig = {
@@ -69,7 +70,7 @@ _COMPONENTS = {
     "augmentation": _AUGMENTATION_WRAPPER["reference"],
     "augmentor": _AUGMENTOR["reference"],
     "data_module": "dsio.data.loading.module:DsioDataModule",
-    "dataset_factory": "reference_projects.self_supervised.components:unlabelled_samples",
+    "dataset_factory": DATASET,
     "model": _MODEL,
     "module": "dsio.model.module:DsioModule",
     "objective": "reference_projects.self_supervised.components:ContrastiveObjective",
@@ -113,7 +114,7 @@ def train_model(
             manifest,
             fold=_TRAINING["fold"],
             roles=_TRAINING["roles"],
-            dataset_factory=unlabelled_samples,
+            dataset_factory=resolve_component(DATASET, expected=StoredItems),
             batch_size=_TRAINING["batch_size"],
             num_workers=_TRAINING["num_workers"],
             seed=seed,

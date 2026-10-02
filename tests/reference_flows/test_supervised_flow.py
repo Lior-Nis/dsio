@@ -25,11 +25,13 @@ def test_training_and_inference_share_channel_first_signal_layout(
 ) -> None:
     del reference_services
     from reference_projects.supervised.components import (
-        RegressionSamples,
+        DATASET,
         TimeMajorToChannelFirst,
         evaluation_arrays,
     )
 
+    from dsio.config.components import resolve_component
+    from dsio.data.adapters import entity_examples
     from dsio.data.store import SignalStore
 
     values = np.asarray(
@@ -44,7 +46,8 @@ def test_training_and_inference_share_channel_first_signal_layout(
 
     prepared = TimeMajorToChannelFirst(channels=2, time=3)(torch.from_numpy(raw["x"]))
 
-    training_tensor = RegressionSamples(store, ["sample"])[0]["x"]
+    items = resolve_component(DATASET)
+    training_tensor = items(store, entity_examples(store), ["sample"])[0]["x"]
     assert prepared.shape == (1, 2, 3)
     assert prepared.is_contiguous()
     assert training_tensor.is_contiguous()
@@ -239,9 +242,13 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
         for key, value in expected_training_configuration.items():
             assert provenance["configuration"][key] == value
         assert provenance["components"]["optimizer"] == "torch.optim:SGD"
-        assert provenance["components"]["dataset_factory"] == (
-            "reference_projects.supervised.components:regression_samples"
-        )
+        assert provenance["components"]["dataset_factory"] == {
+            "reference": "dsio.experimental.data.items:StoredItems",
+            "parameters": {
+                "x": {"from": "data", "layout": "channel_first"},
+                "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "shape": [1]},
+            },
+        }
         execution = provenance["configuration"]["execution"]
         assert execution["requested_accelerator"] == "cpu"
         assert execution["resolved_device"] == "cpu"

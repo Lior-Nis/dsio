@@ -9,6 +9,70 @@ Conventions every block follows: [conventions.md](conventions.md).
 
 ## Components
 
+### `dsio.experimental.data`
+
+#### `dsio.experimental.data.items:StoredItems`
+
+Map stored samples into identity-bearing training items, field by field. — **experimental**; real uses: 7 (bike_sharing, child_mind, digit_recognizer, essay_scoring, rogii, store_sales, titanic).
+
+**Consumes**: A `SignalStore` whose samples are `[rows, channels]` arrays with entity
+attributes, the `Examples` that describe that exact store (name and content
+digest), and the assigned `sample_ids`.
+
+**Produces**: Items `{"sample_id", "x", ...}` with exactly the declared fields among `x`,
+`y`, `mask` and `sample_weight`, as CPU tensors.
+
+**Parameters**: One mapping per field (`x` required):
+
+- `from`: `"data"` or `"attribute"`; `attribute`: the entity attribute name.
+- `columns`: `[start, stop]` of the data array; `layout`: `time_major`
+  (default, as stored) or `channel_first` (transposed to `[channels, rows]`).
+- `dtype`: `float32` (default), `float64`, `int64` or `bool`.
+- `offset` (added), `log1p` (`true`) and `divide` (divisor), applied in
+  that order after the cast. Float fields accept all three, `int64` fields an
+  integer `offset` only, `bool` fields none, so the declared dtype is the
+  produced dtype. `shape`: final shape, e.g. `[1]` or `[]` (one `-1` at most).
+
+**Devices**: CPU; items are moved to the accelerator by Lightning after collation.
+
+**Limitations**: Whole-sample reads only (windows are a separate block); numeric transforms run in
+NumPy on the cast array, so they match NumPy-based preprocessing bit for bit.
+
+**Example**
+
+```python
+>>> from pathlib import Path
+>>> import numpy as np
+>>> from dsio.data.adapters import entity_examples
+>>> from dsio.data.store import SignalStore
+>>> from tempfile import mkdtemp
+>>> path = Path(mkdtemp()) / "store"
+>>> with SignalStore.builder(path, channels=2) as builder:
+...     _ = builder.add("a", np.array([[1.0, 2.0]]), group="g1", attrs={"target": 3.0})
+...     _ = builder.add("b", np.array([[4.0, 5.0]]), group="g2", attrs={"target": 6.0})
+>>> store = SignalStore(path)
+>>> items = StoredItems(
+...     x={"from": "data", "dtype": "float32"},
+...     y={"from": "attribute", "attribute": "target", "log1p": True, "shape": [1]},
+... )
+>>> dataset = items(store, entity_examples(store), ["b"])
+>>> item = dataset[0]
+>>> item["sample_id"], item["x"].tolist(), round(float(item["y"][0]), 4)
+('b', [[4.0, 5.0]], 1.9459)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; runs —)
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+- real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs —)
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/child_mind` (test `tests/kaggle_portfolio/test_child_mind.py`; runs —)
+- fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
+- fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
+
 ### `dsio.experimental.execution`
 
 #### `dsio.experimental.execution:calibrate_execution`
@@ -455,7 +519,7 @@ local on purpose.
 | Local objectives | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Supervised, masked dense and reconstruction objectives (#18-#20), Stories 7.4, 8.2. |
 | Pad collate functions | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii` | Pad collator (#3), Story 8.1. |
 | Prediction normalizers and validators | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6. |
-| Stored-sample Dataset classes | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Field-mapping dataset (#1), Story 7.1. |
+| Stored-sample Dataset classes | 1 | `reference_projects/kaggle/parkinsons_fog` | Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
 | Train and export task wiring | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |
 | Train-fold statistics and weight fitting | 3 | `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Training-role fitters (#4a-#4c), Stories 7.2, 9.2, 9.3. |

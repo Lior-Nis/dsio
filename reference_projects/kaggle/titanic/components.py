@@ -2,42 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
-import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.utils.data import Dataset
 
-from dsio.data.store import SignalStore
+from dsio.config.components import ComponentConfig
 
 FEATURES = 10
 
 
-class PassengerSamples(Dataset[Mapping[str, Any]]):
-    def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
-        self.store = store
-        self.sample_ids = tuple(sample_ids)
-
-    def __len__(self) -> int:
-        return len(self.sample_ids)
-
-    def __getitem__(self, position: int) -> Mapping[str, Any]:
-        sample = self.store.read_sample(self.sample_ids[position])
-        return {
-            "sample_id": sample["sample_id"],
-            "x": torch.from_numpy(np.array(sample["data"], dtype=np.float32, copy=True)),
-            "y": torch.tensor([float(sample["attrs"]["target"])], dtype=torch.float32),
-        }
-
-
-def passenger_samples(
-    store: SignalStore, examples: object, sample_ids: Sequence[str]
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return PassengerSamples(store, sample_ids)
+DATASET: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "dtype": "float32"},
+        "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "shape": [1]},
+    },
+}
 
 
 class PassengerClassifier(nn.Module):

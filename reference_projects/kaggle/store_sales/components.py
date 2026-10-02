@@ -2,43 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
-import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.utils.data import Dataset
 
-from dsio.data.store import SignalStore
+from dsio.config.components import ComponentConfig
 from reference_projects.kaggle.store_sales.data import CONTEXT_DAYS, HORIZON_DAYS
 
 FEATURES = 5
 
 
-class ForecastSamples(Dataset[Mapping[str, Any]]):
-    def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
-        self.store, self.sample_ids = store, tuple(sample_ids)
-
-    def __len__(self) -> int:
-        return len(self.sample_ids)
-
-    def __getitem__(self, position: int) -> Mapping[str, Any]:
-        sample = self.store.read_sample(self.sample_ids[position])
-        target = np.asarray(sample["attrs"]["target"], dtype=np.float32)
-        return {
-            "sample_id": sample["sample_id"],
-            "x": torch.from_numpy(np.array(sample["data"], dtype=np.float32, copy=True)),
-            "y": torch.from_numpy(np.log1p(target)),
-        }
-
-
-def forecast_samples(
-    store: SignalStore, examples: object, sample_ids: Sequence[str]
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return ForecastSamples(store, sample_ids)
+DATASET: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "dtype": "float32"},
+        "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "log1p": True},
+    },
+}
 
 
 class ForecastRegressor(nn.Module):

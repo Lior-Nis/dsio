@@ -29,7 +29,7 @@ Rules:
 - **`hidden` stays out of batches today.** The strategies in `dsio.experimental.model.masking` return `hidden` tensors. `MaskedReconstruction` keeps its tensor internal: hidden positions are zeroed in `x`, and visible positions are NaN in `y`. It emits no batch `mask` and passes a consumer's `mask` through untouched.
 - **Validity a model needs travels inside `x`** *(from Stories 8.4, 8.5 and 9.4)*. This covers masked pooling, residual validity and modality presence. Declare it as a channel of `x`, or derive it from a declared padding value.
 - **Multimodal inputs are declared slices of `x`** *(from Story 9.4)*, plus declared presence channels. There is no container class.
-- **Datasets and collators fail on a missing declared field** *(from Story 7.1)*. They never invent one.
+- **Datasets and collators fail on a missing declared field.** They never invent one. `StoredItems` enforces this for datasets; collators follow *(from Story 8.1)*.
 
 ## Weighting rule *(from Stories 7.4 and 9.3)*
 
@@ -39,12 +39,12 @@ Rules:
 ## Tensor layouts and targets
 
 - **Signal-sequence backbones** consume channel-first `[B, C, T]`.
-- **Datasets declare their layout** *(from Story 7.1)*. Convert time-major data with the layout adapter *(from Story 8.3)*, not an ad hoc transpose inside a model.
+- **Datasets declare their layout** (`StoredItems` `layout`). Convert time-major data with the layout adapter *(from Story 8.3)*, not an ad hoc transpose inside a model.
 - **Output shapes.** Dense per-timestep outputs are `[B, T, K]`, and sequence-level outputs are `[B, K]`.
 - **Scalar regression** is `[B]` or `[B, 1]` as declared, and is never silently squeezed *(from Story 7.4; the legacy `bce_loss`/`mse_loss` factories still squeeze until then)*.
 - **Multiclass and ordinal targets** are zero-based int64 indices. An ordinal label offset is applied only by the output.
 - **Binary targets** are float in {0, 1}, with the output's shape.
-- **Transformed regression targets** (log1p, scale) are declared once on the dataset. Their inverse is declared on the output, and both are recorded in provenance *(from Stories 7.1 and 7.5)*.
+- **Transformed regression targets** (log1p, scale) are declared once on the dataset. The dataset side is recorded in provenance with the dataset configuration; the inverse is declared on the output *(from Story 7.5)*.
 
 ## Objectives
 
@@ -57,6 +57,6 @@ objectives do not recompute evaluation metrics that `dsio.eval` owns.
 
 - Every public component is a module-level class or function, selected as `{"reference": "module:qualname", "parameters": {...}}` with canonical-JSON parameters.
 - Public imports are re-exported from the owning package's `__init__.py`. A file that grows becomes a same-named package without changing imports.
-- Datasets and collators are supplied as component configurations, and their parameters enter provenance *(from Story 7.1)*.
-- Fitted values, such as statistics and weights, are logged as evidence and passed as runtime arguments. A configured parameter that collides with a runtime argument is an error *(from Story 7.1)*.
+- Datasets (and, from Story 8.1, collators) are supplied as component configurations, and the full configuration enters provenance.
+- Fitted values, such as statistics and weights, are logged as evidence and passed as runtime arguments. A configured parameter that collides with a runtime argument is an error (`resolve_component` raises).
 - DSio source never names a consumer, competition or dataset.

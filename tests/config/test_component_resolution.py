@@ -120,3 +120,18 @@ def test_spawn_process_main_components_are_rejected(
 
     with pytest.raises(ComponentError, match="named importable"):
         importable_reference(spawn_factory)
+
+
+def test_configured_parameters_never_override_runtime_arguments() -> None:
+    from dsio.config.components import ComponentError, resolve_component
+
+    with pytest.raises(ComponentError, match=r"\['out_features'\] collide with runtime"):
+        resolve_component(
+            {"reference": "torch.nn:Linear", "parameters": {"in_features": 3, "out_features": 2}},
+            out_features=4,
+        )
+
+    layer = resolve_component(
+        {"reference": "torch.nn:Linear", "parameters": {"in_features": 3}}, out_features=4
+    )
+    assert (layer.in_features, layer.out_features) == (3, 4)

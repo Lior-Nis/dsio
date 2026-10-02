@@ -7,39 +7,19 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.utils.data import Dataset
 
+from dsio.config.components import ComponentConfig
 from dsio.data.store import SignalStore
 
-
-class RegressionSamples(Dataset[Mapping[str, Any]]):
-    def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
-        self.store = store
-        self.sample_ids = tuple(sample_ids)
-
-    def __len__(self) -> int:
-        return len(self.sample_ids)
-
-    def __getitem__(self, position: int) -> Mapping[str, Any]:
-        sample = self.store.read_sample(self.sample_ids[position])
-        data = np.ascontiguousarray(sample["data"].T)
-        return {
-            "sample_id": sample["sample_id"],
-            "x": torch.from_numpy(data),
-            "y": torch.tensor([float(sample["attrs"]["target"])], dtype=torch.float32),
-        }
-
-
-def regression_samples(
-    store: SignalStore,
-    examples: object,
-    sample_ids: Sequence[str],
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return RegressionSamples(store, sample_ids)
+DATASET: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "layout": "channel_first"},
+        "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "shape": [1]},
+    },
+}
 
 
 class TimeMajorToChannelFirst(nn.Module):

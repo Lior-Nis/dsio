@@ -77,10 +77,21 @@ def resolve_component[T](
     expected: type[T] | tuple[type[Any], ...] | None = None,
     **runtime_parameters: Any,
 ) -> T:
-    """Import, construct, and type-check one configured native component."""
+    """Import, construct, and type-check one configured native component.
+
+    Runtime arguments (e.g. fitted statistics) and configured parameters share one
+    constructor call; a name present in both raises rather than letting one silently win.
+    """
     validated = validate_component_config(config)
     reference = validated["reference"]
     target = resolve_reference(reference)
+    collisions = sorted(set(runtime_parameters) & set(validated["parameters"]))
+    if collisions:
+        # A configured value silently replacing a runtime one (e.g. fitted statistics) would
+        # record one value in provenance while constructing with another.
+        raise ComponentError(
+            f"{reference}: configured parameters {collisions} collide with runtime arguments"
+        )
     parameters = {**runtime_parameters, **validated["parameters"]}
     try:
         component = target(*runtime_args, **parameters)
