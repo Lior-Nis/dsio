@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Self
 
 import torch
 from torch import Tensor, nn
@@ -19,7 +21,16 @@ _ACTIVATIONS: dict[str, type[nn.Module]] = {
 }
 
 
-class MLP(nn.Sequential):
+class _Sequence(nn.Sequential):
+    """``nn.Sequential`` whose slices are plain ``nn.Sequential`` (subclasses take configs)."""
+
+    def __getitem__(self, idx: slice | int) -> nn.Sequential | nn.Module:
+        if isinstance(idx, slice):
+            return nn.Sequential(OrderedDict(list(self.named_children())[idx]))
+        return super().__getitem__(idx)
+
+
+class MLP(_Sequence):
     """Flatten a fixed-shape input, then Linear layers with activations between them.
 
     Layers are built in order (``Flatten``, then ``Linear`` + activation per hidden width,
@@ -27,7 +38,8 @@ class MLP(nn.Sequential):
     initializes exactly like the hand-written ``nn.Sequential`` it replaces.
 
     Consumes:
-        A tensor ``[batch, *input_shape]``; integer inputs are cast to float32.
+        A tensor ``[batch, *input_shape]``; inputs of another dtype (integers, float64)
+        are cast to the layers' dtype, float32 unless the module is cast.
 
     Produces:
         ``[batch, output]`` after the optional output activation.
@@ -89,10 +101,11 @@ class MLP(nn.Sequential):
                 f"MLP expects [batch, {', '.join(map(str, self.input_shape))}], "
                 f"got {tuple(x.shape)}"
             )
-        return super().forward(x if x.is_floating_point() else x.float())
+        dtype = next(self.parameters()).dtype
+        return super().forward(x if x.dtype == dtype else x.to(dtype))
 
 
-class Stages(nn.Sequential):
+class Stages(_Sequence):
     """Run configured components one after another.
 
     Each stage is a ``{"reference": "module:qualname", "parameters": {...}}`` mapping, so a
@@ -143,8 +156,10 @@ class Chain(nn.Module):
     ``forward`` is ``head(backbone(preprocessor(x)))``; ``encode`` stops before the head,
     which is what self-supervised pretraining exports and a downstream classifier reuses.
     With ``frozen_backbone``, the backbone takes no gradient and runs under
-    ``torch.no_grad()``, so only the head trains on top of transferred features. An error
-    raised inside a stage carries a note naming the stage (preprocessor, backbone or head).
+    ``torch.no_grad()`` in eval mode (``train()`` leaves it there, so BatchNorm statistics
+    and dropout stay pretrained), and only the head trains on transferred features. An
+    error raised inside a stage carries a note naming the stage (preprocessor, backbone or
+    head).
 
     Consumes:
         What the preprocessor (or, without one, the backbone) consumes.
@@ -161,7 +176,9 @@ class Chain(nn.Module):
         CPU and accelerators.
 
     Limitations:
-        Loading pretrained backbone weights is the consumer's handoff for now; a verified
+        Loading pretrained backbone weights is the consumer's handoff for now: export with
+        ``model.backbone.state_dict()`` and load into the receiving chain's ``backbone``
+        (the legacy ``export_encoder`` serves only ``ComponentChain``). A verified
         load-and-freeze path is planned with pretrained weights (roadmap v2).
 
     Example:
@@ -185,17 +202,24 @@ class Chain(nn.Module):
         frozen_backbone: bool = False,
     ) -> None:
         super().__init__()
+        if not isinstance(frozen_backbone, bool):
+            raise ValueError("frozen_backbone must be true or false")
         self.preprocessor = (
             None if preprocessor is None else resolve_component(preprocessor, expected=nn.Module)
         )
         self.backbone = resolve_component(backbone, expected=nn.Module)
         self.head = resolve_component(head, expected=nn.Module)
-        if not isinstance(frozen_backbone, bool):
-            raise ValueError("frozen_backbone must be true or false")
         self.frozen_backbone = frozen_backbone
         if frozen_backbone:
             for parameter in self.backbone.parameters():
                 parameter.requires_grad_(False)
+            self.backbone.eval()
+
+    def train(self, mode: bool = True) -> Self:
+        super().train(mode)
+        if self.frozen_backbone:
+            self.backbone.eval()
+        return self
 
     def encode(self, x: Tensor) -> Tensor:
         if self.preprocessor is not None:
@@ -214,8 +238,15 @@ def _run(stage: str, module: nn.Module, x: Tensor) -> Tensor:
     try:
         return module(x)
     except Exception as error:
-        error.add_note(f"in {stage} ({type(module).__name__}), input {tuple(x.shape)}")
+        # The note is best effort: describing the input must never replace the real error.
+        with contextlib.suppress(Exception):
+            error.add_note(f"in {stage} ({type(module).__name__}), {_describe(x)}")
         raise
+
+
+def _describe(x: object) -> str:
+    shape = getattr(x, "shape", None)
+    return f"input {tuple(shape)}" if shape is not None else f"input of type {type(x).__name__}"
 
 
 def _activation(name: str) -> nn.Module:

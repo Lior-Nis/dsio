@@ -84,7 +84,8 @@ def test_digit_encoder_handoff_rejects_tainted_or_mismatched_lineage(
 
 
 @pytest.mark.parametrize(
-    "state", ["failed", "deleted", "corrupted", "mismatched", "foreign", "label-tainted"]
+    "state",
+    ["failed", "deleted", "corrupted", "mismatched", "foreign", "label-tainted", "architecture"],
 )
 def test_digit_encoder_handoff_rejects_unusable_artifact_evidence(
     state: str, kaggle_services: None
@@ -98,14 +99,21 @@ def test_digit_encoder_handoff_rejects_unusable_artifact_evidence(
     run = client.create_run(experiment_id)
     source_dataset = "other" if state == "foreign" else "dataset"
     label_fields = ["label"] if state == "label-tainted" else []
+    encoder = CLASSIFIER["parameters"]["backbone"]
+    pretrained = (
+        {**encoder, "parameters": {**encoder["parameters"], "hidden": [64]}}
+        if state == "architecture"
+        else encoder
+    )
     identity = record_provenance(
         run.info.run_id,
         {
             "dataset_digest": source_dataset,
             "split_digest": "split",
             "label_fields_consumed": label_fields,
+            "encoder": pretrained,
         },
-        components={"encoder": CLASSIFIER["parameters"]["backbone"]},
+        components={"encoder": pretrained},
     )
     buffer = io.BytesIO()
     torch.save(resolve_component(CLASSIFIER, expected=Chain).backbone.state_dict(), buffer)
@@ -120,15 +128,22 @@ def test_digit_encoder_handoff_rejects_unusable_artifact_evidence(
     elif state == "corrupted":
         artifact_root = Path(unquote(urlparse(run.info.artifact_uri).path))
         (artifact_root / reference.path).write_bytes(b"corrupt")
-    else:
+    elif state == "mismatched":
         expected_identity = "f" * 64
+    # Configuration states keep the true identity, so each fails for its own reason.
+    reason = {
+        "foreign": "dataset_digest",
+        "label-tainted": "label_fields_consumed",
+        "architecture": "encoder",
+    }.get(state, "")
 
-    with pytest.raises((TrackingError, ArtifactIntegrityError, ValueError)):
+    with pytest.raises((TrackingError, ArtifactIntegrityError, ValueError), match=reason):
         _verified_encoder(
             reference.model_dump(mode="json"),
             identity=expected_identity,
             dataset_digest="dataset",
             split_digest="split",
+            encoder=encoder,
         )
 
 

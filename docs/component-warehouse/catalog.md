@@ -213,7 +213,9 @@ configuration (e.g. a `Standardize` stage); `frozen_backbone`: default
 
 **Devices**: CPU and accelerators.
 
-**Limitations**: Loading pretrained backbone weights is the consumer's handoff for now; a verified
+**Limitations**: Loading pretrained backbone weights is the consumer's handoff for now: export with
+`model.backbone.state_dict()` and load into the receiving chain's `backbone`
+(the legacy `export_encoder` serves only `ComponentChain`). A verified
 load-and-freeze path is planned with pretrained weights (roadmap v2).
 
 **Example**
@@ -239,7 +241,8 @@ load-and-freeze path is planned with pretrained weights (roadmap v2).
 
 Flatten a fixed-shape input, then Linear layers with activations between them. — **experimental**; real uses: 4 (bike_sharing, digit_recognizer, store_sales, titanic).
 
-**Consumes**: A tensor `[batch, *input_shape]`; integer inputs are cast to float32.
+**Consumes**: A tensor `[batch, *input_shape]`; inputs of another dtype (integers, float64)
+are cast to the layers' dtype, float32 unless the module is cast.
 
 **Produces**: `[batch, output]` after the optional output activation.
 
@@ -312,7 +315,8 @@ Subtract a fixed per-feature mean and divide by a fixed per-feature scale. — *
 **Consumes**: A tensor whose `axis` dimension holds the features; any other dimensions
 broadcast. A single-value `mean`/`scale` applies to every feature.
 
-**Produces**: A float32 tensor of the input's shape: `(x - mean) / scale`.
+**Produces**: A tensor of the input's shape and the statistics' dtype (float32 unless the module
+is cast): `(x - mean) / scale`.
 
 **Parameters**: `mean` and `scale`: equal-length sequences of finite numbers (`scale` must be
 non-zero); `axis`: the feature axis (default `-1`, the last).

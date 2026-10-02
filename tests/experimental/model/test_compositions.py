@@ -139,3 +139,44 @@ def test_a_failing_stage_is_named_in_the_error() -> None:
     with pytest.raises(ValueError, match=r"MLP expects \[batch, 28, 28\]") as shape:
         model(torch.rand(2, 784))
     assert shape.value.__notes__ == ["in Chain backbone (MLP), input (2, 784)"]
+
+
+def test_a_frozen_backbone_keeps_its_statistics_in_train_mode() -> None:
+    model = Chain(
+        backbone={"reference": "torch.nn:BatchNorm1d", "parameters": {"num_features": 4}},
+        head={"reference": "torch.nn:Linear", "parameters": {"in_features": 4, "out_features": 1}},
+        frozen_backbone=True,
+    )
+    before = model.backbone.running_mean.clone()
+    model.train()
+    model(torch.randn(8, 4) * 5 + 3)
+    assert not model.backbone.training and model.head.training
+    assert torch.equal(model.backbone.running_mean, before)
+    with pytest.raises(ValueError, match="frozen_backbone"):
+        Chain(backbone=ENCODER, head=ENCODER, frozen_backbone="yes")  # type: ignore[arg-type]
+
+
+def test_an_unshaped_input_never_replaces_the_real_error() -> None:
+    stages = Stages(
+        stages=[
+            {
+                "reference": "torch.nn:LSTM",
+                "parameters": {"input_size": 2, "hidden_size": 3, "batch_first": True},
+            },
+            {"reference": "torch.nn:Linear", "parameters": {"in_features": 3, "out_features": 1}},
+        ]
+    )
+    with pytest.raises(TypeError) as raised:
+        stages(torch.randn(1, 4, 2))  # the LSTM returns a tuple
+    assert raised.value.__notes__ == ["in Stages stage 1 (Linear), input of type tuple"]
+
+
+def test_inputs_are_cast_to_the_layers_dtype_and_slices_stay_plain() -> None:
+    model = MLP(input_shape=[3], hidden=[4], output=2)
+    assert model(torch.ones(2, 3, dtype=torch.float64)).dtype == torch.float32
+    double = MLP(input_shape=[3], output=2).double()
+    assert double(torch.ones(2, 3)).dtype == torch.float64
+
+    head = model[:2]
+    assert type(head) is nn.Sequential and len(head) == 2
+    assert type(Stages(stages=[{"reference": "torch.nn:ReLU"}])[:1]) is nn.Sequential

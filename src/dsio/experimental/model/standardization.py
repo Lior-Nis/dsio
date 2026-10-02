@@ -14,16 +14,17 @@ class Standardize(nn.Module):
 
     The statistics come from outside, typically
     :func:`~dsio.experimental.data.fitting.fit_standardization` on the training role, or
-    are constants (``mean=[0]``, ``scale=[255]`` for 8-bit pixels). Integer inputs are cast
-    to float32 first, so the same stage serves raw predictor inputs and float training
-    batches.
+    are constants (``mean=[0]``, ``scale=[255]`` for 8-bit pixels). Inputs of another dtype
+    (integers, float64) are cast to the statistics' dtype first, so the same stage serves
+    raw predictor inputs and float training batches.
 
     Consumes:
         A tensor whose ``axis`` dimension holds the features; any other dimensions
         broadcast. A single-value ``mean``/``scale`` applies to every feature.
 
     Produces:
-        A float32 tensor of the input's shape: ``(x - mean) / scale``.
+        A tensor of the input's shape and the statistics' dtype (float32 unless the module
+        is cast): ``(x - mean) / scale``.
 
     Parameters:
         ``mean`` and ``scale``: equal-length sequences of finite numbers (``scale`` must be
@@ -64,7 +65,7 @@ class Standardize(nn.Module):
         self.register_buffer("scale", torch.tensor(list(scale), dtype=torch.float32))
 
     def forward(self, x: Tensor) -> Tensor:
-        values = x if x.is_floating_point() else x.float()
+        values = x if x.dtype == self.mean.dtype else x.to(self.mean.dtype)
         features = self.mean.numel()
         if not -values.ndim <= self.axis < values.ndim:
             raise ValueError(

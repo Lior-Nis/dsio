@@ -31,6 +31,7 @@ from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.digit_recognizer.components import (
     AUTOENCODER,
     CLASSIFIER,
+    ENCODER,
     LABELLED_DATASET,
     UNLABELLED_DATASET,
     ClassificationObjective,
@@ -130,6 +131,8 @@ def pretrain_encoder(
                 "split_digest": split["split_digest"],
                 "sample_ids": split["assignments"],
                 "label_fields_consumed": [],
+                # The exported state's architecture, checked before any classifier loads it.
+                "encoder": ENCODER,
                 "seed": seed,
                 "fold": FOLD,
                 "batch_size": BATCH_SIZE,
@@ -176,6 +179,7 @@ def _verified_encoder(
     identity: str,
     dataset_digest: str,
     split_digest: str,
+    encoder: ComponentConfig,
 ) -> tuple[ArtifactRef, dict[str, Any]]:
     reference = ArtifactRef.model_validate(payload)
     require_evidence(
@@ -186,6 +190,7 @@ def _verified_encoder(
             "dataset_digest": dataset_digest,
             "split_digest": split_digest,
             "label_fields_consumed": [],
+            "encoder": encoder,
         },
     )
     payload_bytes = load_artifact(reference)
@@ -226,6 +231,7 @@ def train_classifier(
             identity=pretraining["identity"],
             dataset_digest=data["dataset_digest"],
             split_digest=split["split_digest"],
+            encoder=CLASSIFIER["parameters"]["backbone"],
         )
         store = SignalStore(data["store_path"])
         examples = labelled_examples(store)

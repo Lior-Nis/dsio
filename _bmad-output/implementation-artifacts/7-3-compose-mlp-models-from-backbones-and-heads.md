@@ -50,6 +50,15 @@ so that I never define an `nn.Module` for flat inputs (cohort #7, #8a, #8b, #14,
     - "Local nn.Module models" drops the four migrated consumers.
     - A new "Verified encoder handoff" entry records Digit's lineage-checked load, which waits for the v2 pretrained-weights path.
   - Legacy `ComponentChain`, `MLP1d` and `FixedStandardize` say in their catalog summaries which block supersedes them.
+- [x] Task 5: Review follow-ups. The adversarial review found nothing critical. It verified bit-identical parameters, outputs and RNG streams for all six migrations. It also verified byte-identical Digit encoder state, three identical Adam steps on the frozen classifier, and predictor export and pyfunc reload for Digit and Bike. Notes appear once per level under `torch.compile` (eager, aot_eager and inductor).
+  - [x] 5.1 (important) A frozen backbone now stays in eval mode, set at construction and kept through `train()`. BatchNorm statistics and dropout stay pretrained; a test covers BatchNorm.
+  - [x] 5.2 (important) The stage note is best effort. A non-tensor input (e.g. an LSTM's tuple) is described by its type, and a failing `add_note` no longer replaces the real error.
+  - [x] 5.3 `MLP` and `Standardize` cast inputs of another dtype (integers, float64) to their parameters' dtype. Before, float64 batches crashed `MLP`, and `Standardize` returned float64. Casting to the module's own dtype keeps `.double()` or bf16-true modules working.
+  - [x] 5.4 Slicing an `MLP` or `Stages` returns a plain `nn.Sequential`. Before, it re-entered the config constructor and failed.
+  - [x] 5.5 `frozen_backbone` is validated before any stage is built.
+  - [x] 5.6 Digit's pretraining provenance records the exported encoder's architecture. The classifier requires it to match its own backbone before loading. A strict `load_state_dict` alone missed activation changes.
+  - [x] 5.7 The handoff evidence test now fails each configuration state (foreign, label-tainted, architecture) for its own reason. Before, a wrong identity masked all of them.
+  - [x] 5.8 The `Chain` Limitations section states the export path (`backbone.state_dict()`). The legacy `export_encoder` serves only `ComponentChain`.
 
 ## Dev Notes
 
