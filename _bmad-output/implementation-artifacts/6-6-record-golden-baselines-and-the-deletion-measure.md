@@ -1,6 +1,6 @@
 # Story 6.6: Record golden baselines and the deletion measure
 
-Status: review
+Status: done
 
 ## Story
 
