@@ -1,6 +1,6 @@
 # Story 7.2: Fit standardization on training-role samples
 
-Status: review
+Status: done
 
 ## Story
 
