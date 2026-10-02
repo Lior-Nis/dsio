@@ -54,7 +54,6 @@ DATASET: ComponentConfig = {
             "attribute": "target",
             "dtype": "int64",
             "offset": -1,
-            "optional": True,
         },
     },
 }

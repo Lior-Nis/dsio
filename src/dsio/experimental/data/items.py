@@ -14,12 +14,11 @@ from dsio.data.examples import Examples
 from dsio.data.loading.datasets import LoadingError
 from dsio.data.store import SignalStore, StoreError
 
-FIELDS = ("x", "y", "mask", "sample_weight")
 _DTYPES = {"float32": np.float32, "float64": np.float64, "int64": np.int64, "bool": np.bool_}
 _LAYOUTS = ("time_major", "channel_first")
 _KEYS = {
     "data": {"from", "columns", "dtype", "layout", "offset", "log1p", "divide", "shape"},
-    "attribute": {"from", "attribute", "optional", "dtype", "offset", "log1p", "divide", "shape"},
+    "attribute": {"from", "attribute", "dtype", "offset", "log1p", "divide", "shape"},
 }
 
 
@@ -30,9 +29,8 @@ class StoredItems:
     called with ``(store, examples, sample_ids)``. Each declared field reads either the
     sample's stored data array (optionally a column range) or one entity attribute, casts it,
     applies the declared numeric transforms in a fixed order (offset, log1p, divide), and
-    reshapes it. Undeclared fields are never invented; an unlabelled dataset simply declares
-    no ``y``, and an ``optional`` attribute field is omitted for samples without it (e.g.
-    unlabelled test rows sharing a store with labelled training rows).
+    reshapes it. Undeclared fields are never invented, and a declared field missing from a
+    sample is an error, never a silently absent key; an unlabelled dataset declares no ``y``.
 
     Consumes:
         A ``SignalStore`` whose samples are ``[rows, channels]`` arrays with entity
@@ -46,14 +44,14 @@ class StoredItems:
     Parameters:
         One mapping per field (``x`` required):
 
-        - ``from``: ``"data"`` or ``"attribute"``; ``attribute``: the entity attribute name;
-          ``optional`` (attribute fields only, default ``false``) omits the field for
-          samples that lack the attribute.
+        - ``from``: ``"data"`` or ``"attribute"``; ``attribute``: the entity attribute name.
         - ``columns``: ``[start, stop]`` of the data array; ``layout``: ``time_major``
           (default, as stored) or ``channel_first`` (transposed to ``[channels, rows]``).
         - ``dtype``: ``float32`` (default), ``float64``, ``int64`` or ``bool``.
         - ``offset`` (added), ``log1p`` (``true``) and ``divide`` (divisor), applied in
-          that order after the cast; ``shape``: final shape, e.g. ``[1]`` or ``[]``.
+          that order after the cast. Float fields accept all three, ``int64`` fields an
+          integer ``offset`` only, ``bool`` fields none, so the declared dtype is the
+          produced dtype. ``shape``: final shape, e.g. ``[1]`` or ``[]`` (one ``-1`` at most).
 
     Devices:
         CPU; items are moved to the accelerator by Lightning after collation.
@@ -105,6 +103,13 @@ class StoredItems:
                 f"{store.identity!r}, but examples describe {examples.name!r} with "
                 f"{examples.digest!r}"
             )
+        for name, spec in self.fields.items():
+            columns = spec.get("columns")
+            if columns is not None and columns[1] > store.channels:
+                raise LoadingError(
+                    f"field {name!r} reads columns {columns} but store {store.path.name!r} has "
+                    f"{store.channels} channels"
+                )
         return _StoredItemsDataset(store, sample_ids, self.fields)
 
 
@@ -135,8 +140,6 @@ class _StoredItemsDataset(Dataset[dict[str, Any]]):
         sample = self.store.read_sample(self.sample_ids[position])
         item: dict[str, Any] = {"sample_id": sample["sample_id"]}
         for name, spec in self.fields.items():
-            if spec.get("optional") and spec["attribute"] not in sample["attrs"]:
-                continue
             item[name] = torch.from_numpy(_value(name, spec, sample))
         return item
 
@@ -145,16 +148,22 @@ def _field(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(spec, Mapping):
         raise ValueError(f"field {name!r} must be a mapping, got {type(spec).__name__}")
     source = spec.get("from")
-    if source not in _KEYS:
+    if not isinstance(source, str) or source not in _KEYS:
         raise ValueError(f"field {name!r}: 'from' must be 'data' or 'attribute', got {source!r}")
     unknown = sorted(set(spec) - _KEYS[source])
     if unknown:
         raise ValueError(f"field {name!r} from {source}: unsupported keys {unknown}")
     if source == "attribute" and not (isinstance(spec.get("attribute"), str) and spec["attribute"]):
         raise ValueError(f"field {name!r}: an attribute field must name its 'attribute'")
-    if spec.get("dtype", "float32") not in _DTYPES:
+    if (
+        not isinstance(spec.get("dtype", "float32"), str)
+        or spec.get("dtype", "float32") not in _DTYPES
+    ):
         raise ValueError(f"field {name!r}: dtype must be one of {sorted(_DTYPES)}")
-    if spec.get("layout", "time_major") not in _LAYOUTS:
+    if (
+        not isinstance(spec.get("layout", "time_major"), str)
+        or spec.get("layout", "time_major") not in _LAYOUTS
+    ):
         raise ValueError(f"field {name!r}: layout must be one of {list(_LAYOUTS)}")
     columns = spec.get("columns")
     if columns is not None and not (
@@ -174,16 +183,32 @@ def _field(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(f"field {name!r}: {key} must be a finite number")
     if spec.get("divide") == 0:
         raise ValueError(f"field {name!r}: divide must be non-zero")
-    for flag in ("log1p", "optional"):
-        if not isinstance(spec.get(flag, False), bool):
-            raise ValueError(f"field {name!r}: {flag} must be true or false")
-    if name == "x" and spec.get("optional"):
-        raise ValueError("field 'x' is the model input and cannot be optional")
+    if not isinstance(spec.get("log1p", False), bool):
+        raise ValueError(f"field {name!r}: log1p must be true or false")
+    dtype = spec.get("dtype", "float32")
+    transforms = [
+        key for key in ("offset", "log1p", "divide") if spec.get(key) not in (None, False)
+    ]
+    if dtype == "bool" and transforms:
+        raise ValueError(f"field {name!r}: a bool field accepts no {transforms} transform")
+    if dtype == "int64" and (
+        "log1p" in transforms
+        or "divide" in transforms
+        or ("offset" in transforms and not isinstance(spec["offset"], int))
+    ):
+        raise ValueError(
+            f"field {name!r}: an int64 field accepts only an integer offset; use a float dtype"
+        )
     shape = spec.get("shape")
     if shape is not None and not (
-        isinstance(shape, Sequence) and all(isinstance(size, int) and size >= -1 for size in shape)
+        isinstance(shape, Sequence)
+        and not isinstance(shape, str)
+        and all(
+            isinstance(size, int) and not isinstance(size, bool) and size >= -1 for size in shape
+        )
+        and list(shape).count(-1) <= 1
     ):
-        raise ValueError(f"field {name!r}: shape must be a list of integers")
+        raise ValueError(f"field {name!r}: shape must be integers with at most one -1")
     return dict(spec)
 
 
@@ -210,6 +235,11 @@ def _value(name: str, spec: Mapping[str, Any], sample: Mapping[str, Any]) -> np.
                 f"field {name!r} reads attribute {attribute!r}, which sample "
                 f"{sample['sample_id']!r} does not have"
             )
+        if attrs[attribute] is None:
+            raise LoadingError(
+                f"field {name!r} reads attribute {attribute!r}, which is null for sample "
+                f"{sample['sample_id']!r}"
+            )
         array = np.array(attrs[attribute], dtype=dtype, copy=True)
     if spec.get("offset") is not None:
         array = array + array.dtype.type(spec["offset"])
@@ -217,11 +247,16 @@ def _value(name: str, spec: Mapping[str, Any], sample: Mapping[str, Any]) -> np.
         array = np.log1p(array)
     if spec.get("divide") is not None:
         array = array / spec["divide"]
-        if array.dtype != dtype and dtype in (np.float32, np.float64):
-            array = array.astype(dtype)
+    array = array.astype(dtype, copy=False)  # NumPy promotion must never change the dtype
     shape = spec.get("shape")
     if shape is not None:
-        array = array.reshape(shape)
+        try:
+            array = array.reshape(shape)
+        except ValueError as error:
+            raise LoadingError(
+                f"field {name!r} cannot reshape sample {sample['sample_id']!r} of shape "
+                f"{tuple(array.shape)} to {list(shape)}"
+            ) from error
     # np.ascontiguousarray would promote a 0-d scalar target to shape (1,).
     return np.asarray(array, order="C")
 

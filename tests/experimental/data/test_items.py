@@ -123,18 +123,45 @@ def test_a_tampered_payload_fails_the_digest_check(store: SignalStore) -> None:
         dataset[0]
 
 
-def test_optional_attribute_fields_are_omitted_for_unlabelled_samples(tmp_path: Path) -> None:
-    with SignalStore.builder(tmp_path / "mixed", channels=1) as builder:
-        builder.add("train", np.zeros((1, 1)), group="g1", attrs={"target": 4})
-        builder.add("test", np.zeros((1, 1)), group="g2", attrs={})
-    store = SignalStore(tmp_path / "mixed")
-    items = StoredItems(
-        x={"from": "data"},
-        y={"from": "attribute", "attribute": "target", "dtype": "int64", "optional": True},
-    )
-    dataset = items(store, entity_examples(store), ["train", "test"])
+@pytest.mark.parametrize(
+    ("spec", "message"),
+    [
+        ({"from": "data", "dtype": "bool", "offset": 1}, "a bool field accepts no"),
+        ({"from": "data", "dtype": "int64", "log1p": True}, "accepts only an integer offset"),
+        ({"from": "data", "dtype": "int64", "divide": 2}, "accepts only an integer offset"),
+        ({"from": "data", "dtype": "int64", "offset": 0.5}, "accepts only an integer offset"),
+        ({"from": "data", "shape": [-1, -1]}, "at most one -1"),
+        ({"from": "data", "shape": [True]}, "at most one -1"),
+        ({"from": ["data"]}, "'from' must be"),
+        ({"from": "data", "dtype": ["float32"]}, "dtype must be"),
+    ],
+)
+def test_transforms_must_preserve_the_declared_dtype(spec: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        StoredItems(x=spec)
 
-    assert dataset[0]["y"].item() == 4
-    assert "y" not in dataset[1]
-    with pytest.raises(ValueError, match="cannot be optional"):
-        StoredItems(x={"from": "attribute", "attribute": "target", "optional": True})
+
+def test_integer_offsets_keep_int64_and_float_transforms_keep_float32(store: SignalStore) -> None:
+    item = _item(
+        store,
+        x={"from": "data", "divide": 3},
+        y={"from": "attribute", "attribute": "target", "dtype": "int64", "offset": -1},
+    )
+    assert item["x"].dtype == torch.float32
+    assert item["y"].dtype == torch.int64 and item["y"].item() == 1
+
+
+def test_null_attributes_bad_reshapes_and_excess_columns_name_the_field(
+    tmp_path: Path, store: SignalStore
+) -> None:
+    with SignalStore.builder(tmp_path / "null", channels=1) as builder:
+        builder.add("n", np.zeros((1, 1)), group="g", attrs={"target": None})
+    nulls = SignalStore(tmp_path / "null")
+    with pytest.raises(LoadingError, match="field 'y' reads attribute 'target', which is null"):
+        StoredItems(x={"from": "data"}, y={"from": "attribute", "attribute": "target"})(
+            nulls, entity_examples(nulls), ["n"]
+        )[0]
+    with pytest.raises(LoadingError, match="field 'x' cannot reshape sample 'a'"):
+        _item(store, x={"from": "data", "shape": [4]})
+    with pytest.raises(LoadingError, match="field 'x' reads columns \\[0, 9\\] but store"):
+        StoredItems(x={"from": "data", "columns": [0, 9]})(store, entity_examples(store), ["a"])

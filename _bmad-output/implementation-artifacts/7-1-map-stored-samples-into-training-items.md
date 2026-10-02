@@ -18,17 +18,33 @@ so that I stop writing a Dataset class per project (cohort #1).
 
 - [x] Task 1: `dsio.experimental.data.items:StoredItems` (AC 1).
   - It is a dataset factory configured per field (`x` required; `y`, `mask`, `sample_weight` optional).
-  - A field reads the stored data array (optional `columns`, `layout`) or one entity attribute (`optional` omits it for samples without it). Each field is cast to `dtype`, then `offset`, `log1p` and `divide` apply in that order, then `shape`.
+  - A field reads the stored data array (optional `columns`, `layout`) or one entity attribute. Each field is cast to `dtype`, then `offset`, `log1p` and `divide` apply in that order, then `shape`.
   - The factory verifies the `Examples` describe the store, and every assigned sample resolves. Whole-sample reads verify payload digests.
   - Specs are validated at construction, and errors name the field.
 - [x] Task 2: `resolve_component` raises when configured parameters collide with runtime arguments, which previously overrode them silently (AC 2). Consumers record the full `StoredItems` config as `dataset_factory` in provenance, and the supervised flow test pins it.
 - [x] Task 3: Migrated, with goldens unchanged (AC 3):
   - titanic, bike_sharing, store_sales and digit_recognizer (two configs, unlabelled and labelled);
   - the supervised and self_supervised fixtures;
-  - and, beyond the AC, essay_scoring, rogii and child_mind. Their datasets fit exactly, with `optional` labels for unlabelled test rows. No other story covered them.
+  - and, beyond the AC, essay_scoring, rogii and child_mind. Their datasets fit exactly, and no other story covered them.
 
   Every migrated consumer's local Dataset class and factory is deleted. parkinsons_fog stays local until per-instance standardization lands (Story 8.3), since its dataset z-scores in NumPy. It is recorded in `candidates.yaml`.
 - [x] Task 4: Catalog. `StoredItems` has all six sections plus a runnable Example, and its evidence entry lists 7 real Kaggle uses, 2 fixtures and the owner's standing approval. Conventions mark the dataset rules as enforced.
+
+- [x] Task 5: Review follow-ups. The review found nothing critical and verified parity bit-for-bit against the old datasets: all 256 pixel values, large integer targets, every consumer, plus spawn-pickling under `num_workers=2`.
+  - [x] 5.1 Transforms can no longer change the declared dtype:
+    - `bool` fields take no transform;
+    - `int64` fields take only an integer `offset`;
+    - float fields take all three transforms;
+    - the result is cast back to the declared dtype.
+  - [x] 5.2 `optional` is removed. Essay and CMI only feed labelled training rows into the dataset, so the flag only weakened the fail-loud check and risked a mixed batch silently dropping `y` under default collation. A missing target now always fails.
+  - [x] 5.3 Errors name the field for:
+    - bad or multiple `-1` shapes;
+    - unhashable `from`/`dtype`;
+    - null attributes;
+    - failed reshapes;
+    - columns beyond the store's channel count, now checked once in the factory rather than per item.
+  - [x] 5.4 The unused `FIELDS` constant is removed, and the `resolve_component` docstring states the collision rule.
+  - **Recorded, not changed:** `record_provenance` strips secret and ephemeral key names at any depth, so marking a key such as `shape` ephemeral would record a dataset config different from the one used. No consumer does this; it is a provenance-layer concern beyond this story.
 
 ## Dev Notes
 

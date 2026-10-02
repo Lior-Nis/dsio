@@ -28,7 +28,7 @@ DATASET: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",
     "parameters": {
         "x": {"from": "data", "dtype": "float32"},
-        "y": {"from": "attribute", "attribute": "target", "dtype": "int64", "optional": True},
+        "y": {"from": "attribute", "attribute": "target", "dtype": "int64"},
     },
 }
 

@@ -77,7 +77,11 @@ def resolve_component[T](
     expected: type[T] | tuple[type[Any], ...] | None = None,
     **runtime_parameters: Any,
 ) -> T:
-    """Import, construct, and type-check one configured native component."""
+    """Import, construct, and type-check one configured native component.
+
+    Runtime arguments (e.g. fitted statistics) and configured parameters share one
+    constructor call; a name present in both raises rather than letting one silently win.
+    """
     validated = validate_component_config(config)
     reference = validated["reference"]
     target = resolve_reference(reference)

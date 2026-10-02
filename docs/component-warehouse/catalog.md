@@ -24,14 +24,14 @@ digest), and the assigned `sample_ids`.
 
 **Parameters**: One mapping per field (`x` required):
 
-- `from`: `"data"` or `"attribute"`; `attribute`: the entity attribute name;
-  `optional` (attribute fields only, default `false`) omits the field for
-  samples that lack the attribute.
+- `from`: `"data"` or `"attribute"`; `attribute`: the entity attribute name.
 - `columns`: `[start, stop]` of the data array; `layout`: `time_major`
   (default, as stored) or `channel_first` (transposed to `[channels, rows]`).
 - `dtype`: `float32` (default), `float64`, `int64` or `bool`.
 - `offset` (added), `log1p` (`true`) and `divide` (divisor), applied in
-  that order after the cast; `shape`: final shape, e.g. `[1]` or `[]`.
+  that order after the cast. Float fields accept all three, `int64` fields an
+  integer `offset` only, `bool` fields none, so the declared dtype is the
+  produced dtype. `shape`: final shape, e.g. `[1]` or `[]` (one `-1` at most).
 
 **Devices**: CPU; items are moved to the accelerator by Lightning after collation.
 
