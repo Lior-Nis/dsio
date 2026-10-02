@@ -1,6 +1,6 @@
 # Story 7.3: Compose MLP models from backbones and heads
 
-Status: review
+Status: done
 
 ## Story
 
