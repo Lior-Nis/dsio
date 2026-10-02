@@ -18,6 +18,7 @@ from dsio.inference.predictor import PredictorError
 
 ViolationKind = Literal[
     "shape",
+    "dtype",
     "finiteness",
     "sign",
     "range",
@@ -32,8 +33,11 @@ class PredictionViolation(PredictorError):
     """A prediction broke its output contract; ``kind`` names the violated rule."""
 
     def __init__(self, kind: ViolationKind, message: str) -> None:
-        super().__init__(f"{kind}: {message}")
+        super().__init__(kind, message)  # both args, so copies and pickles round-trip
         self.kind = kind
+
+    def __str__(self) -> str:
+        return f"{self.args[0]}: {self.args[1]}"
 
 
 class BinaryOutput(nn.Module):
@@ -66,11 +70,7 @@ class BinaryOutput(nn.Module):
 
     def __init__(self, threshold: float = 0.5) -> None:
         super().__init__()
-        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
-            raise ValueError("threshold must be a number")
-        if not 0 < threshold < 1:
-            raise ValueError(f"threshold must be in (0, 1), got {threshold}")
-        self.threshold = float(threshold)
+        self.threshold = _check_threshold(threshold)
         self.validator = BinaryValidator(self.threshold)
 
     def forward(self, logits: Tensor) -> dict[str, Tensor]:
@@ -115,7 +115,7 @@ class BinaryValidator:
     """
 
     def __init__(self, threshold: float = 0.5) -> None:
-        self.threshold = float(threshold)
+        self.threshold = _check_threshold(threshold)
 
     def __call__(self, output: Mapping[str, Any]) -> None:
         prediction = _tensor(output, "prediction", torch.int64)
@@ -153,7 +153,8 @@ class MulticlassOutput(nn.Module):
     Parameters:
         ``classes``: the number of classes (at least 2); ``scores``: report probabilities
         (default ``false``); ``label_offset``: added to the class index, e.g. ``1`` for
-        ordinal labels 1..K (default ``0``).
+        ordinal labels 1..K (default ``0``); ``score_field``: name of the probability
+        field (default ``score``).
 
     Devices:
         CPU and accelerators.
@@ -170,18 +171,20 @@ class MulticlassOutput(nn.Module):
         >>> output.validator(result)
     """
 
-    def __init__(self, classes: int, scores: bool = False, label_offset: int = 0) -> None:
+    def __init__(
+        self,
+        classes: int,
+        scores: bool = False,
+        label_offset: int = 0,
+        score_field: str = "score",
+    ) -> None:
         super().__init__()
-        if isinstance(classes, bool) or not isinstance(classes, int) or classes < 2:
-            raise ValueError(f"classes must be an integer of at least 2, got {classes!r}")
-        if not isinstance(scores, bool):
-            raise ValueError("scores must be true or false")
-        if isinstance(label_offset, bool) or not isinstance(label_offset, int):
-            raise ValueError(f"label_offset must be an integer, got {label_offset!r}")
+        _check_multiclass(classes, scores, label_offset, score_field)
         self.classes = classes
         self.scores = scores
         self.label_offset = label_offset
-        self.validator = MulticlassValidator(classes, scores, label_offset)
+        self.score_field = score_field
+        self.validator = MulticlassValidator(classes, scores, label_offset, score_field)
 
     def forward(self, logits: Tensor) -> dict[str, Tensor]:
         if logits.ndim != 2 or logits.shape[1] != self.classes:
@@ -194,7 +197,7 @@ class MulticlassOutput(nn.Module):
         probabilities = torch.softmax(logits, dim=1)
         return {
             "prediction": torch.argmax(probabilities, dim=1) + self.label_offset,
-            "score": probabilities,
+            self.score_field: probabilities,
         }
 
 
@@ -211,13 +214,13 @@ class MulticlassValidator:
         ``simplex`` or ``argmax consistency``).
 
     Parameters:
-        ``classes``, ``scores`` and ``label_offset``, as on the output.
+        ``classes``, ``scores``, ``label_offset`` and ``score_field``, as on the output.
 
     Devices:
         CPU and accelerators.
 
     Limitations:
-        Rows must sum to 1 within ``1e-6``.
+        Rows must sum to 1 within ``max(1e-6, classes * eps)`` of the score dtype.
 
     Example:
         >>> import torch
@@ -230,10 +233,18 @@ class MulticlassValidator:
         'range'
     """
 
-    def __init__(self, classes: int, scores: bool = False, label_offset: int = 0) -> None:
+    def __init__(
+        self,
+        classes: int,
+        scores: bool = False,
+        label_offset: int = 0,
+        score_field: str = "score",
+    ) -> None:
+        _check_multiclass(classes, scores, label_offset, score_field)
         self.classes = classes
         self.scores = scores
         self.label_offset = label_offset
+        self.score_field = score_field
 
     def __call__(self, output: Mapping[str, Any]) -> None:
         prediction = _tensor(output, "prediction", torch.int64)
@@ -246,16 +257,17 @@ class MulticlassValidator:
             raise PredictionViolation("range", f"predictions must be in [{low}, {high}]")
         if not self.scores:
             return
-        score = _tensor(output, "score")
+        score = _tensor(output, self.score_field)
         if score.shape != (prediction.shape[0], self.classes):
             raise PredictionViolation(
                 "shape",
                 f"score must be [{prediction.shape[0]}, {self.classes}], got {tuple(score.shape)}",
             )
         _finite(score, "score")
-        rows = score.sum(dim=1)
+        rows = score.float().sum(dim=1)
+        tolerance = max(_SIMPLEX_TOLERANCE, self.classes * torch.finfo(score.dtype).eps)
         if bool((score < 0).any()) or not torch.allclose(
-            rows, torch.ones_like(rows), atol=_SIMPLEX_TOLERANCE
+            rows, torch.ones_like(rows), atol=tolerance, rtol=0.0
         ):
             raise PredictionViolation("simplex", "scores must be probability distributions")
         if not torch.equal(prediction, torch.argmax(score, dim=1) + self.label_offset):
@@ -307,18 +319,9 @@ class RegressionOutput(nn.Module):
         raw_field: str | None = None,
     ) -> None:
         super().__init__()
-        if isinstance(shape, (str, bytes)) or any(
-            isinstance(size, bool) or not isinstance(size, int) or size < 1 for size in shape
-        ):
-            raise ValueError(f"shape must be positive integers, got {shape!r}")
         if inverse not in (None, "expm1"):
             raise ValueError(f"inverse must be 'expm1' or null, got {inverse!r}")
-        if not isinstance(non_negative, bool):
-            raise ValueError("non_negative must be true or false")
-        if raw_field is not None and (
-            not isinstance(raw_field, str) or raw_field in {"", "prediction", "sample_id"}
-        ):
-            raise ValueError(f"raw_field must name a new output field, got {raw_field!r}")
+        _check_regression(shape, non_negative, raw_field)
         self.shape = tuple(shape)
         self.inverse = inverse
         self.non_negative = non_negative
@@ -374,6 +377,7 @@ class RegressionValidator:
     def __init__(
         self, shape: Sequence[int], non_negative: bool = False, raw_field: str | None = None
     ) -> None:
+        _check_regression(shape, non_negative, raw_field)
         self.shape = tuple(shape)
         self.non_negative = non_negative
         self.raw_field = raw_field
@@ -393,14 +397,46 @@ class RegressionValidator:
             raise PredictionViolation("sign", "predictions must be non-negative")
 
 
+def _check_threshold(threshold: object) -> float:
+    if isinstance(threshold, bool) or not isinstance(threshold, int | float):
+        raise ValueError("threshold must be a number")
+    if not 0 < threshold < 1:
+        raise ValueError(f"threshold must be in (0, 1), got {threshold}")
+    return float(threshold)
+
+
+def _check_multiclass(classes: object, scores: object, offset: object, field: object) -> None:
+    if isinstance(classes, bool) or not isinstance(classes, int) or classes < 2:
+        raise ValueError(f"classes must be an integer of at least 2, got {classes!r}")
+    if not isinstance(scores, bool):
+        raise ValueError("scores must be true or false")
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise ValueError(f"label_offset must be an integer, got {offset!r}")
+    if not isinstance(field, str) or field in {"", "prediction", "sample_id"}:
+        raise ValueError(f"score_field must name a new output field, got {field!r}")
+
+
+def _check_regression(shape: Sequence[int], non_negative: object, raw_field: object) -> None:
+    if isinstance(shape, str | bytes) or any(
+        isinstance(size, bool) or not isinstance(size, int) or size < 1 for size in shape
+    ):
+        raise ValueError(f"shape must be positive integers, got {shape!r}")
+    if not isinstance(non_negative, bool):
+        raise ValueError("non_negative must be true or false")
+    if raw_field is not None and (
+        not isinstance(raw_field, str) or raw_field in {"", "prediction", "sample_id"}
+    ):
+        raise ValueError(f"raw_field must name a new output field, got {raw_field!r}")
+
+
 def _tensor(output: Mapping[str, Any], field: str, dtype: torch.dtype | None = None) -> Tensor:
     value = output.get(field)
     if not isinstance(value, Tensor):
         raise PredictionViolation("shape", f"{field} must be a tensor")
     if dtype is not None and value.dtype != dtype:
-        raise PredictionViolation("shape", f"{field} must be {dtype}, got {value.dtype}")
+        raise PredictionViolation("dtype", f"{field} must be {dtype}, got {value.dtype}")
     if dtype is None and not value.is_floating_point():
-        raise PredictionViolation("shape", f"{field} must be floating point, got {value.dtype}")
+        raise PredictionViolation("dtype", f"{field} must be floating point, got {value.dtype}")
     return value
 
 

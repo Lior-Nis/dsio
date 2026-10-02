@@ -55,7 +55,7 @@ def test_binary_violations_are_named() -> None:
     ok = {"prediction": torch.tensor([1, 0]), "score": torch.tensor([0.9, 0.2])}
     validate(ok)
     assert _violation(validate, {**ok, "score": torch.tensor([0.9])}) == "shape"
-    assert _violation(validate, {**ok, "prediction": torch.tensor([1.0, 0.0])}) == "shape"
+    assert _violation(validate, {**ok, "prediction": torch.tensor([1.0, 0.0])}) == "dtype"
     assert _violation(validate, {**ok, "score": torch.tensor([0.9, torch.nan])}) == "finiteness"
     assert _violation(validate, {**ok, "score": torch.tensor([1.5, 0.2])}) == "range"
     assert _violation(validate, {**ok, "prediction": torch.tensor([2, 0])}) == "range"
@@ -92,7 +92,7 @@ def test_regression_violations_are_named() -> None:
     assert _violation(validate, {**ok, "prediction": torch.ones(3, 1)}) == "shape"
     assert _violation(validate, {**ok, "raw": torch.ones(3)}) == "shape"
     assert _violation(validate, {**ok, "prediction": torch.ones(3, 2, dtype=torch.int64)}) == (
-        "shape"
+        "dtype"
     )
     assert _violation(validate, {**ok, "prediction": torch.full((3, 2), torch.inf)}) == (
         "finiteness"
@@ -163,3 +163,41 @@ def test_configuration_is_validated() -> None:
         RegressionOutput(shape=[1], raw_field="prediction")
     with pytest.raises(ValueError, match="shape"):
         RegressionOutput(shape=[0])
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+def test_scores_in_reduced_precision_pass_their_own_validator(dtype: torch.dtype) -> None:
+    output = MulticlassOutput(classes=100, scores=True)
+    output.validator(output(torch.randn(8, 100).to(dtype)))
+
+
+def test_violations_pickle_and_dtype_is_its_own_kind() -> None:
+    import copy
+    import pickle
+
+    error = PredictionViolation("sign", "predictions must be non-negative")
+    for clone in (copy.deepcopy(error), pickle.loads(pickle.dumps(error))):
+        assert (clone.kind, str(clone)) == (error.kind, str(error))
+    validate = RegressionOutput(shape=[1]).validator
+    assert _violation(validate, {"prediction": torch.ones(2, 1, dtype=torch.int64)}) == "dtype"
+
+
+def test_score_field_renames_and_validators_check_their_parameters() -> None:
+    output = MulticlassOutput(classes=3, scores=True, score_field="probability")
+    result = output(torch.randn(2, 3))
+    assert set(result) == {"prediction", "probability"}
+    output.validator(result)
+    with pytest.raises(ValueError, match="threshold"):
+        BinaryOutput(threshold=1.0).validator.__class__(threshold=2.0)
+    from dsio.experimental.inference import (
+        BinaryValidator,
+        MulticlassValidator,
+        RegressionValidator,
+    )
+
+    with pytest.raises(ValueError, match="classes"):
+        MulticlassValidator(classes=1)
+    with pytest.raises(ValueError, match="shape"):
+        RegressionValidator(shape=[0])
+    with pytest.raises(ValueError, match="threshold"):
+        BinaryValidator(threshold=2.0)

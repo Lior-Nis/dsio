@@ -49,6 +49,13 @@ so that I never write a normalizer or validator (cohort #24, #25, #26).
   - All six classes have full sections and doctested Examples.
   - Evidence records each output's real uses and each validator's uses `via` its output, plus the owner's standing approval.
   - "Prediction normalizers and validators" in the candidates register keeps FoG, ROGII, Essay and both CMI consumers.
+- [x] Task 5: Review follow-ups. The adversarial review found nothing critical. Parity held for all five consumers (including Store's dropped `clamp_min(0)`, which a softplus makes a no-op, sign bits included), as did the round trip through the `pytorch` form, `pyfunc` and `predict`.
+  - [x] 5.1 (important) `MulticlassOutput(scores=True)` rejected its own float16/bf16 output. The simplex check now sums in float32 with a tolerance of `max(1e-6, classes * eps)` and no relative term.
+  - [x] 5.2 Wrong dtypes are their own `dtype` violation kind.
+  - [x] 5.3 `PredictionViolation` pickles and deep-copies, which matters for process-based Prefect runners.
+  - [x] 5.4 The standalone validators check their parameters like the outputs do.
+  - [x] 5.5 `MulticlassOutput(score_field=...)` names the probability field, so CMI (`probability`) can migrate without renaming its logged signature.
+  - **Recorded, not changed:** pickled predictors reference `dsio.experimental.inference.outputs.*`, so promoting these blocks to stable needs alias re-exports.
 
 ## Dev Notes
 

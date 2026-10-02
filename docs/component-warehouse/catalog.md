@@ -272,7 +272,8 @@ with `scores`, `score`: softmax probabilities `[batch, classes]`.
 
 **Parameters**: `classes`: the number of classes (at least 2); `scores`: report probabilities
 (default `false`); `label_offset`: added to the class index, e.g. `1` for
-ordinal labels 1..K (default `0`).
+ordinal labels 1..K (default `0`); `score_field`: name of the probability
+field (default `score`).
 
 **Devices**: CPU and accelerators.
 
@@ -302,11 +303,11 @@ Validate a :class:`MulticlassOutput` result: shape, range, simplex and argmax. â
 **Produces**: Nothing; raises :class:`PredictionViolation` (`shape`, `finiteness`, `range`,
 `simplex` or `argmax consistency`).
 
-**Parameters**: `classes`, `scores` and `label_offset`, as on the output.
+**Parameters**: `classes`, `scores`, `label_offset` and `score_field`, as on the output.
 
 **Devices**: CPU and accelerators.
 
-**Limitations**: Rows must sum to 1 within `1e-6`.
+**Limitations**: Rows must sum to 1 within `max(1e-6, classes * eps)` of the score dtype.
 
 **Example**
 
