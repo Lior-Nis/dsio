@@ -1,6 +1,6 @@
 # Story 7.1: Map stored samples into training items
 
-Status: review
+Status: done
 
 ## Story
 
