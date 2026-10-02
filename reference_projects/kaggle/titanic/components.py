@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
-import torch
-from torch import Tensor, nn
-
 from dsio.config.components import ComponentConfig
 
 FEATURES = 10
@@ -28,19 +22,7 @@ OBJECTIVE: ComponentConfig = {
 }
 
 
-class BinaryPrediction(nn.Module):
-    def forward(self, logits: Tensor) -> Mapping[str, Tensor]:
-        score = torch.sigmoid(logits).reshape(-1)
-        return {"prediction": (score >= 0.5).to(torch.int64), "score": score}
-
-
-def validate_binary_prediction(output: Mapping[str, Any]) -> None:
-    prediction, score = output.get("prediction"), output.get("score")
-    if not isinstance(prediction, Tensor) or not isinstance(score, Tensor):
-        raise ValueError("binary prediction requires tensor prediction and score fields")
-    if prediction.shape != score.shape or prediction.ndim != 1:
-        raise ValueError("binary prediction and score must have shape [batch]")
-    if not bool(torch.all((prediction == 0) | (prediction == 1))):
-        raise ValueError("binary predictions must be 0 or 1")
-    if not bool(torch.isfinite(score).all()) or not bool(torch.all((score >= 0) & (score <= 1))):
-        raise ValueError("binary scores must be finite probabilities")
+OUTPUT: ComponentConfig = {
+    "reference": "dsio.experimental.inference.outputs:BinaryOutput",
+    "parameters": {},
+}

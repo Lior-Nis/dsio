@@ -15,10 +15,11 @@ from prefect import task
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
+from dsio.experimental.inference import RegressionOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
-from reference_projects.kaggle.store_sales.components import ForecastOutput, validate_forecast
+from reference_projects.kaggle.store_sales.components import OUTPUT
 from reference_projects.kaggle.store_sales.data import CONTEXT_DAYS, HORIZON_DAYS
 from reference_projects.kaggle.store_sales.tasks.training import TRAINING_FOLD
 
@@ -51,6 +52,7 @@ def export(
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         ids = list(split["fold_assignments"][TRAINING_FOLD]["validate"])
         inputs = _arrays(data["store_path"], ids)
+        output = resolve_component(OUTPUT, expected=RegressionOutput)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -63,8 +65,7 @@ def export(
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
-                "normalizer": ("reference_projects.kaggle.store_sales.components:ForecastOutput"),
-                "validator": ("reference_projects.kaggle.store_sales.components:validate_forecast"),
+                "output": OUTPUT,
             },
         )
         example = {
@@ -75,8 +76,8 @@ def export(
             reference,
             model=model,
             preprocessor=preprocessor,
-            normalizer=ForecastOutput(),
-            validator=validate_forecast,
+            normalizer=output,
+            validator=output.validator,
             input_example=example,
         )
         info = log_predictor(

@@ -9,7 +9,6 @@ import torch
 from torch import Tensor, nn
 
 from dsio.config.components import ComponentConfig
-from dsio.experimental.inference import validate_tensor_prediction
 from dsio.experimental.model.components import NTXent
 from reference_projects.supervised.components import (
     TimeMajorToChannelFirst as TimeMajorToChannelFirst,
@@ -53,9 +52,9 @@ class EmbeddingNorm(nn.Module):
 
 def validate_embedding_norm(output: Mapping[str, Any]) -> None:
     """Require one finite, non-negative norm for every source sample."""
-    validate_tensor_prediction(output)
-    prediction = output["prediction"]
-    assert isinstance(prediction, Tensor)
+    prediction = output.get("prediction")
+    if not isinstance(prediction, Tensor) or not bool(torch.isfinite(prediction).all()):
+        raise ValueError("embedding norm prediction must be a finite tensor")
     if prediction.ndim != 2 or prediction.shape[1] != 1:
         raise ValueError("embedding norm prediction must have shape [batch, 1]")
     if bool((prediction < 0).any()):

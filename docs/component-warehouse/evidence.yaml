@@ -74,21 +74,6 @@ dsio.experimental.execution:calibrate_execution:
     via: dsio.experimental.training:calibrate_training_execution
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d
-dsio.experimental.inference.outputs:TensorOutput:
-  legacy: true
-  uses:
-  - consumer: reference_projects/supervised
-    test: tests/reference_flows/test_supervised_flow.py
-    kind: fixture
-dsio.experimental.inference.outputs:validate_tensor_prediction:
-  legacy: true
-  uses:
-  - consumer: reference_projects/supervised
-    test: tests/reference_flows/test_supervised_flow.py
-    kind: fixture
-  - consumer: reference_projects/self_supervised
-    test: tests/reference_flows/test_self_supervised_flow.py
-    kind: fixture
 dsio.experimental.model.chain:ComponentChain:
   legacy: true
   uses: []
@@ -338,3 +323,56 @@ dsio.experimental.model.objectives:RootMeanSquaredError:
   - consumer: reference_projects/kaggle/store_sales
     test: tests/kaggle_portfolio/test_store_sales.py
     kind: real
+dsio.experimental.inference.outputs:BinaryOutput:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/titanic
+    test: tests/kaggle_portfolio/test_titanic.py
+    kind: real
+dsio.experimental.inference.outputs:BinaryValidator:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/titanic
+    test: tests/kaggle_portfolio/test_titanic.py
+    kind: real
+    via: dsio.experimental.inference.outputs:BinaryOutput
+dsio.experimental.inference.outputs:MulticlassOutput:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/digit_recognizer
+    test: tests/kaggle_portfolio/test_digit_recognizer.py
+    kind: real
+dsio.experimental.inference.outputs:MulticlassValidator:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/digit_recognizer
+    test: tests/kaggle_portfolio/test_digit_recognizer.py
+    kind: real
+    via: dsio.experimental.inference.outputs:MulticlassOutput
+dsio.experimental.inference.outputs:RegressionOutput:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/bike_sharing
+    test: tests/kaggle_portfolio/test_bike_sharing.py
+    kind: real
+  - consumer: reference_projects/kaggle/store_sales
+    test: tests/kaggle_portfolio/test_store_sales.py
+    kind: real
+  - consumer: reference_projects/supervised
+    test: tests/reference_flows/test_supervised_flow.py
+    kind: fixture
+dsio.experimental.inference.outputs:RegressionValidator:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/bike_sharing
+    test: tests/kaggle_portfolio/test_bike_sharing.py
+    kind: real
+    via: dsio.experimental.inference.outputs:RegressionOutput
+  - consumer: reference_projects/kaggle/store_sales
+    test: tests/kaggle_portfolio/test_store_sales.py
+    kind: real
+    via: dsio.experimental.inference.outputs:RegressionOutput
+  - consumer: reference_projects/supervised
+    test: tests/reference_flows/test_supervised_flow.py
+    kind: fixture
+    via: dsio.experimental.inference.outputs:RegressionOutput
