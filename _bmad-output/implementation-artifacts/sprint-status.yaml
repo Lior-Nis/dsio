@@ -86,7 +86,7 @@ development_status:
   6-3-one-batch-field-vocabulary-with-consistent-mask-polarity: done
   6-4-generate-a-ci-checked-component-catalog: done
   6-5-place-every-component-where-its-evidence-puts-it: done
-  6-6-record-golden-baselines-and-the-deletion-measure: in-progress
+  6-6-record-golden-baselines-and-the-deletion-measure: review
   epic-6-retrospective: optional
 
   epic-7: backlog
