@@ -18,7 +18,7 @@ from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
 from dsio.experimental.data import StoredItems
-from dsio.experimental.model import Chain
+from dsio.experimental.model import Chain, SupervisedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance, require_evidence
 from dsio.train.artifacts import ArtifactRef, load_artifact, save_artifact
@@ -30,12 +30,12 @@ from dsio.train.capabilities import (
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.digit_recognizer.components import (
     AUTOENCODER,
+    CLASSIFICATION_OBJECTIVE,
     CLASSIFIER,
     ENCODER,
     LABELLED_DATASET,
+    RECONSTRUCTION_OBJECTIVE,
     UNLABELLED_DATASET,
-    ClassificationObjective,
-    ReconstructionObjective,
 )
 from reference_projects.kaggle.digit_recognizer.tasks.data import labelled_examples
 
@@ -118,7 +118,7 @@ def pretrain_encoder(
         )
         module = DsioModule(
             model=resolve_component(AUTOENCODER, expected=Chain),
-            objective=ReconstructionObjective(),
+            objective=resolve_component(RECONSTRUCTION_OBJECTIVE, expected=SupervisedObjective),
             optimizer_factory=torch.optim.Adam,
             optimizer_parameters=PRETRAIN_OPTIMIZER_PARAMETERS,
         )
@@ -149,9 +149,7 @@ def pretrain_encoder(
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": UNLABELLED_DATASET,
                 "model": AUTOENCODER,
-                "objective": (
-                    "reference_projects.kaggle.digit_recognizer.components:ReconstructionObjective"
-                ),
+                "objective": RECONSTRUCTION_OBJECTIVE,
                 "optimizer": "torch.optim:Adam",
             },
         )
@@ -246,7 +244,7 @@ def train_classifier(
         )
         module = DsioModule(
             model=model,
-            objective=ClassificationObjective(),
+            objective=resolve_component(CLASSIFICATION_OBJECTIVE, expected=SupervisedObjective),
             optimizer_factory=torch.optim.Adam,
             optimizer_parameters=CLASSIFIER_OPTIMIZER_PARAMETERS,
         )
@@ -276,9 +274,7 @@ def train_classifier(
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": LABELLED_DATASET,
                 "model": CLASSIFIER,
-                "objective": (
-                    "reference_projects.kaggle.digit_recognizer.components:ClassificationObjective"
-                ),
+                "objective": CLASSIFICATION_OBJECTIVE,
                 "optimizer": "torch.optim:Adam",
                 "preprocessor": PREPROCESSOR,
             },

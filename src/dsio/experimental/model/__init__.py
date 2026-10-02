@@ -1,8 +1,9 @@
-"""Model-side components not yet proven by real downstream use.
+"""Experimental model-side components: compositions, standardization and objectives.
 
-Legacy experimental under the pre-1.0 clause in docs/component-admission.md: these
-components have no real downstream use yet, carry no compatibility promise, and are
-deleted at 1.0 if still unproven.
+Each block's maturity and evidence is listed in docs/component-warehouse/catalog.md. The
+modules ``chain``, ``components`` and ``masking`` hold legacy experimental components under
+the pre-1.0 clause in docs/component-admission.md: no compatibility promise, deleted at 1.0
+if still unproven.
 """
 
 from dsio.experimental.model.chain import (
@@ -42,6 +43,7 @@ from dsio.experimental.model.masking import (
     SpanMask,
     apply_mask,
 )
+from dsio.experimental.model.objectives import RootMeanSquaredError, SupervisedObjective
 from dsio.experimental.model.standardization import Standardize
 
 __all__ = [
@@ -63,9 +65,11 @@ __all__ = [
     "PatchMask",
     "RandomMask",
     "RandomScale",
+    "RootMeanSquaredError",
     "SpanMask",
     "Stages",
     "Standardize",
+    "SupervisedObjective",
     "VICReg",
     "apply_mask",
     "bce_loss",

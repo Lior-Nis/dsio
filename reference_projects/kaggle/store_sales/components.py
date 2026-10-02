@@ -7,7 +7,6 @@ from typing import Any
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
 from reference_projects.kaggle.store_sales.data import HORIZON_DAYS
@@ -24,14 +23,15 @@ DATASET: ComponentConfig = {
 }
 
 
-class ForecastObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        prediction = model(batch["x"])
-        loss = F.mse_loss(prediction, batch["y"].float())
-        return {"loss": loss, "rmsle": torch.sqrt(loss.detach())}
+OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.objectives:SupervisedObjective",
+    "parameters": {
+        "loss": {"reference": "torch.nn:MSELoss"},
+        "metrics": {
+            "rmsle": {"reference": "dsio.experimental.model.objectives:RootMeanSquaredError"}
+        },
+    },
+}
 
 
 class ForecastOutput(nn.Module):

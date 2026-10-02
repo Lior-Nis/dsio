@@ -16,7 +16,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.experimental.data import StoredItems
-from dsio.experimental.model import MLP
+from dsio.experimental.model import MLP, SupervisedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -29,7 +29,7 @@ from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.store_sales.components import (
     DATASET,
     FEATURES,
-    ForecastObjective,
+    OBJECTIVE,
 )
 from reference_projects.kaggle.store_sales.data import CONTEXT_DAYS, HORIZON_DAYS
 from reference_projects.kaggle.store_sales.tasks.data import labelled_examples
@@ -91,7 +91,7 @@ def train(
         )
         module = DsioModule(
             model=resolve_component(model_config, expected=MLP),
-            objective=ForecastObjective(),
+            objective=resolve_component(OBJECTIVE, expected=SupervisedObjective),
             optimizer_factory=torch.optim.Adam,
             optimizer_parameters=OPTIMIZER_PARAMETERS,
         )
@@ -130,7 +130,7 @@ def train(
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": DATASET,
                 "model": model_config,
-                "objective": ("reference_projects.kaggle.store_sales.components:ForecastObjective"),
+                "objective": OBJECTIVE,
                 "optimizer": "torch.optim:Adam",
                 "preprocessor": PREPROCESSOR,
             },

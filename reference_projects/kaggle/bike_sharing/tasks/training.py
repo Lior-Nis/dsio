@@ -16,7 +16,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.experimental.data import StoredItems, fit_standardization, record_fitted
-from dsio.experimental.model import Stages
+from dsio.experimental.model import Stages, SupervisedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -29,7 +29,7 @@ from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.bike_sharing.components import (
     DATASET,
     FEATURES,
-    DemandObjective,
+    OBJECTIVE,
 )
 from reference_projects.kaggle.bike_sharing.tasks.data import labelled_examples
 
@@ -106,7 +106,7 @@ def train(
         )
         module = DsioModule(
             model=resolve_component(model_config, expected=Stages),
-            objective=DemandObjective(),
+            objective=resolve_component(OBJECTIVE, expected=SupervisedObjective),
             optimizer_factory=torch.optim.SGD,
             optimizer_parameters=OPTIMIZER_PARAMETERS,
         )
@@ -147,7 +147,7 @@ def train(
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": DATASET,
                 "model": model_config,
-                "objective": "reference_projects.kaggle.bike_sharing.components:DemandObjective",
+                "objective": OBJECTIVE,
                 "optimizer": "torch.optim:SGD",
                 "preprocessor": PREPROCESSOR,
             },

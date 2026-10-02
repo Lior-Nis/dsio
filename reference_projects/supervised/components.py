@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
 from dsio.data.store import SignalStore
@@ -48,20 +47,13 @@ class TimeMajorToChannelFirst(nn.Module):
         return x.transpose(1, 2).contiguous()
 
 
-class RegressionObjective(nn.Module):
-    def forward(
-        self,
-        model: nn.Module,
-        batch: Mapping[str, Any],
-        stage: str,
-    ) -> Mapping[str, Tensor]:
-        del stage
-        prediction = model(batch["x"])
-        target = batch["y"].float()
-        return {
-            "loss": F.mse_loss(prediction, target),
-            "mae": F.l1_loss(prediction, target),
-        }
+OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.objectives:SupervisedObjective",
+    "parameters": {
+        "loss": {"reference": "torch.nn:MSELoss"},
+        "metrics": {"mae": {"reference": "torch.nn:L1Loss"}},
+    },
+}
 
 
 def build_synthetic_store(path: Path, seed: int) -> SignalStore:

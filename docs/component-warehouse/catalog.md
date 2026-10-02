@@ -308,6 +308,84 @@ inside a stage carries a note naming that stage's position and class.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
 
+#### `dsio.experimental.model.objectives:RootMeanSquaredError`
+
+Square root of the mean squared error, as an auxiliary metric. — **experimental**; real uses: 1 (store_sales).
+
+**Consumes**: `(prediction, target)` tensors of the same shape.
+
+**Produces**: A scalar: `sqrt(mse(prediction, target))`; on log1p targets this is RMSLE.
+
+**Parameters**: None.
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: Not elementwise, so it cannot be sample-weighted; a micro-batch value is the root
+of that batch's mean, and epoch logging averages those roots.
+
+**Example**
+
+```python
+>>> import torch
+>>> RootMeanSquaredError()(torch.tensor([1.0, 3.0]), torch.tensor([1.0, 1.0])).item()
+1.4142135381698608
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs —)
+
+#### `dsio.experimental.model.objectives:SupervisedObjective`
+
+Compute a native loss between the model's prediction and a declared batch field. — **experimental**; real uses: 4 (bike_sharing, digit_recognizer, store_sales, titanic).
+
+**Consumes**: A batch with `x` (the model input), the target field, and, when
+`sample_weighted`, `sample_weight` shaped `[batch]` or `[batch, 1]`.
+
+**Produces**: `{"loss": scalar}` plus one detached scalar per auxiliary metric, which
+`DsioModule` logs as `<stage>/<name>`.
+
+**Parameters**: `loss`: component configuration of a native loss module (`torch.nn:MSELoss`,
+`torch.nn:CrossEntropyLoss`, ...). Its parameters are native; list-valued
+`weight` and `pos_weight` become float32 tensors, and `reduction` is owned
+by the objective. `target`: the batch field to predict (default `y`; `x`
+makes a reconstruction objective). `target_dtype`: optional cast (`float32`,
+`float64`, `int64`). `target_shape`: optional per-sample reshape, e.g.
+`[]` turns a `[batch, 1]` class column into `[batch]`. `metrics`: named
+component configurations of `(prediction, target)` modules. `metric_stages`:
+the stages that compute metrics (default every stage). `sample_weighted`:
+weight each sample's loss and metrics (default `false`).
+
+**Devices**: CPU and accelerators; class weights are buffers of the loss and move with it.
+
+**Limitations**: After adaptation, a floating target must match the prediction's shape exactly and
+an integer target must match it without the class dimension, so a `[batch, 1]`
+target is never silently broadcast against a `[batch]` prediction. Sample
+weighting needs a loss and metrics that accept `reduction="none"`. Masked dense
+targets need a masked objective.
+
+**Example**
+
+```python
+>>> import torch
+>>> objective = SupervisedObjective(
+...     loss={"reference": "torch.nn:MSELoss"},
+...     metrics={"mae": {"reference": "torch.nn:L1Loss"}},
+... )
+>>> batch = {"x": torch.tensor([[1.0], [3.0]]), "y": torch.tensor([[2.0], [3.0]])}
+>>> result = objective(torch.nn.Identity(), batch, "train")
+>>> {name: value.item() for name, value in result.items()}
+{'loss': 0.5, 'mae': 0.5}
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; runs —)
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+- real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs —)
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
+- fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
+
 #### `dsio.experimental.model.standardization:Standardize`
 
 Subtract a fixed per-feature mean and divide by a fixed per-feature scale. — **experimental**; real uses: 2 (bike_sharing, digit_recognizer).
@@ -553,7 +631,7 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.inference.outputs:TensorOutput` | Name one native tensor model output without changing it. | supervised |
 | `dsio.experimental.inference.outputs:validate_tensor_prediction` | Require the standard prediction field to be a finite tensor. | self_supervised, supervised |
 | `dsio.experimental.model.chain:ComponentChain` | Compose preprocessing, transform, backbone and head; superseded by ``compositions.Chain``. | — |
-| `dsio.experimental.model.chain:LossObjective` | Adapt an established `(prediction, target)` loss to the generic objective contract. | — |
+| `dsio.experimental.model.chain:LossObjective` | Adapt a `(prediction, target)` loss; superseded by ``objectives.SupervisedObjective``. | — |
 | `dsio.experimental.model.chain:export_encoder` | Export the encoder portion of a DSio module configured with `ComponentChain`. | — |
 | `dsio.experimental.model.components:Conv1dEncoder` | Strided dilated convolutions with global pooling. | — |
 | `dsio.experimental.model.components:CrossEntropy` | Cross-entropy that accepts either hard integer labels or soft ratios. | — |
@@ -736,7 +814,7 @@ local on purpose.
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
 | Local nn.Module models | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10-#13, |
-| Local objectives | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Supervised, masked dense and reconstruction objectives (#18-#20), Stories 7.4, 8.2. |
+| Local objectives | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Masked dense objectives (#19), Story 8.2; essay and CMI move to SupervisedObjective (#18) with their sequence and weighting stories (8.3-8.5, 9.2-9.4). |
 | Pad collate functions | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii` | Pad collator (#3), Story 8.1. |
 | Prediction normalizers and validators | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6. |
 | Stored-sample Dataset classes | 1 | `reference_projects/kaggle/parkinsons_fog` | Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3. |

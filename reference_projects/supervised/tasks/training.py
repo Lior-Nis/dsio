@@ -17,6 +17,7 @@ from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.experimental.data import StoredItems
+from dsio.experimental.model import SupervisedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -28,7 +29,7 @@ from dsio.train.capabilities import (
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.supervised.components import (
     DATASET,
-    RegressionObjective,
+    OBJECTIVE,
 )
 
 _SHUFFLE = {"train": True, "validate": False, "test": False, "predict": False}
@@ -62,7 +63,7 @@ _COMPONENTS = {
     "data_module": "dsio.data.loading.module:DsioDataModule",
     "dataset_factory": DATASET,
     "model": _MODEL,
-    "objective": "reference_projects.supervised.components:RegressionObjective",
+    "objective": OBJECTIVE,
     "optimizer": "torch.optim:SGD",
     "preprocessor": _PREPROCESSOR,
 }
@@ -111,7 +112,7 @@ def train_model(
         )
         module = DsioModule(
             model=resolve_component(_MODEL, expected=torch.nn.Module),
-            objective=RegressionObjective(),
+            objective=resolve_component(OBJECTIVE, expected=SupervisedObjective),
             optimizer_factory=torch.optim.SGD,
             optimizer_parameters=_TRAINING["optimizer_parameters"],
         )
