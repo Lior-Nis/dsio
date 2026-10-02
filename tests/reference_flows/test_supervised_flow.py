@@ -15,6 +15,7 @@ from tests.golden import assert_golden_metrics
 from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
+from dsio.experimental.data import collate_arrays
 from dsio.experimental.model import MLP, SupervisedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import TrackingError, canonical_dataset_digest, resolve_experiment
@@ -27,8 +28,8 @@ def test_training_and_inference_share_channel_first_signal_layout(
     del reference_services
     from reference_projects.supervised.components import (
         DATASET,
+        INPUTS,
         TimeMajorToChannelFirst,
-        evaluation_arrays,
     )
 
     from dsio.config.components import resolve_component
@@ -43,7 +44,7 @@ def test_training_and_inference_share_channel_first_signal_layout(
     with SignalStore.builder(path, channels=2, dtype="float32") as builder:
         builder.add("sample", values, group="group", attrs={"target": 0.0})
     store = SignalStore(path)
-    raw, _ = evaluation_arrays(str(path), ["sample"])
+    raw = collate_arrays(INPUTS, store, ["sample"])
 
     prepared = TimeMajorToChannelFirst(channels=2, time=3)(torch.from_numpy(raw["x"]))
 

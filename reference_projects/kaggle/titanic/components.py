@@ -15,6 +15,23 @@ DATASET: ComponentConfig = {
     },
 }
 
+# Predictor inputs, exactly as the exported model receives them.
+INPUTS: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "dtype": "float32"},
+    },
+}
+
+# Evaluation inputs and targets, assembled through the training collation.
+EVALUATION: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "dtype": "float32"},
+        "y": {"from": "attribute", "attribute": "target", "dtype": "int64"},
+    },
+}
+
 
 OBJECTIVE: ComponentConfig = {
     "reference": "dsio.experimental.model.objectives:SupervisedObjective",

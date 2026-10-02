@@ -15,23 +15,16 @@ from prefect import task
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
+from dsio.experimental.data import collate_arrays
 from dsio.experimental.inference import RegressionOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.bike_sharing.components import (
+    DATASET,
+    INPUTS,
     OUTPUT,
 )
-
-
-def _arrays(store_path: str, sample_ids: list[str]) -> dict[str, np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    return {
-        "sample_id": np.asarray(sample_ids, dtype=np.str_),
-        "x": np.stack([store.read_sample(value)["data"] for value in sample_ids]).astype(
-            np.float32
-        ),
-    }
 
 
 @task(persist_result=False)
@@ -50,7 +43,9 @@ def export(
         )
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
-        inputs = _arrays(data["store_path"], list(split["assignments"]["validate"]))
+        inputs = collate_arrays(
+            INPUTS, SignalStore(data["store_path"]), list(split["assignments"]["validate"])
+        )
         output = resolve_component(OUTPUT, expected=RegressionOutput)
         identity = record_provenance(
             run.info.run_id,
@@ -101,11 +96,9 @@ def evaluate_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         ids = list(split["assignments"]["validate"])
-        store = SignalStore(data["store_path"])
-        targets = np.asarray(
-            [[float(store.read_sample(value)["attrs"]["target"])] for value in ids],
-            dtype=np.float32,
-        )
+        arrays = collate_arrays(DATASET, SignalStore(data["store_path"]), ids)
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        targets = arrays["y"]
         identity = record_provenance(
             run.info.run_id,
             {
@@ -121,7 +114,7 @@ def evaluate_model(
             run_id=run.info.run_id,
             model_uri=exported["model_uri"],
             dataset_run_id=split["split_run_id"],
-            inputs=_arrays(data["store_path"], ids),
+            inputs=inputs,
             targets=targets,
             metrics=("rmse",),
         )
@@ -134,7 +127,9 @@ def infer_and_submit(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         ids = list(data["test_ids"])
-        outputs = predict(exported["model_uri"], _arrays(data["store_path"], ids))
+        outputs = predict(
+            exported["model_uri"], collate_arrays(INPUTS, SignalStore(data["store_path"]), ids)
+        )
         values = np.asarray(outputs["prediction"], dtype=float).reshape(-1).tolist()
         identity = record_provenance(
             run.info.run_id,

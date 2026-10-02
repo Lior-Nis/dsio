@@ -11,6 +11,58 @@ Conventions every block follows: [conventions.md](conventions.md).
 
 ### `dsio.experimental.data`
 
+#### `dsio.experimental.data.arrays:collate_arrays`
+
+Collate the given samples, in order, into NumPy arrays as training would batch them. — **experimental**; real uses: 4 (bike_sharing, digit_recognizer, store_sales, titanic).
+
+**Consumes**: A dataset factory called as `(store, examples, sample_ids)`, or its component
+configuration (e.g. a `StoredItems` config, the same one training records), the
+store, and the samples in the order the arrays must follow.
+
+**Produces**: `{"sample_id": str array, <field>: array, ...}`: one entry per collated field,
+each with the samples along the first axis, in the requested order.
+
+**Parameters**: `examples`: the store's `Examples` (default: its identity without attributes);
+`collate_fn`: the training collation (default: PyTorch's `default_collate`).
+
+**Devices**: CPU; arrays are NumPy copies of the collated CPU tensors.
+
+**Limitations**: All samples are collated as one batch, so a padding collation pads to the longest
+requested sample, which can differ from the training batches' padding. Collated
+values must be tensors (or the `sample_id` strings).
+
+**Example**
+
+```python
+>>> from pathlib import Path
+>>> from tempfile import mkdtemp
+>>> import numpy as np
+>>> path = Path(mkdtemp()) / "store"
+>>> with SignalStore.builder(path, channels=1) as builder:
+...     _ = builder.add("a", np.array([[1.0]]), group="a", attrs={"target": 0})
+...     _ = builder.add("b", np.array([[2.0]]), group="b", attrs={"target": 1})
+>>> store = SignalStore(path)
+>>> items = {
+...     "reference": "dsio.experimental.data.items:StoredItems",
+...     "parameters": {
+...         "x": {"from": "data"},
+...         "y": {"from": "attribute", "attribute": "target", "dtype": "int64"},
+...     },
+... }
+>>> arrays = collate_arrays(items, store, ["b", "a"])
+>>> arrays["sample_id"].tolist(), arrays["x"].tolist(), arrays["y"].tolist()
+(['b', 'a'], [[[2.0]], [[1.0]]], [1, 0])
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; runs —)
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+- real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs —)
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
+- fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
+- fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
+
 #### `dsio.experimental.data.fitting:fit_standardization`
 
 Fit per-feature mean and scale over the samples one split role assigns. — **experimental**; real uses: 1 (bike_sharing).
@@ -101,10 +153,11 @@ digest), and the assigned `sample_ids`.
 - `from`: `"data"` or `"attribute"`; `attribute`: the entity attribute name.
 - `columns`: `[start, stop]` of the data array; `layout`: `time_major`
   (default, as stored) or `channel_first` (transposed to `[channels, rows]`).
-- `dtype`: `float32` (default), `float64`, `int64` or `bool`.
+- `dtype`: `float32` (default), `float64`, `int64`, `uint8` (raw
+  8-bit inputs, e.g. pixels a predictor scales itself) or `bool`.
 - `offset` (added), `log1p` (`true`) and `divide` (divisor), applied in
   that order after the cast. Float fields accept all three, `int64` fields an
-  integer `offset` only, `bool` fields none, so the declared dtype is the
+  integer `offset` only, `uint8` and `bool` fields none, so the declared dtype is the
   produced dtype. `shape`: final shape, e.g. `[1]` or `[]` (one `-1` at most).
 
 **Devices**: CPU; items are moved to the accelerator by Lightning after collation.
@@ -1009,7 +1062,7 @@ local on purpose.
 
 | Candidate | Uses | Consumers | Reason |
 |---|---|---|---|
-| Evaluation array builders | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Array assembly from the training collation (#5), Story 7.6. |
+| Evaluation array builders | 4 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind` | collate_arrays (#5) once their datasets and padding collation are warehouse blocks, Stories 8.1-8.5 and 9.1-9.4. |
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
 | Local nn.Module models | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10-#13, |

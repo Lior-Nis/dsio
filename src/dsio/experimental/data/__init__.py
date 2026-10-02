@@ -4,6 +4,7 @@ Which ones are proven by real consumers and which are pre-1.0 legacy (no real us
 deleted at 1.0 if still unproven) is recorded in docs/component-warehouse/catalog.md.
 """
 
+from dsio.experimental.data.arrays import collate_arrays
 from dsio.experimental.data.fitting import fit_standardization, record_fitted
 from dsio.experimental.data.items import StoredItems
 from dsio.experimental.data.labels import (
@@ -21,6 +22,7 @@ __all__ = [
     "StoredItems",
     "StoredSamples",
     "WindowDataset",
+    "collate_arrays",
     "entity_attribute_labels",
     "fit_standardization",
     "record_fitted",

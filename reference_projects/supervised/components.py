@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from torch import Tensor, nn
@@ -16,6 +14,22 @@ DATASET: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",
     "parameters": {
         "x": {"from": "data", "layout": "channel_first"},
+        "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "shape": [1]},
+    },
+}
+
+# Predictor inputs: raw time-major signals, exactly as the exported model receives them.
+INPUTS: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {"x": {"from": "data"}},
+}
+
+# Evaluation inputs (raw time-major, as the predictor receives them) and targets,
+# assembled through the training collation.
+EVALUATION: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data"},
         "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "shape": [1]},
     },
 }
@@ -74,22 +88,3 @@ def build_synthetic_store(path: Path, seed: int) -> SignalStore:
                 attrs={"target": target},
             )
     return SignalStore(path)
-
-
-def evaluation_arrays(
-    store_path: str,
-    sample_ids: Sequence[str],
-) -> tuple[dict[str, np.ndarray[Any, Any]], np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    samples = [store.read_sample(sample_id) for sample_id in sample_ids]
-    inputs = {
-        "sample_id": np.asarray([sample["sample_id"] for sample in samples], dtype=np.str_),
-        "x": np.stack([np.array(sample["data"], copy=True) for sample in samples]).astype(
-            np.float32
-        ),
-    }
-    targets = np.asarray(
-        [[float(sample["attrs"]["target"])] for sample in samples],
-        dtype=np.float32,
-    )
-    return inputs, targets
