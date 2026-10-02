@@ -1,6 +1,6 @@
 # Story 6.4: Generate a CI-checked component catalog
 
-Status: review
+Status: done
 
 ## Story
 

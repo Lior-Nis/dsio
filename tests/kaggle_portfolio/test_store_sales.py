@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from mlflow import MlflowClient
+from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
     assert_execution_evidence,
@@ -105,6 +106,7 @@ def test_store_sales_flow_trains_a_causal_multi_horizon_forecaster(
     assert_replay_run_ids_differ(result, replay)
     assert result["split_digest"] == replay["split_digest"]
     assert_same_identities(result, replay)
+    assert_golden_metrics("store_sales", result["metrics"])
     assert result["metrics"] == replay["metrics"]
     assert result["prediction"] == replay["prediction"]
     assert result["submission_bytes"] == replay["submission_bytes"]

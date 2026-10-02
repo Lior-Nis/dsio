@@ -12,6 +12,7 @@ import pytest
 import torch
 from lightning import Trainer
 from mlflow import MlflowClient
+from tests.golden import assert_golden_metrics
 from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
@@ -267,6 +268,7 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         assert left["source_x"].shape[0] == 4
 
     assert_same_identities(first, second)
+    assert_golden_metrics("self_supervised", first["metrics"])
     assert first["assignments"] == second["assignments"]
     np.testing.assert_array_equal(first["prediction"], second["prediction"])
     assert first["prediction"].shape == (len(first["test_sample_id"]), 1)

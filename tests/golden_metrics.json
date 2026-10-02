@@ -1,0 +1,65 @@
+{
+  "bike_sharing": {
+    "rmse": 16.966452573807235
+  },
+  "child_mind:fused": {
+    "accuracy": 0.25,
+    "quadratic_weighted_kappa": -0.11538461538461564,
+    "qwk.sensor_ablated": 0.6938775510204082,
+    "qwk.sensor_ablation_delta": -0.7323390894819465,
+    "qwk.sensor_missing": -0.08450704225352124,
+    "qwk.sensor_present": -0.038461538461538325
+  },
+  "child_mind:tabular": {
+    "accuracy": 0.375,
+    "quadratic_weighted_kappa": 0.2692307692307693,
+    "qwk.sensor_ablated": 0.42553191489361697,
+    "qwk.sensor_ablation_delta": 0.0,
+    "qwk.sensor_missing": 0.054054054054053835,
+    "qwk.sensor_present": 0.42553191489361697
+  },
+  "child_mind_sequence": {
+    "accuracy": 0.25,
+    "quadratic_weighted_kappa": 0.0,
+    "qwk.sensor_ablated": 0.0,
+    "qwk.sensor_ablation_delta": 0.0,
+    "qwk.sensor_missing": 0.0,
+    "qwk.sensor_present": 0.0
+  },
+  "digit_recognizer": {
+    "accuracy": 0.25
+  },
+  "essay_scoring": {
+    "accuracy": 0.4166666666666667,
+    "quadratic_weighted_kappa": 0.6818181818181819
+  },
+  "parkinsons_fog": {
+    "average_precision.StartHesitation": 0.09215775542088347,
+    "average_precision.Turn": 0.22749828709020165,
+    "average_precision.Walking": 0.3192640692640693,
+    "average_precision.mean": 0.21297337059171814,
+    "positive_rate.StartHesitation": 0.12,
+    "positive_rate.Turn": 0.18,
+    "positive_rate.Walking": 0.12,
+    "positive_rate.mean": 0.13999999999999999
+  },
+  "rogii": {
+    "last_value_rmse": 6.146376212033407,
+    "rmse": 3.549518828474803
+  },
+  "self_supervised": {
+    "mae": 1.658693641424179,
+    "rmse": 1.7390551924417184
+  },
+  "store_sales": {
+    "rmsle": 1.609425340796225,
+    "seasonal_naive_rmsle": 0.0
+  },
+  "supervised": {
+    "mae": 0.10762318968772888,
+    "rmse": 0.12347557571791241
+  },
+  "titanic": {
+    "accuracy": 0.5
+  }
+}

@@ -1,5 +1,5 @@
 # generated: 2026-09-21T18:15:08+03:00
-# last_updated: 2026-09-30T16:21:27+03:00
+# last_updated: 2026-10-02T10:00:00+03:00
 # project: DSio
 # project_key: NOKEY
 # tracking_system: file-system
@@ -36,7 +36,7 @@
 # - Re-run sprint planning to refresh statuses without downgrading existing progress.
 
 generated: "2026-09-21T18:15:08+03:00"
-last_updated: "2026-09-30T16:21:27+03:00"
+last_updated: "2026-10-02T10:00:00+03:00"
 project: DSio
 project_key: NOKEY
 tracking_system: file-system
@@ -80,13 +80,13 @@ development_status:
   5-3-run-the-self-supervised-reference-flow: done
   epic-5-retrospective: optional
 
-  epic-6: in-progress
+  epic-6: done
   6-1-single-source-the-version-and-clean-the-package-surface: done
   6-2-make-replay-identity-deterministic-in-ci: done
   6-3-one-batch-field-vocabulary-with-consistent-mask-polarity: done
-  6-4-generate-a-ci-checked-component-catalog: review
+  6-4-generate-a-ci-checked-component-catalog: done
   6-5-place-every-component-where-its-evidence-puts-it: done
-  6-6-record-golden-baselines-and-the-deletion-measure: backlog
+  6-6-record-golden-baselines-and-the-deletion-measure: done
   epic-6-retrospective: optional
 
   epic-7: backlog

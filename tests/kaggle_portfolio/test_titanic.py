@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 
 import pytest
+from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
     assert_execution_evidence,
@@ -92,6 +93,7 @@ def test_titanic_flow_is_replayable_and_ticket_groups_do_not_leak(
     assert first["split_digest"] == second["split_digest"]
     assert first["assignments"] == second["assignments"]
     assert_same_identities(first, second)
+    assert_golden_metrics("titanic", first["metrics"])
     assert first["metrics"] == second["metrics"]
     assert first["prediction"] == second["prediction"]
     assert first["submission_bytes"] == second["submission_bytes"]

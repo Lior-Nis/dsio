@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 
 import pytest
+from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
     assert_execution_evidence,
@@ -98,6 +99,7 @@ def test_bike_flow_has_one_causal_purged_holdout_and_nonnegative_ordered_submiss
     assert_replay_run_ids_differ(result, replay)
     assert result["split_digest"] == replay["split_digest"]
     assert_same_identities(result, replay)
+    assert_golden_metrics("bike_sharing", result["metrics"])
     assert result["metrics"] == replay["metrics"]
     assert result["prediction"] == replay["prediction"]
     assert result["submission_bytes"] == replay["submission_bytes"]

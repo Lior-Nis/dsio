@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from tests.golden import assert_golden_metrics
 from tests.replay import assert_same_identities
 from torch.utils.data import default_collate
 
@@ -237,5 +238,6 @@ def test_sequence_flow_replays_data_split_weights_and_metrics(
     assert first["checkpoint_digest"] == replay["checkpoint_digest"]
     assert first["metrics"] == replay["metrics"]
     assert_same_identities(first, replay)
+    assert_golden_metrics("child_mind_sequence", first["metrics"])
     assert first["train_run_id"] != replay["train_run_id"]
     assert first["model_uri"] != replay["model_uri"]
