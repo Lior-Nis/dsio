@@ -70,8 +70,8 @@ class StoredItems:
         >>> from tempfile import mkdtemp
         >>> path = Path(mkdtemp()) / "store"
         >>> with SignalStore.builder(path, channels=2) as builder:
-        ...     builder.add("a", np.array([[1.0, 2.0]]), group="g1", attrs={"target": 3.0})
-        ...     builder.add("b", np.array([[4.0, 5.0]]), group="g2", attrs={"target": 6.0})
+        ...     _ = builder.add("a", np.array([[1.0, 2.0]]), group="g1", attrs={"target": 3.0})
+        ...     _ = builder.add("b", np.array([[4.0, 5.0]]), group="g2", attrs={"target": 6.0})
         >>> store = SignalStore(path)
         >>> items = StoredItems(
         ...     x={"from": "data", "dtype": "float32"},
