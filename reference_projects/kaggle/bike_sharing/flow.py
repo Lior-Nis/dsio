@@ -43,7 +43,7 @@ def bike_sharing_flow(data_dir: str, workspace: str, *, seed: int = 19) -> dict[
         "discarded_count": split["discarded_count"],
         "train_times": split["train_times"],
         "validate_times": split["validate_times"],
-        "scaler_fit_ids": training["scaler_fit_ids"],
+        "standardization_sample_ids": training["standardization_sample_ids"],
         "model_uri": exported["model_uri"],
         "checkpoint_digest": exported["checkpoint_digest"],
         "metrics": evaluation["metrics"],

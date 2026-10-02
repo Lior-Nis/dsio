@@ -45,7 +45,10 @@ def test_statistics_use_only_the_training_role(tmp_path: Path) -> None:
     assert fitted["scale"] == [rows.std(axis=0)[0], 1.0]  # zero-variance feature maps to 1
 
     tampered = _store(tmp_path / "tampered", {sample_id: 1000.0 for sample_id in held_out})
-    assert fit_standardization(tampered, _manifest(tampered), fold=0)["mean"] == fitted["mean"]
+    tampered_manifest = _manifest(tampered)
+    assert tampered_manifest.fold(0).assignments == manifest.fold(0).assignments
+    refitted = fit_standardization(tampered, tampered_manifest, fold=0)
+    assert (refitted["mean"], refitted["scale"]) == (fitted["mean"], fitted["scale"])
 
 
 def test_observed_statistics_ignore_missing_values_and_refuse_empty_features(

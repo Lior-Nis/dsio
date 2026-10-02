@@ -64,7 +64,6 @@ def train(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
         standardization = fit_standardization(store, manifest, fold=FOLD)
-        fit_ids = standardization["sample_ids"]
         standardization_artifact = record_fitted(
             run.info.run_id, "standardization", standardization
         )
@@ -115,14 +114,8 @@ def train(
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
                 "seed": seed,
-                "standardization": {
-                    "artifact": standardization_artifact,
-                    "role": standardization["role"],
-                    "fold": standardization["fold"],
-                    "sample_ids": fit_ids,
-                    "mean": standardization["mean"],
-                    "scale": standardization["scale"],
-                },
+                # Everything the fit used and produced, so provenance matches the artifact.
+                "standardization": {"artifact": standardization_artifact, **standardization},
                 "fold": FOLD,
                 "batch_size": BATCH_SIZE,
                 "num_workers": NUM_WORKERS,
@@ -156,6 +149,6 @@ def train(
         return {
             "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
-            "scaler_fit_ids": fit_ids,
+            "standardization_sample_ids": standardization["sample_ids"],
             "identity": identity,
         }

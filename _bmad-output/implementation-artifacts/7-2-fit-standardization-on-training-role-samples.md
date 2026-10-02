@@ -32,6 +32,11 @@ so that I cannot leak validation data into normalization (cohort #4a, #9a).
   - **bike_sharing:** `_scaler` is deleted. `fit_standardization` and `record_fitted` feed `DemandRegressor`, which now delegates to `Standardize`; the rest of the model moves to the warehouse composition in Story 7.3. Provenance records `standardization` (artifact path, role, fold, sample IDs, values).
   - **digit_recognizer:** `ScalePixels` is deleted. The predictor preprocessor is `Standardize(mean=[0], scale=[255])`.
 - [x] Task 6: Catalog. All three blocks have full sections and doctested Examples. Their evidence lists real uses (`Standardize`: Bike Sharing and Digit Recognizer; the fitter and recorder: Bike Sharing) and the owner's standing approval. The candidates register now lists only CMI (both consumers) for statistics and weights (Stories 9.2 and 9.3).
+- [x] Task 7: Review follow-ups. The adversarial review found nothing critical. It verified that the fitter reads only the manifest's `train` assignments, so purged and discarded samples never enter, and that `Standardize` is bit-identical to the former arithmetic.
+  - [x] 7.1 Bike provenance records the whole fitted mapping, including `observed`, next to the artifact path. Two fits differing only in `observed` no longer share an identity.
+  - [x] 7.2 The stale `scaler_fit_ids` result and export key is renamed `standardization_sample_ids`.
+  - [x] 7.3 The Bike contract test now checks the `fitted/standardization.json` evidence that `record_fitted`'s catalog entry cites.
+  - [x] 7.4 The leakage test asserts the tampered store's manifest assigns the same samples and compares `scale` as well as `mean`.
 
 ## Dev Notes
 

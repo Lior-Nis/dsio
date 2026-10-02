@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import pytest
+from mlflow import MlflowClient
 from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
     assert_downstream_evidence,
@@ -112,7 +114,15 @@ def test_bike_flow_has_one_causal_purged_holdout_and_nonnegative_ordered_submiss
         + result["discarded_count"]
         == 24
     )
-    assert set(result["scaler_fit_ids"]) == set(result["assignments"]["train"])
+    assert set(result["standardization_sample_ids"]) == set(result["assignments"]["train"])
+    fitted = json.loads(
+        Path(
+            MlflowClient().download_artifacts(result["train_run_id"], "fitted/standardization.json")
+        ).read_text(encoding="utf-8")
+    )
+    assert fitted["sample_ids"] == result["standardization_sample_ids"]
+    assert (fitted["role"], fitted["fold"], fitted["observed"]) == ("train", 0, False)
+    assert len(fitted["mean"]) == len(fitted["scale"]) == 9
     assert len(result["prediction"]) == 4
     assert all(value >= 0 for value in result["prediction"])
     lines = result["submission_bytes"].decode().splitlines()
