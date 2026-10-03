@@ -1,6 +1,6 @@
 # Story 7.6: Build evaluation arrays from the training collation
 
-Status: review
+Status: done
 
 ## Story
 
