@@ -8,7 +8,7 @@ import torch
 from prefect import task
 
 from dsio.config.components import resolve_component
-from dsio.experimental.inference import TensorOutput, validate_tensor_prediction
+from dsio.experimental.inference import RegressionOutput
 from dsio.inference import (
     build_predictor,
     log_predictor,
@@ -16,7 +16,7 @@ from dsio.inference import (
 )
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef
-from reference_projects.supervised.components import evaluation_arrays
+from reference_projects.supervised.components import OUTPUT, evaluation_arrays
 
 
 @task(persist_result=False)
@@ -39,6 +39,7 @@ def export_model(
         )
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
+        output = resolve_component(OUTPUT, expected=RegressionOutput)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -51,9 +52,8 @@ def export_model(
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
-                "normalizer": "dsio.experimental.inference.outputs:TensorOutput",
+                "output": OUTPUT,
                 "preprocessor": components["preprocessor"],
-                "validator": "dsio.experimental.inference.outputs:validate_tensor_prediction",
             },
         )
         input_example = {
@@ -64,8 +64,8 @@ def export_model(
             reference,
             model=model,
             preprocessor=preprocessor,
-            normalizer=TensorOutput(),
-            validator=validate_tensor_prediction,
+            normalizer=output,
+            validator=output.validator,
             input_example=input_example,
         )
         info = log_predictor(

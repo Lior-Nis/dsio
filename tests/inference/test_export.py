@@ -12,8 +12,14 @@ import torch
 from mlflow.tracking import MlflowClient
 from torch import Tensor, nn
 
-from dsio.experimental.inference import TensorOutput
 from dsio.inference import Predictor, PredictorError, log_predictor
+
+
+class NamePrediction(nn.Module):
+    """Name the raw model tensor ``prediction``: the minimal normalizer contract."""
+
+    def forward(self, value: Tensor) -> dict[str, Tensor]:
+        return {"prediction": value}
 
 
 class AddOne(nn.Module):
@@ -86,7 +92,7 @@ def _predictor() -> Predictor:
     return Predictor(
         model=model,
         preprocessor=AddOne(),
-        normalizer=TensorOutput(),
+        normalizer=NamePrediction(),
         validator=require_finite_nonnegative_prediction,
         checkpoint_uri="runs:/training/checkpoint",
         checkpoint_digest="a" * 64,
@@ -111,7 +117,7 @@ def _identity_predictor() -> Predictor:
     return Predictor(
         model=nn.Identity(),
         preprocessor=nn.Identity(),
-        normalizer=TensorOutput(),
+        normalizer=NamePrediction(),
         validator=require_finite_nonnegative_prediction,
         checkpoint_uri="runs:/training/checkpoint",
         checkpoint_digest="b" * 64,

@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
-import torch
-from torch import Tensor, nn
-
 from dsio.config.components import ComponentConfig
 
 UNLABELLED_DATASET: ComponentConfig = {
@@ -86,20 +80,7 @@ CLASSIFICATION_OBJECTIVE: ComponentConfig = {
 }
 
 
-class DigitPrediction(nn.Module):
-    def forward(self, logits: Tensor) -> Mapping[str, Tensor]:
-        if logits.ndim != 2 or logits.shape[1] != 10 or not bool(torch.isfinite(logits).all()):
-            raise ValueError("digit logits must be a finite [batch, 10] tensor")
-        return {"prediction": torch.argmax(logits, dim=1)}
-
-
-def validate_digit_prediction(output: Mapping[str, Any]) -> None:
-    prediction = output.get("prediction")
-    if (
-        not isinstance(prediction, Tensor)
-        or prediction.ndim != 1
-        or prediction.dtype != torch.int64
-    ):
-        raise ValueError("digit prediction must be an int64 [batch] tensor")
-    if not bool(torch.all((prediction >= 0) & (prediction <= 9))):
-        raise ValueError("digit predictions must be in [0, 9]")
+OUTPUT: ComponentConfig = {
+    "reference": "dsio.experimental.inference.outputs:MulticlassOutput",
+    "parameters": {"classes": 10},
+}

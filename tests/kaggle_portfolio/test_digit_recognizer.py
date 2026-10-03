@@ -20,6 +20,7 @@ from tests.replay import assert_same_identities
 from dsio.config.components import resolve_component
 from dsio.contracts import sha256_of_bytes
 from dsio.data.loading import DsioDataModule
+from dsio.experimental.inference import MulticlassOutput, PredictionViolation
 from dsio.experimental.model import Chain
 from dsio.model.module import DsioModule
 from dsio.tracking import TrackingError, record_provenance
@@ -148,20 +149,21 @@ def test_digit_encoder_handoff_rejects_unusable_artifact_evidence(
 
 
 def test_digit_prediction_rejects_invalid_logits_and_fractional_classes() -> None:
-    from reference_projects.kaggle.digit_recognizer.components import (
-        DigitPrediction,
-        validate_digit_prediction,
-    )
+    from reference_projects.kaggle.digit_recognizer.components import OUTPUT
 
-    for logits in (
-        torch.zeros(2, 9),
-        torch.full((2, 10), torch.nan),
-        torch.full((2, 10), torch.inf),
+    output = resolve_component(OUTPUT, expected=MulticlassOutput)
+    for logits, kind in (
+        (torch.zeros(2, 9), "shape"),
+        (torch.full((2, 10), torch.nan), "finiteness"),
+        (torch.full((2, 10), torch.inf), "finiteness"),
     ):
-        with pytest.raises(ValueError, match="finite.*batch, 10"):
-            DigitPrediction()(logits)
-    with pytest.raises(ValueError, match="int64"):
-        validate_digit_prediction({"prediction": torch.tensor([1.5])})
+        with pytest.raises(PredictionViolation) as raised:
+            output(logits)
+        assert raised.value.kind == kind
+    with pytest.raises(PredictionViolation, match="int64"):
+        output.validator({"prediction": torch.tensor([1.5])})
+    with pytest.raises(PredictionViolation, match=r"\[0, 9\]"):
+        output.validator({"prediction": torch.tensor([10])})
 
 
 def test_digit_flow_verifies_label_free_encoder_then_trains_a_frozen_classifier(

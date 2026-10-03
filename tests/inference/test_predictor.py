@@ -15,12 +15,24 @@ import torch
 from mlflow.tracking import MlflowClient
 from torch import Tensor, nn
 
-from dsio.experimental.inference import TensorOutput, validate_tensor_prediction
 from dsio.inference import Predictor, PredictorError, build_predictor, require_checkpoint_lineage
 from dsio.model.module import DsioModule
 from dsio.tracking import record_provenance
 from dsio.tracking.client import resolve_tracking_uri
 from dsio.train.artifacts import ArtifactRef, load_artifact, save_artifact
+
+
+class NamePrediction(nn.Module):
+    """Name the raw model tensor ``prediction``: the minimal normalizer contract."""
+
+    def forward(self, value: Tensor) -> dict[str, Tensor]:
+        return {"prediction": value}
+
+
+def validate_finite_prediction(output: Mapping[str, Any]) -> None:
+    prediction = output.get("prediction")
+    if not isinstance(prediction, Tensor) or not bool(torch.isfinite(prediction).all()):
+        raise PredictorError("prediction must be a finite tensor")
 
 
 class AddOne(nn.Module):
@@ -132,8 +144,8 @@ def _build(ref: ArtifactRef, **overrides: Any) -> Predictor:
     values: dict[str, Any] = {
         "model": nn.Linear(2, 1),
         "preprocessor": AddOne(),
-        "normalizer": TensorOutput(),
-        "validator": validate_tensor_prediction,
+        "normalizer": NamePrediction(),
+        "validator": validate_finite_prediction,
         "input_example": {"sample_id": ["example"], "x": torch.ones(1, 2)},
     }
     values.update(overrides)
@@ -423,7 +435,7 @@ def test_construction_probe_preserves_ambient_rng_state(tmp_path: Path) -> None:
     ref = _checkpoint(tmp_path)
     model = nn.Linear(2, 1)
     preprocessor = RngConsumingPreprocessor()
-    normalizer = TensorOutput()
+    normalizer = NamePrediction()
     python_state = random.getstate()
     numpy_state = np.random.get_state()
     torch_state = torch.random.get_rng_state()
@@ -433,7 +445,7 @@ def test_construction_probe_preserves_ambient_rng_state(tmp_path: Path) -> None:
         model=model,
         preprocessor=preprocessor,
         normalizer=normalizer,
-        validator=validate_tensor_prediction,
+        validator=validate_finite_prediction,
         input_example={"sample_id": ["example"], "x": torch.ones(1, 2)},
     )
 

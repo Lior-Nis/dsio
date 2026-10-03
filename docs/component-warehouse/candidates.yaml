@@ -42,16 +42,14 @@ Pad collate functions:
   reason: Pad collator (#3), Story 8.1.
 Prediction normalizers and validators:
   consumers:
-    - reference_projects/kaggle/titanic
-    - reference_projects/kaggle/bike_sharing
-    - reference_projects/kaggle/digit_recognizer
     - reference_projects/kaggle/essay_scoring
     - reference_projects/kaggle/parkinsons_fog
     - reference_projects/kaggle/rogii
-    - reference_projects/kaggle/store_sales
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6.
+  reason: >-
+    Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay
+    and CMI move to MulticlassOutput (#25) with their sequence and weighting stories.
 Evaluation array builders:
   consumers:
     - reference_projects/kaggle/titanic

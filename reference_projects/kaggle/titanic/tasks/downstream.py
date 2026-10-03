@@ -15,12 +15,12 @@ from prefect import task
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
+from dsio.experimental.inference import BinaryOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.titanic.components import (
-    BinaryPrediction,
-    validate_binary_prediction,
+    OUTPUT,
 )
 
 
@@ -51,6 +51,7 @@ def export(
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         inputs = _arrays(data["store_path"], list(split["assignments"]["validate"]))
+        output = resolve_component(OUTPUT, expected=BinaryOutput)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -63,10 +64,7 @@ def export(
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
-                "normalizer": "reference_projects.kaggle.titanic.components:BinaryPrediction",
-                "validator": (
-                    "reference_projects.kaggle.titanic.components:validate_binary_prediction"
-                ),
+                "output": OUTPUT,
             },
         )
         example = {
@@ -77,8 +75,8 @@ def export(
             reference,
             model=model,
             preprocessor=preprocessor,
-            normalizer=BinaryPrediction(),
-            validator=validate_binary_prediction,
+            normalizer=output,
+            validator=output.validator,
             input_example=example,
         )
         info = log_predictor(

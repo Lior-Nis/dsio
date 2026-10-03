@@ -79,8 +79,6 @@ LEGACY = frozenset(
         "dsio.experimental.data.windows:WindowDataset",
         "dsio.experimental.eval.ess:autocorrelation",
         "dsio.experimental.eval.ess:effective_sample_size",
-        "dsio.experimental.inference.outputs:TensorOutput",
-        "dsio.experimental.inference.outputs:validate_tensor_prediction",
         "dsio.experimental.model.chain:ComponentChain",
         "dsio.experimental.model.chain:LossObjective",
         "dsio.experimental.model.chain:export_encoder",

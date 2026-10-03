@@ -197,6 +197,205 @@ fixed. Selection is benchmark-noise sensitive inside the tolerance band.
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
+### `dsio.experimental.inference`
+
+#### `dsio.experimental.inference.outputs:BinaryOutput`
+
+Sigmoid scores and thresholded 0/1 predictions from one logit per sample. — **experimental**; real uses: 1 (titanic).
+
+**Consumes**: Logits `[batch]` or `[batch, 1]`.
+
+**Produces**: `prediction`: int64 `[batch]`, 1 where `score >= threshold`; `score`: the
+sigmoid probability, float `[batch]`.
+
+**Parameters**: `threshold`: in `(0, 1)`, default `0.5`.
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: One binary target per sample; dense `[batch, time, k]` outputs are not covered.
+
+**Example**
+
+```python
+>>> import torch
+>>> output = BinaryOutput()
+>>> result = output(torch.tensor([[2.0], [-1.0]]))
+>>> result["prediction"].tolist(), [round(v, 3) for v in result["score"].tolist()]
+([1, 0], [0.881, 0.269])
+>>> output.validator(result)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; runs —)
+
+#### `dsio.experimental.inference.outputs:BinaryValidator`
+
+Validate a :class:`BinaryOutput` result: shape, finiteness, range and threshold. — **experimental**; real uses: 1 (titanic).
+
+**Consumes**: A predictor result with `prediction` and `score`.
+
+**Produces**: Nothing; raises :class:`PredictionViolation` (`shape`, `finiteness`, `range`
+or `threshold consistency`).
+
+**Parameters**: `threshold`: the output's threshold (default `0.5`).
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: Checks `[batch]` results only.
+
+**Example**
+
+```python
+>>> import torch
+>>> validate = BinaryValidator(threshold=0.5)
+>>> validate({"prediction": torch.tensor([1]), "score": torch.tensor([0.9])})
+>>> try:
+...     validate({"prediction": torch.tensor([0]), "score": torch.tensor([0.9])})
+... except PredictionViolation as error:
+...     error.kind
+'threshold consistency'
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; via `dsio.experimental.inference.outputs:BinaryOutput`; runs —)
+
+#### `dsio.experimental.inference.outputs:MulticlassOutput`
+
+Argmax class labels, optionally with softmax scores and an ordinal label offset. — **experimental**; real uses: 1 (digit_recognizer).
+
+**Consumes**: Finite logits `[batch, classes]`.
+
+**Produces**: `prediction`: int64 `[batch]` in `[label_offset, label_offset + classes)`;
+with `scores`, `score`: softmax probabilities `[batch, classes]`.
+
+**Parameters**: `classes`: the number of classes (at least 2); `scores`: report probabilities
+(default `false`); `label_offset`: added to the class index, e.g. `1` for
+ordinal labels 1..K (default `0`); `score_field`: name of the probability
+field (default `score`).
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: One label per sample; per-step or multi-label outputs are not covered.
+
+**Example**
+
+```python
+>>> import torch
+>>> output = MulticlassOutput(classes=3, scores=True, label_offset=1)
+>>> result = output(torch.tensor([[0.0, 2.0, 1.0]]))
+>>> result["prediction"].tolist(), round(result["score"].sum().item(), 6)
+([2], 1.0)
+>>> output.validator(result)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs —)
+
+#### `dsio.experimental.inference.outputs:MulticlassValidator`
+
+Validate a :class:`MulticlassOutput` result: shape, range, simplex and argmax. — **experimental**; real uses: 1 (digit_recognizer).
+
+**Consumes**: A predictor result with `prediction` and, when `scores`, `score`.
+
+**Produces**: Nothing; raises :class:`PredictionViolation` (`shape`, `finiteness`, `range`,
+`simplex` or `argmax consistency`).
+
+**Parameters**: `classes`, `scores`, `label_offset` and `score_field`, as on the output.
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: Rows must sum to 1 within `max(1e-6, classes * eps)` of the score dtype.
+
+**Example**
+
+```python
+>>> import torch
+>>> validate = MulticlassValidator(classes=3, label_offset=1)
+>>> validate({"prediction": torch.tensor([1, 3])})
+>>> try:
+...     validate({"prediction": torch.tensor([0])})
+... except PredictionViolation as error:
+...     error.kind
+'range'
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; via `dsio.experimental.inference.outputs:MulticlassOutput`; runs —)
+
+#### `dsio.experimental.inference.outputs:RegressionOutput`
+
+Named regression values, optionally mapped back from a transformed target. — **experimental**; real uses: 2 (bike_sharing, store_sales).
+
+**Consumes**: Values `[batch, *shape]`, in target space after any training transform.
+
+**Produces**: `prediction`: `[batch, *shape]` after the inverse transform; with
+`raw_field`, also the untransformed values under that name.
+
+**Parameters**: `shape`: per-sample shape (e.g. `[1]` or `[horizon]`); `inverse`: `expm1`
+undoes a `log1p` target (default none); `non_negative`: the validator rejects
+negative predictions (default `false`); `raw_field`: optional field name for
+the untransformed values.
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: The only inverse transform is `expm1`; other target transforms need a new
+declared inverse.
+
+**Example**
+
+```python
+>>> import torch
+>>> output = RegressionOutput(shape=[2], inverse="expm1", non_negative=True)
+>>> result = output(torch.log1p(torch.tensor([[1.0, 3.0]])))
+>>> [round(v, 4) for v in result["prediction"][0].tolist()]
+[1.0, 3.0]
+>>> output.validator(result)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs —)
+- real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs —)
+- fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
+
+#### `dsio.experimental.inference.outputs:RegressionValidator`
+
+Validate a :class:`RegressionOutput` result: shape, finiteness and sign. — **experimental**; real uses: 2 (bike_sharing, store_sales).
+
+**Consumes**: A predictor result with `prediction` and, with `raw_field`, that field.
+
+**Produces**: Nothing; raises :class:`PredictionViolation` (`shape`, `finiteness` or
+`sign`).
+
+**Parameters**: `shape`, `non_negative` and `raw_field`, as on the output.
+
+**Devices**: CPU and accelerators.
+
+**Limitations**: Floating-point predictions only.
+
+**Example**
+
+```python
+>>> import torch
+>>> validate = RegressionValidator(shape=[1], non_negative=True)
+>>> validate({"prediction": torch.tensor([[2.5]])})
+>>> try:
+...     validate({"prediction": torch.tensor([[-1.0]])})
+... except PredictionViolation as error:
+...     error.kind
+'sign'
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; via `dsio.experimental.inference.outputs:RegressionOutput`; runs —)
+- real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; via `dsio.experimental.inference.outputs:RegressionOutput`; runs —)
+- fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; via `dsio.experimental.inference.outputs:RegressionOutput`; runs —)
+
 ### `dsio.experimental.model`
 
 #### `dsio.experimental.model.compositions:Chain`
@@ -630,8 +829,6 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.data.windows:WindowDataset` | Read selected index positions as raw, identity-bearing tensor windows. | — |
 | `dsio.experimental.eval.ess:autocorrelation` | Sample autocorrelation at lags 0..max_lag. Lag 0 is 1 by definition. | — |
 | `dsio.experimental.eval.ess:effective_sample_size` | How many independent observations a correlated series is worth. | — |
-| `dsio.experimental.inference.outputs:TensorOutput` | Name one native tensor model output without changing it. | supervised |
-| `dsio.experimental.inference.outputs:validate_tensor_prediction` | Require the standard prediction field to be a finite tensor. | self_supervised, supervised |
 | `dsio.experimental.model.chain:ComponentChain` | Compose preprocessing, transform, backbone and head; superseded by ``compositions.Chain``. | — |
 | `dsio.experimental.model.chain:LossObjective` | Adapt a `(prediction, target)` loss; superseded by ``objectives.SupervisedObjective``. | — |
 | `dsio.experimental.model.chain:export_encoder` | Export the encoder portion of a DSio module configured with `ComponentChain`. | — |
@@ -818,7 +1015,7 @@ local on purpose.
 | Local nn.Module models | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10-#13, |
 | Local objectives | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Masked dense objectives (#19), Story 8.2; essay and CMI move to SupervisedObjective (#18) with their sequence and weighting stories (8.3-8.5, 9.2-9.4). |
 | Pad collate functions | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii` | Pad collator (#3), Story 8.1. |
-| Prediction normalizers and validators | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Binary, multiclass/ordinal and regression outputs (#24-#26), Stories 7.5, 8.6. |
+| Prediction normalizers and validators | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay and CMI move to MulticlassOutput (#25) with their sequence and weighting stories. |
 | Stored-sample Dataset classes | 1 | `reference_projects/kaggle/parkinsons_fog` | Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
 | Train and export task wiring | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |

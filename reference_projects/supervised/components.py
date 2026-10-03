@@ -47,6 +47,11 @@ class TimeMajorToChannelFirst(nn.Module):
         return x.transpose(1, 2).contiguous()
 
 
+OUTPUT: ComponentConfig = {
+    "reference": "dsio.experimental.inference.outputs:RegressionOutput",
+    "parameters": {"shape": [1]},
+}
+
 OBJECTIVE: ComponentConfig = {
     "reference": "dsio.experimental.model.objectives:SupervisedObjective",
     "parameters": {
