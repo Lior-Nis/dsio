@@ -35,12 +35,6 @@ Local objectives:
   reason: >-
     Masked dense objectives (#19), Story 8.2; essay and CMI move to SupervisedObjective (#18)
     with their sequence and weighting stories (8.3-8.5, 9.2-9.4).
-Pad collate functions:
-  consumers:
-    - reference_projects/kaggle/essay_scoring
-    - reference_projects/kaggle/parkinsons_fog
-    - reference_projects/kaggle/rogii
-  reason: Pad collator (#3), Story 8.1.
 Prediction normalizers and validators:
   consumers:
     - reference_projects/kaggle/essay_scoring
@@ -53,13 +47,9 @@ Prediction normalizers and validators:
     and CMI move to MulticlassOutput (#25) with their sequence and weighting stories.
 Evaluation array builders:
   consumers:
-    - reference_projects/kaggle/essay_scoring
-    - reference_projects/kaggle/parkinsons_fog
-    - reference_projects/kaggle/rogii
     - reference_projects/kaggle/child_mind
   reason: >-
-    collate_arrays (#5) once their datasets and padding collation are warehouse blocks,
-    Stories 8.1-8.5 and 9.1-9.4.
+    collate_arrays (#5) once its dataset is a warehouse block, Stories 9.1-9.4.
 Train-fold statistics and weight fitting:
   consumers:
     - reference_projects/kaggle/child_mind

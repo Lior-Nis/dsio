@@ -22,6 +22,11 @@ class NamePrediction(nn.Module):
         return {"prediction": value}
 
 
+class ReuseInputName(nn.Module):
+    def forward(self, value: Tensor) -> dict[str, Tensor]:
+        return {"x": value}
+
+
 class AddOne(nn.Module):
     def forward(self, value: Tensor) -> Tensor:
         return value + 1
@@ -206,6 +211,83 @@ def test_undeclared_form_produces_no_model() -> None:
     logged = mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list")
     assert len(logged) == 1
     assert logged[0].tags["dsio.export_form"] == "pyfunc"
+
+
+def test_declared_dynamic_axes_accept_another_sequence_length() -> None:
+    _, run_id = _run()
+    example = {
+        "sample_id": ["a", "b"],
+        "x": torch.ones(2, 3, 2),
+    }
+    models = log_predictor(
+        _identity_predictor(),
+        run_id=run_id,
+        input_example=example,
+        forms=("pyfunc",),
+        dynamic_axes={"x": [1], "prediction": [1]},
+    )
+
+    signature = models["pyfunc"].signature
+    assert signature is not None
+    assert signature.inputs.input_dict()["x"].shape == (-1, -1, 2)
+    assert signature.outputs.input_dict()["prediction"].shape == (-1, -1, 2)
+    result = mlflow.pyfunc.load_model(models["pyfunc"].model_uri).predict(
+        {
+            "sample_id": np.asarray(["long"]),
+            "x": np.ones((1, 5, 2), dtype=np.float32),
+        }
+    )
+    assert result["prediction"].shape == (1, 5, 2)
+
+
+@pytest.mark.parametrize(
+    ("dynamic_axes", "message"),
+    [
+        ({"unknown": [1]}, "unknown"),
+        ({"sample_id": [1]}, "sample_id"),
+        ({"x": [0]}, "batch axis"),
+        ({"x": [1, 1]}, "duplicate"),
+        ({"x": [3]}, "out of range"),
+    ],
+)
+def test_invalid_dynamic_axes_fail_before_logging(
+    dynamic_axes: dict[str, list[int]], message: str
+) -> None:
+    experiment_id, run_id = _run()
+
+    with pytest.raises(ValueError, match=message):
+        log_predictor(
+            _identity_predictor(),
+            run_id=run_id,
+            input_example={"sample_id": ["a"], "x": torch.ones(1, 3, 2)},
+            forms=("pyfunc",),
+            dynamic_axes=dynamic_axes,
+        )
+
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
+
+
+def test_dynamic_axis_field_cannot_ambiguously_name_input_and_output() -> None:
+    experiment_id, run_id = _run()
+    predictor = Predictor(
+        model=nn.Identity(),
+        preprocessor=nn.Identity(),
+        normalizer=ReuseInputName(),
+        validator=accept_prediction,
+        checkpoint_uri="runs:/training/checkpoint",
+        checkpoint_digest="d" * 64,
+    )
+
+    with pytest.raises(ValueError, match="dynamic_axes.*ambiguous.*input and output"):
+        log_predictor(
+            predictor,
+            run_id=run_id,
+            input_example={"sample_id": ["a"], "x": torch.ones(1, 3, 2)},
+            forms=("pyfunc",),
+            dynamic_axes={"x": [1]},
+        )
+
+    assert mlflow.search_logged_models(experiment_ids=[experiment_id], output_format="list") == []
 
 
 @pytest.mark.parametrize("forms", [(), ("pyfunc", "pyfunc"), ("pt2",), ([],)])

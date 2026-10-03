@@ -22,8 +22,8 @@ from dsio.model.module import DsioModule
 
 def test_essay_boundary_and_quadratic_weighted_kappa(essay_scoring_csvs: Path) -> None:
     from reference_projects.kaggle.essay_scoring.components import (
+        COLLATOR,
         MAX_TOKENS,
-        pad_essays,
         tokenize,
     )
     from reference_projects.kaggle.essay_scoring.data import load_competition_data
@@ -38,7 +38,10 @@ def test_essay_boundary_and_quadratic_weighted_kappa(essay_scoring_csvs: Path) -
     assert {row["score"] for row in loaded["train"]} == set(range(1, 7))
     assert tokenize("Same words, same IDs!") == tokenize("Same words, same IDs!")
     assert 0 < len(tokenize("word " * (MAX_TOKENS + 10))) == MAX_TOKENS
-    batch = pad_essays(
+    from dsio.config.components import resolve_component
+    from dsio.experimental.data import PadCollator
+
+    batch = resolve_component(COLLATOR, expected=PadCollator)(
         [
             {"sample_id": "short", "x": torch.ones(2, 2), "y": torch.tensor(1)},
             {"sample_id": "long", "x": torch.ones(5, 2), "y": torch.tensor(2)},
@@ -127,6 +130,8 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
     assert run.data.metrics["quadratic_weighted_kappa"] == pytest.approx(
         result["metrics"]["quadratic_weighted_kappa"]
     )
+    from reference_projects.kaggle.essay_scoring.components import COLLATOR, DATASET, INPUTS
+
     assert_execution_evidence(
         result["train_run_id"],
         tmp_path / "essay-provenance",
@@ -134,5 +139,13 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
         optimizer_parameters={"lr": 0.01},
         batch_size=128,
         num_workers=2,
+        dataset=DATASET,
+        collator=COLLATOR,
     )
-    assert_downstream_evidence(result, tmp_path / "essay-downstream")
+    assert_downstream_evidence(
+        result,
+        tmp_path / "essay-downstream",
+        datasets={"export": INPUTS, "evaluation": INPUTS, "inference": INPUTS},
+        collator=COLLATOR,
+        dynamic_axes={"x": [1]},
+    )

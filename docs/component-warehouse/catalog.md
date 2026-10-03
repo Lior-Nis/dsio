@@ -13,7 +13,7 @@ Conventions every block follows: [conventions.md](conventions.md).
 
 #### `dsio.experimental.data.arrays:collate_arrays`
 
-Collate the given samples, in order, into NumPy arrays as training would batch them. — **experimental**; real uses: 4 (bike_sharing, digit_recognizer, store_sales, titanic).
+Collate the given samples, in order, into NumPy arrays as training would batch them. — **experimental**; real uses: 7 (bike_sharing, digit_recognizer, essay_scoring, parkinsons_fog, rogii, store_sales, titanic).
 
 **Consumes**: A dataset factory called as `(store, examples, sample_ids)`, or its component
 configuration (e.g. a `StoredItems` config, the same one training records), the
@@ -64,6 +64,9 @@ and arrays from tensors share their memory.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 - fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
 
@@ -204,6 +207,46 @@ NumPy on the cast array, so they match NumPy-based preprocessing bit for bit.
 - real: `reference_projects/kaggle/child_mind` (test `tests/kaggle_portfolio/test_child_mind.py`; runs —)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 - fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
+
+#### `dsio.experimental.data.padding:PadCollator`
+
+Pad aligned fields, stack fixed fields, and optionally emit a validity mask. — **experimental**; real uses: 3 (essay_scoring, parkinsons_fog, rogii).
+
+**Consumes**: Mapping items containing `sample_id` plus every field declared in
+`padded_fields` and `fixed_fields`. Padded fields are tensors or values
+accepted by `torch.as_tensor` and align on axis zero within each sample.
+
+**Produces**: A CPU tensor batch with padded fields shaped `[batch, max_length, ...]`,
+stacked fixed fields, ordered `sample_id`, and optionally a boolean `mask`
+whose True values identify real positions.
+
+**Parameters**: `padded_fields` maps each ragged field to its padding value; `fixed_fields`
+names fields stacked without padding; `emit_mask` adds the padding-validity
+mask. A declared fixed field may be absent from an inputs-only batch, but it must
+be present in every item or none.
+
+**Devices**: CPU collation only; device transfer remains Lightning's responsibility.
+
+**Limitations**: All padded fields belong to one alignment group. Every non-identity field must
+be declared. Padding is only along axis zero.
+
+**Example**
+
+```python
+>>> collate = PadCollator({"x": 0.0}, fixed_fields=["y"], emit_mask=True)
+>>> batch = collate([
+...     {"sample_id": "a", "x": [1.0], "y": 0},
+...     {"sample_id": "b", "x": [2.0, 3.0], "y": 1},
+... ])
+>>> batch["mask"].tolist()
+[[True, False], [True, True]]
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
 
 ### `dsio.experimental.execution`
 
@@ -1065,12 +1108,11 @@ local on purpose.
 
 | Candidate | Uses | Consumers | Reason |
 |---|---|---|---|
-| Evaluation array builders | 4 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind` | collate_arrays (#5) once their datasets and padding collation are warehouse blocks, Stories 8.1-8.5 and 9.1-9.4. |
+| Evaluation array builders | 1 | `reference_projects/kaggle/child_mind` | collate_arrays (#5) once its dataset is a warehouse block, Stories 9.1-9.4. |
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
 | Local nn.Module models | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10-#13, |
 | Local objectives | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Masked dense objectives (#19), Story 8.2; essay and CMI move to SupervisedObjective (#18) with their sequence and weighting stories (8.3-8.5, 9.2-9.4). |
-| Pad collate functions | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii` | Pad collator (#3), Story 8.1. |
 | Prediction normalizers and validators | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay and CMI move to MulticlassOutput (#25) with their sequence and weighting stories. |
 | Stored-sample Dataset classes | 1 | `reference_projects/kaggle/parkinsons_fog` | Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |

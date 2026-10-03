@@ -15,7 +15,7 @@ from prefect import task
 from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
-from dsio.experimental.data import StoredItems
+from dsio.experimental.data import PadCollator, StoredItems
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -26,11 +26,11 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.rogii.components import (
+    COLLATOR,
     DATASET,
     FEATURES,
     TvtObjective,
     TvtRegressor,
-    pad_wells,
 )
 from reference_projects.kaggle.rogii.tasks.data import labelled_examples
 
@@ -70,6 +70,7 @@ def train(
             "parameters": MODEL_PARAMETERS,
         }
         seed_everything(seed, workers=True, verbose=False)
+        collator = resolve_component(COLLATOR, expected=PadCollator)
         data_module = DsioDataModule(
             store,
             examples,
@@ -82,7 +83,7 @@ def train(
             seed=seed,
             shuffle=SHUFFLE,
             drop_last=DROP_LAST,
-            collate_fn=pad_wells,
+            collate_fn=collator,
         )
         module = DsioModule(
             model=resolve_component(model_config, expected=TvtRegressor),
@@ -124,7 +125,7 @@ def train(
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": DATASET,
-                "collator": "reference_projects.kaggle.rogii.components:pad_wells",
+                "collator": COLLATOR,
                 "model": model_config,
                 "objective": "reference_projects.kaggle.rogii.components:TvtObjective",
                 "optimizer": "torch.optim:Adam",

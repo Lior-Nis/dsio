@@ -9,7 +9,6 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.nn.utils.rnn import pad_sequence
 
 from dsio.config.components import ComponentConfig
 
@@ -47,25 +46,19 @@ def well_arrays(well: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(rows, dtype=np.float32), np.asarray(targets, dtype=np.float32)
 
 
-def pad_wells(items: list[Mapping[str, Any]]) -> Mapping[str, Any]:
-    if not items:
-        raise ValueError("cannot collate an empty well batch")
-    x = [torch.as_tensor(item["x"], dtype=torch.float32) for item in items]
-    y = [torch.as_tensor(item["y"], dtype=torch.float32) for item in items]
-    if any(value.ndim != 2 or value.shape[1] != FEATURES for value in x):
-        raise ValueError(f"well x values must have shape [points, {FEATURES}]")
-    return {
-        "sample_id": [str(item["sample_id"]) for item in items],
-        "x": pad_sequence(x, batch_first=True),
-        "y": pad_sequence(y, batch_first=True),
-    }
-
-
 DATASET: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",
     "parameters": {
         "x": {"from": "data", "columns": [0, FEATURES]},
         "y": {"from": "data", "columns": [FEATURES, FEATURES + 1], "shape": [-1]},
+    },
+}
+COLLATOR: ComponentConfig = {
+    "reference": "dsio.experimental.data.padding:PadCollator",
+    "parameters": {
+        "padded_fields": {"x": 0.0, "y": 0.0},
+        "fixed_fields": [],
+        "emit_mask": True,
     },
 }
 
