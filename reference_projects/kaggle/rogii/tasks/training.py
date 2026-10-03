@@ -16,7 +16,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.experimental.data import PadCollator, StoredItems
-from dsio.experimental.model import MaskedObjective
+from dsio.experimental.model import BaselineResidual, MaskedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -29,9 +29,8 @@ from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.rogii.components import (
     COLLATOR,
     DATASET,
-    FEATURES,
+    MODEL,
     OBJECTIVE,
-    TvtRegressor,
 )
 from reference_projects.kaggle.rogii.tasks.data import labelled_examples
 
@@ -51,7 +50,6 @@ DROP_LAST = {"train": False, "validate": False, "test": False, "predict": False}
 BATCH_SIZE = 8
 NUM_WORKERS = 2
 OPTIMIZER_PARAMETERS = {"lr": 0.001}
-MODEL_PARAMETERS = {"features": FEATURES, "hidden": 32}
 PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters": {}}
 
 
@@ -66,10 +64,6 @@ def train(
         manifest = load_split_evidence(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
-        model_config: ComponentConfig = {
-            "reference": "reference_projects.kaggle.rogii.components:TvtRegressor",
-            "parameters": MODEL_PARAMETERS,
-        }
         seed_everything(seed, workers=True, verbose=False)
         collator = resolve_component(COLLATOR, expected=PadCollator)
         data_module = DsioDataModule(
@@ -87,7 +81,7 @@ def train(
             collate_fn=collator,
         )
         module = DsioModule(
-            model=resolve_component(model_config, expected=TvtRegressor),
+            model=resolve_component(MODEL, expected=BaselineResidual),
             objective=resolve_component(OBJECTIVE, expected=MaskedObjective),
             optimizer_factory=torch.optim.Adam,
             optimizer_parameters=OPTIMIZER_PARAMETERS,
@@ -127,7 +121,7 @@ def train(
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": DATASET,
                 "collator": COLLATOR,
-                "model": model_config,
+                "model": MODEL,
                 "objective": OBJECTIVE,
                 "optimizer": "torch.optim:Adam",
                 "preprocessor": PREPROCESSOR,

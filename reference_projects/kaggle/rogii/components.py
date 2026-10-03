@@ -73,25 +73,16 @@ OBJECTIVE: ComponentConfig = {
         },
     },
 }
-
-
-class TvtRegressor(nn.Module):
-    def __init__(self, features: int = FEATURES, hidden: int = 32) -> None:
-        super().__init__()
-        self.features = features
-        self.residual = nn.Sequential(nn.Linear(features, hidden), nn.ReLU(), nn.Linear(hidden, 1))
-        output = self.residual[-1]
-        assert isinstance(output, nn.Linear)
-        nn.init.zeros_(output.weight)
-        nn.init.zeros_(output.bias)
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or x.shape[2] != self.features:
-            raise ValueError(f"expected [batch, points, {self.features}], got {tuple(x.shape)}")
-        valid = x[:, :, -1]
-        baseline = x[:, :, 6]
-        correction = 0.01 * torch.tanh(self.residual(x.float()).squeeze(-1))
-        return (baseline + correction) * valid
+MODEL: ComponentConfig = {
+    "reference": "dsio.experimental.model.residual:BaselineResidual",
+    "parameters": {
+        "features": FEATURES,
+        "hidden": 32,
+        "baseline_channel": 6,
+        "validity_channel": FEATURES - 1,
+        "bound": 0.01,
+    },
+}
 
 
 class TvtOutput(nn.Module):

@@ -8,10 +8,9 @@ Window Dataset class:
   reason: Window dataset with weights and groups (#2), Story 9.1.
 Local nn.Module models:
   consumers:
-    - reference_projects/kaggle/rogii
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: Pooled temporal, residual, and multimodal models (#10, #15, #16), Stories 8.5, 9.4.
+  reason: Pooled temporal and multimodal models (#10, #15), Story 9.4.
 Verified encoder handoff:
   consumers:
     - reference_projects/kaggle/digit_recognizer

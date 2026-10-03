@@ -831,6 +831,41 @@ dense targets need a masked objective. Epoch values are logged per process.
 - real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 
+#### `dsio.experimental.model.residual:BaselineResidual`
+
+Add a zero-initialized bounded pointwise residual to a baseline channel. — **experimental**; real uses: 1 (rogii).
+
+**Consumes**: A floating tensor `[batch, points, features]`. `baseline_channel` supplies
+the prediction to improve and `validity_channel` contains exactly zero or one.
+
+**Produces**: `[batch, points]`. Initialization is exactly the valid baseline; invalid rows
+are zero even when their other feature values are non-finite.
+
+**Parameters**: `features`: input width. `baseline_channel` and `validity_channel`: distinct
+non-negative feature indices. `hidden`: pointwise residual width (default 32).
+`bound`: maximum absolute correction around the baseline (default 0.01).
+
+**Devices**: CPU and accelerators. The residual network uses its parameters' floating dtype;
+the output preserves the input dtype and device so initialization remains an exact
+identity around the declared baseline. Input and parameters must share a device.
+
+**Limitations**: The corrector is exactly Linear -> ReLU -> Linear. It is pointwise and bounded by
+`tanh`; temporal context and alternative residual networks are outside this block.
+
+**Example**
+
+```python
+>>> import torch
+>>> model = BaselineResidual(features=3, baseline_channel=1, validity_channel=2)
+>>> x = torch.tensor([[[4.0, 2.0, 1.0], [9.0, 3.0, 0.0]]])
+>>> model(x).tolist()
+[[2.0, 0.0]]
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/149b57ff3e67463f947d8379d26369b5)
+
 #### `dsio.experimental.model.standardization:InstanceStandardize`
 
 Standardize each sample and channel over its observed timesteps. — **experimental**; real uses: 1 (parkinsons_fog).
@@ -1324,7 +1359,7 @@ local on purpose.
 | Evaluation array builders | 1 | `reference_projects/kaggle/child_mind` | collate_arrays (#5) once its dataset is a warehouse block, Stories 9.1-9.4. |
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
-| Local nn.Module models | 3 | `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Pooled temporal, residual, and multimodal models (#10, |
+| Local nn.Module models | 2 | `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Pooled temporal and multimodal models (#10, |
 | Local objectives | 2 | `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | CMI moves to SupervisedObjective (#18) with its weighting stories (9.2-9.4). |
 | Prediction normalizers and validators | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay and CMI move to MulticlassOutput (#25) with their sequence and weighting stories. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |

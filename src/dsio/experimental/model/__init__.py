@@ -43,11 +43,13 @@ from dsio.experimental.model.masking import (
     apply_mask,
 )
 from dsio.experimental.model.objectives import RootMeanSquaredError, SupervisedObjective
+from dsio.experimental.model.residual import BaselineResidual
 from dsio.experimental.model.standardization import InstanceStandardize, Standardize
 from dsio.experimental.model.tokens import EmbeddingEncoder
 
 __all__ = [
     "MLP",
+    "BaselineResidual",
     "CausalMask",
     "Chain",
     "ChannelFirstToTimeMajor",
