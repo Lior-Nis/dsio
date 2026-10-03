@@ -9,6 +9,7 @@ with `--compare`; runs must match exactly unless the story pre-declared a tolera
 
 | Consumer | Commit | Hardware | Seconds | Metrics | Evaluation run |
 |---|---|---|---:|---|---|
+| `bike_sharing` | `fe37300c844d` | CPU x12 | 215.5 | rmse=204.83 | `https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/8f38a18dd6744f95afe9215bb8b70f3d` |
 | `child_mind` | `fe37300c844d` | CPU x12 | 89.3 | fused.accuracy=0.482456, fused.quadratic_weighted_kappa=0.368758, fused.qwk.sensor_ablated=0.333343, fused.qwk.sensor_ablation_delta=0.0277507, fused.qwk.sensor_missing=0.373657, fused.qwk.sensor_present=0.361094, tabular.accuracy=0.464912, tabular.quadratic_weighted_kappa=0.359652, tabular.qwk.sensor_ablated=0.324457, tabular.qwk.sensor_ablation_delta=0, tabular.qwk.sensor_missing=0.378256, tabular.qwk.sensor_present=0.324457 | `https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/dbc483ed18b046a29acad31931b7c131`, `https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/054ff4f568c24b42a0be91265269c0f5` |
 | `child_mind_sequence` | `fe37300c844d` | NVIDIA GeForce RTX 5070 Ti | 268.5 | accuracy=0.551991, quadratic_weighted_kappa=0.379278, qwk.sensor_ablated=0.329204, qwk.sensor_ablation_delta=0.0484176, qwk.sensor_missing=0.38014, qwk.sensor_present=0.377622 | `https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/9eb0fe3346f244908747ebcaf1ee4434` |
 | `digit_recognizer` | `fe37300c844d` | CPU x12 | 902.1 | accuracy=0.809405 | `https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/05644844db1f457abf75b62e6560329a` |

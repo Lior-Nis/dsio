@@ -1,4 +1,35 @@
 {
+  "bike_sharing": {
+    "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
+    "dirty": false,
+    "hardware": {
+      "cpu": "AMD Ryzen 9 9900X 12-Core Processor",
+      "cuda": null,
+      "python": "3.12.3",
+      "threads": 12,
+      "torch": "2.13.0+cpu"
+    },
+    "metrics": {
+      "rmse": 204.82968446829918
+    },
+    "recorded": "20261003T131230Z",
+    "runs": {
+      "data_run_id": "ce4b4fb1247243f2a97e885905c4f24e",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/ce4b4fb1247243f2a97e885905c4f24e",
+      "evaluation_run_id": "8f38a18dd6744f95afe9215bb8b70f3d",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/8f38a18dd6744f95afe9215bb8b70f3d",
+      "export_run_id": "4ba2fee5dfc74e7690f424bfd239ebb8",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/4ba2fee5dfc74e7690f424bfd239ebb8",
+      "inference_run_id": "5b1ddebad92d4a24af9ca0133a74e391",
+      "inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/5b1ddebad92d4a24af9ca0133a74e391",
+      "split_run_id": "afac84ee977b4d4583fd95d05d5e212f",
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/afac84ee977b4d4583fd95d05d5e212f",
+      "train_run_id": "cb52ba03c11c42aeb87b59e6841f94c2",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/cb52ba03c11c42aeb87b59e6841f94c2"
+    },
+    "seconds": 215.5,
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
+  },
   "child_mind": {
     "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
     "dirty": false,

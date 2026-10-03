@@ -36,7 +36,7 @@
 # - Re-run sprint planning to refresh statuses without downgrading existing progress.
 
 generated: "2026-09-21T18:15:08+03:00"
-last_updated: "2026-10-02T10:00:00+03:00"
+last_updated: "2026-10-03T16:20:00+03:00"
 project: DSio
 project_key: NOKEY
 tracking_system: file-system
@@ -96,7 +96,7 @@ development_status:
   7-4-train-with-dsio-objectives: done
   7-5-declare-prediction-outputs-without-writing-validators: done
   7-6-build-evaluation-arrays-from-the-training-collation: done
-  7-7-record-tabular-migration-parity: backlog
+  7-7-record-tabular-migration-parity: in-progress
   epic-7-retrospective: optional
 
   epic-8: backlog

@@ -99,6 +99,7 @@ CONSUMERS: dict[str, Consumer] = {
 def run(name: str, runs_root: Path) -> dict[str, Any]:
     """Execute one consumer's representative flow and return its parity record."""
     tracking_uri = _require_live_tracking()
+    ui_uri = _ui_uri(tracking_uri)
     consumer = CONSUMERS[name]
     if not consumer.data.exists():
         raise FileNotFoundError(f"{name}: data directory {consumer.data} does not exist")
@@ -136,13 +137,16 @@ def run(name: str, runs_root: Path) -> dict[str, Any]:
         payload = json.loads(result_path.read_text(encoding="utf-8"))
     seconds = time.perf_counter() - started
     result = payload["result"]
+    from mlflow.tracking import MlflowClient
+
     return {
         "metrics": _metrics(result),
-        "runs": _runs(result, tracking_uri),
+        "runs": _runs(result, ui_uri, MlflowClient(tracking_uri)),
         "commit": _git("rev-parse", "HEAD"),
         "dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
         "hardware": payload["hardware"],
         "tracking_uri": tracking_uri,
+        "ui_uri": ui_uri,
         "seconds": round(seconds, 1),
         "recorded": stamp,
     }
@@ -164,6 +168,74 @@ def compare(
     return moved
 
 
+def record_parity(
+    name: str,
+    baseline: Mapping[str, Any],
+    observed: Mapping[str, Any],
+    *,
+    tolerance: float,
+    ui_uri: str,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    """Log one immutable comparison run beside the observed evaluation run."""
+    baseline_runs = _evaluation_run_ids(baseline)
+    observed_runs = _evaluation_run_ids(observed)
+    if set(baseline_runs) != set(observed_runs):
+        raise ValueError(
+            "baseline and observed evaluation runs differ: "
+            f"{sorted(baseline_runs)} != {sorted(observed_runs)}"
+        )
+    if client is None:
+        from mlflow.tracking import MlflowClient
+
+        client = MlflowClient(observed["tracking_uri"])
+
+    baseline_metrics = baseline["metrics"]
+    observed_metrics = observed["metrics"]
+    moved = compare(baseline_metrics, observed_metrics, tolerance)
+    missing = sorted(set(baseline_metrics) ^ set(observed_metrics))
+    baseline_run_id = _tag_run_ids(baseline_runs)
+    observed_run_id = _tag_run_ids(observed_runs)
+    first_observed_run_id = next(iter(observed_runs.values()))
+    experiment_id = client.get_run(first_observed_run_id).info.experiment_id
+    status = "failed" if moved else "passed"
+    tags = {
+        "mlflow.runName": f"parity-{name}",
+        "dsio.parity.consumer": name,
+        "dsio.parity.baseline_commit": str(baseline["commit"]),
+        "dsio.parity.baseline_run_id": baseline_run_id,
+        "dsio.parity.observed_commit": str(observed["commit"]),
+        "dsio.parity.observed_run_id": observed_run_id,
+        "dsio.parity.status": status,
+        "dsio.parity.tolerance": str(float(tolerance)),
+    }
+    if missing:
+        tags["dsio.parity.missing_metrics"] = json.dumps(missing)
+    parity_run = client.create_run(experiment_id, tags=tags)
+    parity_run_id = parity_run.info.run_id
+    try:
+        for metric in sorted(set(baseline_metrics) | set(observed_metrics)):
+            before = baseline_metrics.get(metric)
+            after = observed_metrics.get(metric)
+            if before is not None:
+                client.log_metric(parity_run_id, f"baseline.{metric}", float(before))
+            if after is not None:
+                client.log_metric(parity_run_id, f"observed.{metric}", float(after))
+            if before is not None and after is not None:
+                client.log_metric(parity_run_id, f"delta.{metric}", float(after - before))
+    except Exception:
+        client.set_terminated(parity_run_id, status="FAILED")
+        raise
+    client.set_terminated(parity_run_id, status="FAILED" if moved else "FINISHED")
+    return {
+        "moved": moved,
+        "run_id": parity_run_id,
+        "run_uri": (
+            f"{ui_uri.rstrip('/')}/#/experiments/{experiment_id}/runs/{parity_run_id}"
+        ),
+    }
+
+
 def _metrics(result: Mapping[str, Any]) -> dict[str, float]:
     if "metrics" in result:
         return {name: float(value) for name, value in sorted(result["metrics"].items())}
@@ -181,6 +253,23 @@ def _run_ids(result: Mapping[str, Any]) -> dict[str, str]:
             {f"{mode}.{key}": value for key, value in model.items() if key.endswith("_run_id")}
         )
     return dict(sorted(runs.items()))
+
+
+def _evaluation_run_ids(record: Mapping[str, Any]) -> dict[str, str]:
+    runs = record["runs"]
+    return {
+        name: str(run_id)
+        for name, run_id in sorted(runs.items())
+        if "evaluation" in name and name.endswith("_run_id")
+    }
+
+
+def _tag_run_ids(runs: Mapping[str, str]) -> str:
+    if not runs:
+        raise ValueError("representative record has no evaluation run ID")
+    if len(runs) == 1:
+        return next(iter(runs.values()))
+    return json.dumps(runs, sort_keys=True)
 
 
 def _runs(
@@ -223,6 +312,37 @@ def _require_live_tracking(tracking_uri: str | None = None) -> str:
     except Exception as error:
         raise RuntimeError(f"MLflow tracking server {uri!r} is not reachable: {error}") from error
     return uri.rstrip("/")
+
+
+def _ui_uri(tracking_uri: str) -> str:
+    """Return the public MLflow UI base without persisting secrets in evidence."""
+    uri = os.environ.get("MLFLOW_UI_URI", tracking_uri)
+    parsed = urlsplit(uri)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"MLflow UI requires an HTTP(S) URI, got {uri!r}")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("MLflow UI URI must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("MLflow UI URI must not contain a query or fragment")
+    return uri.rstrip("/")
+
+
+def _require_hardware_class(
+    baseline: Mapping[str, Any], observed: Mapping[str, Any]
+) -> None:
+    """Reject parity runs made on a different accelerator/device/thread class."""
+    expected = {
+        "accelerator": "cuda" if baseline.get("cuda") else "cpu",
+        "device": baseline.get("cuda") or baseline.get("cpu"),
+        "threads": baseline.get("threads"),
+    }
+    actual = {
+        "accelerator": "cuda" if observed.get("cuda") else "cpu",
+        "device": observed.get("cuda") or observed.get("cpu"),
+        "threads": observed.get("threads"),
+    }
+    if actual != expected:
+        raise ValueError(f"hardware class mismatch: expected {expected}, observed {actual}")
 
 
 def _hardware() -> dict[str, Any]:
@@ -344,8 +464,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"{name}: no recorded baseline", file=sys.stderr)
                 failed = True
                 continue
-            moved = compare(baseline[name]["metrics"], record["metrics"], args.tolerance)
-            print(f"{name}: parity {'FAILED ' + str(moved) if moved else 'holds'}")
+            _require_hardware_class(baseline[name]["hardware"], record["hardware"])
+            parity = record_parity(
+                name,
+                baseline[name],
+                record,
+                tolerance=args.tolerance,
+                ui_uri=record["ui_uri"],
+            )
+            moved = parity["moved"]
+            outcome = f"FAILED {moved}" if moved else "holds"
+            print(f"{name}: parity {outcome}; evidence {parity['run_uri']}")
             failed = failed or bool(moved)
     return 1 if failed else 0
 
