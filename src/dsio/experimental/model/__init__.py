@@ -34,6 +34,7 @@ from dsio.experimental.model.components import (
     vicreg_projector_head,
 )
 from dsio.experimental.model.compositions import MLP, Chain, Stages
+from dsio.experimental.model.masked_objective import MaskedObjective
 from dsio.experimental.model.masking import (
     CausalMask,
     PatchMask,
@@ -59,6 +60,7 @@ __all__ = [
     "LossObjective",
     "MLP1d",
     "MaskedMSE",
+    "MaskedObjective",
     "NTXent",
     "PatchMask",
     "RandomMask",

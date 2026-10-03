@@ -7,8 +7,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from dsio.config.components import ComponentError
-from dsio.experimental.model import RootMeanSquaredError, SupervisedObjective
+from dsio.config.components import ComponentError, resolve_component
+from dsio.experimental.model import MaskedObjective, RootMeanSquaredError, SupervisedObjective
 
 MSE = {"reference": "torch.nn:MSELoss"}
 MAE = {"reference": "torch.nn:L1Loss"}
@@ -235,3 +235,187 @@ def test_owned_parameters_names_and_stateful_metrics_are_refused() -> None:
     assert _weighted(double)["loss"].dtype == torch.float32
     with pytest.raises(ValueError, match=r"\[batch\] or \[batch, 1\]"):
         _weighted({**batch, "sample_weight": torch.ones(1, 2)})
+
+
+def test_masked_objective_matches_dense_bce_and_mse_consumers_exactly() -> None:
+    logits = torch.tensor(
+        [
+            [[0.2, -0.4, 1.0], [0.7, -1.0, 0.1], [0.3, 0.2, -0.8]],
+            [[-0.2, 0.4, 0.0], [1.7, -0.3, 0.5], [-0.1, 0.9, 0.6]],
+        ]
+    )
+    labels = torch.tensor(
+        [
+            [[1, 0, 1], [0, 1, 0], [1, 1, 0]],
+            [[0, 1, 0], [1, 0, 1], [0, 1, 1]],
+        ]
+    )
+    point_mask = torch.tensor([[True, False, True], [False, True, True]])
+    bce = MaskedObjective(loss={"reference": "torch.nn:BCEWithLogitsLoss"}, target_dtype="float32")
+    assert torch.equal(
+        bce(nn.Identity(), {"x": logits, "y": labels, "mask": point_mask}, "train")["loss"],
+        F.binary_cross_entropy_with_logits(logits[point_mask], labels[point_mask].float()),
+    )
+
+    prediction = logits[..., 0]
+    target = labels[..., 0].float()
+    mse = MaskedObjective(
+        loss=MSE,
+        metrics={
+            "rmse": {
+                "reference": "dsio.experimental.model.objectives:RootMeanSquaredError",
+                "parameters": {"scale": 20_000.0},
+            }
+        },
+    )
+    expected = F.mse_loss(prediction[point_mask], target[point_mask])
+    result = mse(nn.Identity(), {"x": prediction, "y": target, "mask": point_mask}, "validate")
+    assert torch.equal(result["loss"], expected)
+    assert torch.equal(result["rmse"], torch.sqrt(expected.detach()) * 20_000.0)
+
+
+def test_masked_values_never_reach_losses_metrics_or_gradients() -> None:
+    prediction = torch.tensor([[1.0, float("nan")], [3.0, float("inf")]], requires_grad=True)
+    target = torch.tensor([[2.0, float("nan")], [1.0, float("inf")]])
+    mask = torch.tensor([[True, False], [True, False]])
+    objective = MaskedObjective(
+        loss=MSE,
+        metrics={"mae": MAE},
+    )
+
+    result = objective(nn.Identity(), {"x": prediction, "y": target, "mask": mask}, "train")
+    assert torch.equal(result["loss"], torch.tensor(2.5))
+    assert torch.equal(result["mae"], torch.tensor(1.5))
+    assert not result["mae"].requires_grad
+    result["loss"].backward()
+    assert torch.equal(prediction.grad, torch.tensor([[-1.0, 0.0], [2.0, 0.0]]))
+
+    changed = objective(
+        nn.Identity(),
+        {
+            "x": torch.tensor([[1.0, -9_999.0], [3.0, 9_999.0]]),
+            "y": torch.tensor([[2.0, -8_888.0], [1.0, 8_888.0]]),
+            "mask": mask,
+        },
+        "train",
+    )
+    assert torch.equal(changed["loss"], result["loss"])
+    assert torch.equal(changed["mae"], result["mae"])
+
+
+def test_masked_objective_validates_the_reserved_batch_contract() -> None:
+    objective = MaskedObjective(loss=MSE, metrics={"mae": MAE}, metric_stages=["validate"])
+    batch = {
+        "x": torch.ones(2, 3),
+        "y": torch.zeros(2, 3),
+        "mask": torch.tensor([[True, False, True], [True, True, False]]),
+    }
+    assert set(objective(nn.Identity(), batch, "train")) == {"loss"}
+    assert set(objective(nn.Identity(), batch, "validate")) == {"loss", "mae"}
+    assert objective._sample_mean_loss is False
+
+    with pytest.raises(ValueError, match="stage must be"):
+        objective(nn.Identity(), batch, "validation")
+    with pytest.raises(ValueError, match="input field 'x' is missing"):
+        objective(nn.Identity(), {"y": batch["y"], "mask": batch["mask"]}, "train")
+    with pytest.raises(ValueError, match="no valid positions"):
+        objective(nn.Identity(), {**batch, "mask": torch.zeros(2, 3, dtype=torch.bool)}, "train")
+    with pytest.raises(ValueError, match="batch field 'mask' is missing"):
+        objective(nn.Identity(), {"x": batch["x"], "y": batch["y"]}, "train")
+    with pytest.raises(ValueError, match="mask must be a boolean tensor"):
+        objective(nn.Identity(), {**batch, "mask": batch["mask"].long()}, "train")
+    with pytest.raises(ValueError, match=r"mask shape \(2, 1\).+\(2, 3\)"):
+        objective(nn.Identity(), {**batch, "mask": torch.ones(2, 1, dtype=torch.bool)}, "train")
+    with pytest.raises(ValueError, match="target field 'y' is missing"):
+        objective(nn.Identity(), {"x": batch["x"], "mask": batch["mask"]}, "train")
+    with pytest.raises(ValueError, match="target 'y' must be a tensor"):
+        objective(nn.Identity(), {**batch, "y": [0, 1]}, "train")
+    with pytest.raises(ValueError, match=r"target 'y' has shape \(2, 1\); prediction \(2, 3\)"):
+        objective(nn.Identity(), {**batch, "y": torch.zeros(2, 1)}, "train")
+    with pytest.raises(ValueError, match="prediction tensor, got tuple"):
+        objective(
+            nn.LSTM(3, 3, batch_first=True),
+            {"x": torch.ones(2, 1, 3), "y": torch.zeros(2, 1, 3), "mask": batch["mask"]},
+            "train",
+        )
+
+
+def test_masked_objective_preserves_output_axes_and_scalar_results() -> None:
+    prediction = torch.tensor([[0.1, -0.2], [0.3, 0.4]])
+    target = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+    prefix_mask = torch.tensor([True, False])
+    weighted = MaskedObjective(
+        loss={
+            "reference": "torch.nn:BCEWithLogitsLoss",
+            "parameters": {"pos_weight": [1.0, 2.0]},
+        }
+    )
+    assert torch.equal(
+        weighted(nn.Identity(), {"x": prediction, "y": target, "mask": prefix_mask}, "train")[
+            "loss"
+        ],
+        F.binary_cross_entropy_with_logits(
+            prediction[prefix_mask], target[prefix_mask], pos_weight=torch.tensor([1.0, 2.0])
+        ),
+    )
+    with pytest.raises(ValueError, match="full-shape mask.+pos_weight"):
+        weighted(
+            nn.Identity(),
+            {"x": prediction, "y": target, "mask": torch.ones_like(target, dtype=torch.bool)},
+            "train",
+        )
+
+    vector_metric = MaskedObjective(
+        loss=MSE,
+        metrics={"similarity": {"reference": "torch.nn:CosineSimilarity"}},
+    )
+    with pytest.raises(ValueError, match="metric 'similarity' must return a scalar tensor"):
+        vector_metric(nn.Identity(), {"x": prediction, "y": target, "mask": prefix_mask}, "train")
+
+    with pytest.raises(ComponentError, match="loss:.*reduction"):
+        MaskedObjective(loss={"reference": "torch.nn:CosineSimilarity"})
+
+
+def test_masked_objective_handles_rank_one_and_empty_final_axes() -> None:
+    prediction = torch.tensor([1.0, 2.0, 3.0])
+    target = torch.tensor([0.0, 2.0, 4.0])
+    result = MaskedObjective(loss=MSE)(
+        nn.Identity(),
+        {"x": prediction, "y": target, "mask": torch.tensor(True)},
+        "train",
+    )
+    assert torch.equal(result["loss"], F.mse_loss(prediction, target))
+
+    empty = torch.empty(2, 0)
+    with pytest.raises(ValueError, match="selected no values"):
+        MaskedObjective(loss=MSE)(
+            nn.Identity(),
+            {"x": empty, "y": empty.clone(), "mask": torch.tensor([True, False])},
+            "train",
+        )
+
+
+def test_masked_objective_is_importable_and_rejects_invalid_configuration() -> None:
+    configured = resolve_component(
+        {
+            "reference": "dsio.experimental.model.masked_objective:MaskedObjective",
+            "parameters": {
+                "loss": {"reference": "torch.nn:MSELoss"},
+                "target_dtype": "float32",
+            },
+        },
+        expected=MaskedObjective,
+    )
+    assert isinstance(configured, MaskedObjective)
+
+    with pytest.raises(ValueError, match="target_dtype"):
+        MaskedObjective(loss=MSE, target_dtype="float16")
+    with pytest.raises(ValueError, match="metric_stages"):
+        MaskedObjective(loss=MSE, metric_stages=["predict"])
+    with pytest.raises(ValueError, match="metric names must be identifiers"):
+        MaskedObjective(loss=MSE, metrics={"loss": MAE})
+    with pytest.raises(ValueError, match=r"\[.reduction.\] owned by the objective"):
+        MaskedObjective(loss={"reference": "torch.nn:MSELoss", "parameters": {"reduction": "sum"}})
+    for scale in (0, -1, True, float("inf"), 10**1000):
+        with pytest.raises(ValueError, match="scale must be finite and positive"):
+            RootMeanSquaredError(scale=scale)

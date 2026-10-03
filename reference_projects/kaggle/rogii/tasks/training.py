@@ -16,6 +16,7 @@ from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
 from dsio.experimental.data import PadCollator, StoredItems
+from dsio.experimental.model import MaskedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -29,7 +30,7 @@ from reference_projects.kaggle.rogii.components import (
     COLLATOR,
     DATASET,
     FEATURES,
-    TvtObjective,
+    OBJECTIVE,
     TvtRegressor,
 )
 from reference_projects.kaggle.rogii.tasks.data import labelled_examples
@@ -87,7 +88,7 @@ def train(
         )
         module = DsioModule(
             model=resolve_component(model_config, expected=TvtRegressor),
-            objective=TvtObjective(),
+            objective=resolve_component(OBJECTIVE, expected=MaskedObjective),
             optimizer_factory=torch.optim.Adam,
             optimizer_parameters=OPTIMIZER_PARAMETERS,
         )
@@ -127,7 +128,7 @@ def train(
                 "dataset_factory": DATASET,
                 "collator": COLLATOR,
                 "model": model_config,
-                "objective": "reference_projects.kaggle.rogii.components:TvtObjective",
+                "objective": OBJECTIVE,
                 "optimizer": "torch.optim:Adam",
                 "preprocessor": PREPROCESSOR,
             },

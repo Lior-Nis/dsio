@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -202,7 +203,7 @@ class RootMeanSquaredError(nn.Module):
         A scalar: ``sqrt(mse(prediction, target))``; on log1p targets this is RMSLE.
 
     Parameters:
-        None.
+        ``scale``: finite positive multiplier applied after the square root (default 1).
 
     Devices:
         CPU and accelerators.
@@ -217,8 +218,20 @@ class RootMeanSquaredError(nn.Module):
         1.4142135381698608
     """
 
+    def __init__(self, scale: float = 1.0) -> None:
+        super().__init__()
+        if isinstance(scale, bool) or not isinstance(scale, int | float):
+            raise ValueError("scale must be finite and positive")
+        try:
+            normalized = float(scale)
+        except OverflowError:
+            raise ValueError("scale must be finite and positive") from None
+        if not math.isfinite(normalized) or normalized <= 0:
+            raise ValueError("scale must be finite and positive")
+        self.scale = normalized
+
     def forward(self, prediction: Tensor, target: Tensor) -> Tensor:
-        return torch.sqrt(F.mse_loss(prediction, target))
+        return torch.sqrt(F.mse_loss(prediction, target)) * self.scale
 
 
 def _metric_configs(metrics: Mapping[str, Mapping[str, Any]] | None) -> dict[str, Any]:
@@ -238,7 +251,12 @@ def _metric_configs(metrics: Mapping[str, Mapping[str, Any]] | None) -> dict[str
     return configs
 
 
-def _build(role: str, config: Mapping[str, Any], sample_weighted: bool) -> nn.Module:
+def _build(
+    role: str,
+    config: Mapping[str, Any],
+    sample_weighted: bool,
+    reduction: str | None = None,
+) -> nn.Module:
     validated = validate_component_config(config)
     parameters = dict(validated["parameters"])
     owned = sorted(set(parameters) & set(_OWNED_PARAMETERS))
@@ -250,8 +268,12 @@ def _build(role: str, config: Mapping[str, Any], sample_weighted: bool) -> nn.Mo
         if isinstance(parameters.get(name), list | int | float)
         and not isinstance(parameters.get(name), bool)
     }
+    if sample_weighted and reduction is not None:
+        raise ValueError("an objective cannot request two owned reductions")
     if sample_weighted:
         runtime["reduction"] = "none"
+    elif reduction is not None:
+        runtime["reduction"] = reduction
     try:
         module = resolve_component(
             {"reference": validated["reference"], "parameters": parameters},
@@ -259,7 +281,12 @@ def _build(role: str, config: Mapping[str, Any], sample_weighted: bool) -> nn.Mo
             **runtime,
         )
     except ComponentError as error:
-        hint = " (sample weighting needs reduction='none')" if sample_weighted else ""
+        if sample_weighted:
+            hint = " (sample weighting needs reduction='none')"
+        elif reduction is not None:
+            hint = f" (this objective needs reduction={reduction!r})"
+        else:
+            hint = ""
         raise ComponentError(f"{role}: {error}{hint}") from error
     if isinstance(module, Metric):
         raise ValueError(f"{role}: stateful TorchMetrics are not supported as metrics")
