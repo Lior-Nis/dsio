@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 from torch import nn
@@ -84,6 +85,43 @@ def test_instance_standardization_uses_population_statistics_and_validity_channe
     assert torch.equal(standardize(changed), result)
 
 
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_instance_standardization_matches_numpy_float32_reduction(batch_size: int) -> None:
+    rng = np.random.default_rng(0)
+    signal = (
+        rng.normal(size=(512, 3)) * np.array([0.01, 1.0, 100.0]) + np.array([1_000.0, 10.0, -50.0])
+    ).astype(np.float32)
+    expected = (signal - signal.mean(axis=0, keepdims=True)) / np.maximum(
+        signal.std(axis=0, keepdims=True), 1e-6
+    )
+    sample = torch.cat((torch.from_numpy(signal).T, torch.ones(1, len(signal))), dim=0)
+    source = sample.unsqueeze(0).repeat(batch_size, 1, 1)
+
+    actual = InstanceStandardize(observed_channel=3)(source)[:, :3].transpose(1, 2)
+
+    torch.testing.assert_close(
+        actual,
+        torch.from_numpy(expected).expand(batch_size, -1, -1),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+
+def test_instance_standardization_can_reproduce_numpy_float32_exactly() -> None:
+    rng = np.random.default_rng(0)
+    signal = (
+        rng.normal(size=(512, 3)) * np.array([0.01, 1.0, 100.0]) + np.array([1_000.0, 10.0, -50.0])
+    ).astype(np.float32)
+    expected = (signal - signal.mean(axis=0, keepdims=True)) / np.maximum(
+        signal.std(axis=0, keepdims=True), 1e-6
+    )
+    source = torch.cat((torch.from_numpy(signal).T, torch.ones(1, len(signal))), dim=0)
+
+    actual = InstanceStandardize(observed_channel=3, reduction="numpy")(source[None])
+
+    assert torch.equal(actual[0, :3].T, torch.from_numpy(expected))
+
+
 def test_dense_conv_real_outputs_do_not_depend_on_cobatch_padding() -> None:
     torch.manual_seed(19)
     model = nn.Sequential(
@@ -102,6 +140,29 @@ def test_dense_conv_real_outputs_do_not_depend_on_cobatch_padding() -> None:
     assert torch.equal(model(padded)[0, :, 3:], torch.zeros(3, 4))
 
 
+def test_dense_conv_can_preserve_legacy_unmasked_boundary_arithmetic() -> None:
+    torch.manual_seed(19)
+    reference = nn.Sequential(
+        nn.Conv1d(3, 16, kernel_size=5, padding=2),
+        nn.ReLU(),
+        nn.Conv1d(16, 3, kernel_size=5, padding=2),
+    )
+    torch.manual_seed(19)
+    dense = DenseConv1d(
+        channels=3,
+        hidden=16,
+        output=3,
+        kernel_size=5,
+        observed_channel=3,
+        isolate_padding=False,
+    )
+    values = torch.randn(2, 4, 11)
+    values[:, 3] = 1
+    values[0, :, 7:] = 0
+
+    assert torch.equal(dense(values), reference(values[:, :3]))
+
+
 def test_instance_standardization_is_fullgraph_compilable() -> None:
     compiled = torch.compile(
         InstanceStandardize(observed_channel=1),
@@ -112,12 +173,13 @@ def test_instance_standardization_is_fullgraph_compilable() -> None:
     assert torch.equal(compiled(source), InstanceStandardize(observed_channel=1)(source))
 
 
+@pytest.mark.parametrize("reduction", ["torch", "numpy"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
 def test_instance_standardization_keeps_tiny_eps_zero_variance_finite(
-    dtype: torch.dtype,
+    dtype: torch.dtype, reduction: str
 ) -> None:
     source = torch.full((2, 3, 5), 65_000.0, dtype=dtype)
-    result = InstanceStandardize(eps=1e-100)(source)
+    result = InstanceStandardize(eps=1e-100, reduction=reduction)(source)  # type: ignore[arg-type]
     assert result.dtype == dtype
     assert torch.equal(result, torch.zeros_like(source))
 

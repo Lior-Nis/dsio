@@ -40,15 +40,20 @@ dsio.experimental.data.items:StoredItems:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
   - consumer: reference_projects/kaggle/rogii
     test: tests/kaggle_portfolio/test_rogii.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1
   - consumer: reference_projects/kaggle/child_mind
     test: tests/kaggle_portfolio/test_child_mind.py
     kind: real
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
@@ -81,6 +86,7 @@ dsio.experimental.execution:calibrate_execution:
     via: dsio.experimental.training:calibrate_training_execution
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
@@ -178,6 +184,7 @@ dsio.experimental.telemetry:log_phase_evidence:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
@@ -190,6 +197,7 @@ dsio.experimental.telemetry:measure_phase:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
@@ -226,6 +234,7 @@ dsio.experimental.training:calibrate_training_execution:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
@@ -238,6 +247,7 @@ dsio.experimental.training:log_calibration:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/child_mind/sequence
     test: tests/kaggle_portfolio/test_child_mind_sequence.py
     kind: real
@@ -312,11 +322,14 @@ dsio.experimental.model.compositions:Chain:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/essay_scoring
     test: tests/kaggle_portfolio/test_essay_scoring.py
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
 dsio.experimental.model.compositions:Stages:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -333,24 +346,32 @@ dsio.experimental.model.compositions:Stages:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
 dsio.experimental.model.convolution:DenseConv1d:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
 dsio.experimental.model.layout:ChannelFirstToTimeMajor:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
 dsio.experimental.model.layout:TimeMajorToChannelFirst:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
@@ -363,6 +384,8 @@ dsio.experimental.model.standardization:InstanceStandardize:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
 dsio.experimental.model.objectives:SupervisedObjective:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -391,6 +414,7 @@ dsio.experimental.model.objectives:SupervisedObjective:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
@@ -402,6 +426,7 @@ dsio.experimental.model.tokens:EmbeddingEncoder:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
 dsio.experimental.model.residual:BaselineResidual:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -410,6 +435,7 @@ dsio.experimental.model.residual:BaselineResidual:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/149b57ff3e67463f947d8379d26369b5
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1
 dsio.experimental.model.objectives:RootMeanSquaredError:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -421,15 +447,21 @@ dsio.experimental.model.objectives:RootMeanSquaredError:
   - consumer: reference_projects/kaggle/rogii
     test: tests/kaggle_portfolio/test_rogii.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1
 dsio.experimental.model.masked_objective:MaskedObjective:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/rogii
     test: tests/kaggle_portfolio/test_rogii.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1
 dsio.experimental.inference.outputs.binary:BinaryOutput:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -443,6 +475,7 @@ dsio.experimental.inference.outputs.binary:BinaryOutput:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
 dsio.experimental.inference.outputs.binary:BinaryValidator:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -458,6 +491,7 @@ dsio.experimental.inference.outputs.binary:BinaryValidator:
     via: dsio.experimental.inference.outputs.binary:BinaryOutput
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
 dsio.experimental.inference.outputs.multiclass:MulticlassOutput:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -471,6 +505,7 @@ dsio.experimental.inference.outputs.multiclass:MulticlassOutput:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
 dsio.experimental.inference.outputs.multiclass:MulticlassValidator:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -486,6 +521,7 @@ dsio.experimental.inference.outputs.multiclass:MulticlassValidator:
     via: dsio.experimental.inference.outputs.multiclass:MulticlassOutput
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
 dsio.experimental.inference.outputs.regression:RegressionOutput:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -507,6 +543,7 @@ dsio.experimental.inference.outputs.regression:RegressionOutput:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1
 dsio.experimental.inference.outputs.regression:RegressionValidator:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -532,6 +569,7 @@ dsio.experimental.inference.outputs.regression:RegressionValidator:
     via: dsio.experimental.inference.outputs.regression:RegressionOutput
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1
 dsio.experimental.data.arrays:collate_arrays:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -558,12 +596,18 @@ dsio.experimental.data.arrays:collate_arrays:
   - consumer: reference_projects/kaggle/essay_scoring
     test: tests/kaggle_portfolio/test_essay_scoring.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/rogii
     test: tests/kaggle_portfolio/test_rogii.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
@@ -576,9 +620,15 @@ dsio.experimental.data.padding:PadCollator:
   - consumer: reference_projects/kaggle/essay_scoring
     test: tests/kaggle_portfolio/test_essay_scoring.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a
   - consumer: reference_projects/kaggle/rogii
     test: tests/kaggle_portfolio/test_rogii.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1

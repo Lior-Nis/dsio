@@ -27,6 +27,12 @@ so that the signal model is configuration only (cohort #9b, #11, #13).
 - Contract metrics use the already committed golden harness tolerance (`rel_tol=1e-6`, `abs_tol=1e-9`). `tests/golden_metrics.json` must remain byte-for-byte unchanged. No wider tolerance may be selected after observing results.
 - Conv1d modules are constructed in the former order, with no parameter-bearing stage before them, so seeded parameter initialization is expected to remain exact.
 
+### Representative Evidence Correction
+
+- Story 8.7 found that a generic Torch sum did not preserve the declared NumPy float32 reduction tolerance on realistic 512-timestep windows. The clean zero-tolerance failure is preserved in MLflow.
+- `InstanceStandardize` now uses a batched native Torch matrix-vector reduction, which preserves GPU execution while matching the former CPU NumPy accumulation within the declared tolerance for the FoG input distribution. An explicit `reduction="numpy"` mode reproduces audited NumPy float32 migrations exactly; it is not the default because it copies through CPU and is non-differentiable.
+- Metric isolation showed that reduction order was not the final FoG parity cause. The legacy convolution allowed hidden activations in structural padding to influence real boundary positions, while `DenseConv1d` safely isolates padding by default. Its explicit `isolate_padding=False` migration mode preserves that legacy arithmetic; the safe default is unchanged.
+
 ## Tasks / Subtasks
 
 - [x] Task 1: Specify the signal-block contracts with failing tests (AC 1-3).
@@ -71,7 +77,7 @@ so that the signal model is configuration only (cohort #9b, #11, #13).
 
 - `x` remains the sole model input. Padding validity travels as an explicit consumer-declared channel, exactly as the architecture permits; batch `mask` remains the scoring/objective mask and is not sent separately to the model.
 - Do not infer padding from zero or another sensor value. A real all-zero timestep is valid data.
-- The validity channel is structural, not a learned feature. `InstanceStandardize` validates and preserves it; `DenseConv1d` removes it before learned convolution and masks hidden/output padding so convolution cannot leak padded context into real boundary predictions.
+- The validity channel is structural, not a learned feature. `InstanceStandardize` validates and preserves it; `DenseConv1d` removes it before learned convolution and, by default, masks hidden/output padding so convolution cannot leak padded context into real boundary predictions. Story 8.7 records FoG's explicit `isolate_padding=False` exception for legacy parity.
 - Statistics are per sample and feature over the time axis. Invalid/padded locations are ignored and returned as zero after normalization, reproducing normalization-before-padding while allowing the component to live inside the Predictor's deterministic model path.
 - Keep layouts explicit: model preprocessing receives `[B,T,C+1]`, transposes to `[B,C+1,T]`, standardizes while preserving `[B,C+1,T]`, the encoder consumes validity and returns `[B,K,T]`, and the final adapter returns `[B,T,K]`.
 - `DenseConv1d` is the proven architecture only: Conv1d -> ReLU -> Conv1d. Do not add depth lists, pooling, residuals, normalization, or activation registries.
@@ -117,7 +123,7 @@ GPT-5
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Added explicit time-major/channel-first layout adapters, a two-layer dense Conv1d block, and population-based per-instance standardization as small configurable native modules.
-- Kept padding validity inside `x`: standardization preserves it, while the dense block excludes it from learned inputs and masks intermediate/output padding, proving real predictions are invariant to co-batched sequence lengths.
+- Kept padding validity inside `x`: standardization preserves it, while the dense block excludes it from learned inputs and masks intermediate/output padding by default, proving the safe mode is invariant to co-batched sequence lengths. Story 8.7 later configured FoG's audited legacy exception explicitly.
 - Migrated FoG to full `StoredItems`, `Chain`, `Stages`, model, objective, and collator configurations; deleted its local dataset, normalization, model, and factory definitions; and versioned the eight-channel store schema.
 - Extended `StoredItems` with generic pre-cast `finite` and `allowed_values` constraints so boolean conversion cannot hide corrupt targets or masks.
 - Review resolved nine deduplicated actionable findings from blind, edge-case, and acceptance passes, including half-precision stability, graph-compatible checks, empty-time validation, and exact local-vs-MLflow predictor equality.
@@ -161,3 +167,4 @@ GPT-5
 
 - 2026-10-03: Created Story 8.3 with an explicit padding-validity channel and predeclared normalization tolerance.
 - 2026-10-03: Added, migrated, reviewed, and verified the shared dense-signal components and padding-safe FoG configuration.
+- 2026-10-03: Story 8.7 corrected the real-window reduction-order defect exposed by its zero-tolerance parity run.

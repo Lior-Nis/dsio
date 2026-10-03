@@ -21,13 +21,16 @@ class DenseConv1d(nn.Module):
         the hidden convolution (default 16). ``kernel_size``: odd convolution kernel
         (default 5), padded symmetrically to preserve time. ``observed_channel``:
         optional index of the structural validity channel; it is not a learned feature.
+        ``isolate_padding``: zero hidden and output padding so it cannot affect real
+        predictions (default true). False preserves legacy unmasked boundary arithmetic.
 
     Devices:
         CPU and accelerators. Inputs are cast to the convolution parameters' dtype.
 
     Limitations:
-        Exactly Conv1d -> ReLU -> Conv1d. With validity, hidden and output padding are
-        zeroed so real predictions cannot depend on co-batched lengths. There is no
+        Exactly Conv1d -> ReLU -> Conv1d. With validity and isolated padding, hidden and
+        output padding are zeroed so real predictions cannot depend on co-batched lengths.
+        Disabling isolation is intended only for audited migration parity. There is no
         pooling, residual path, or causal padding.
 
     Example:
@@ -44,6 +47,7 @@ class DenseConv1d(nn.Module):
         hidden: int = 16,
         kernel_size: int = 5,
         observed_channel: int | None = None,
+        isolate_padding: bool = True,
     ) -> None:
         super().__init__()
         self.channels = _positive("channels", channels)
@@ -60,6 +64,8 @@ class DenseConv1d(nn.Module):
             isinstance(observed_channel, bool) or not isinstance(observed_channel, int)
         ):
             raise ValueError("observed_channel must be an integer or None")
+        if not isinstance(isolate_padding, bool):
+            raise ValueError("isolate_padding must be true or false")
         input_channels = self.channels + 1
         if (
             observed_channel is not None
@@ -70,6 +76,7 @@ class DenseConv1d(nn.Module):
                 f"{input_channels} input channels"
             )
         self.observed_channel = observed_channel
+        self.isolate_padding = isolate_padding
         padding = kernel_size // 2
         self.input = nn.Conv1d(
             self.channels,
@@ -104,10 +111,12 @@ class DenseConv1d(nn.Module):
             observed = validity.bool()
             values = torch.cat((values[:, :index], values[:, index + 1 :]), dim=1)
         hidden = self.activation(self.input(values))
-        if observed is not None:
+        if observed is not None and self.isolate_padding:
             hidden = torch.where(observed, hidden, 0.0)
         result = self.output(hidden)
-        return result if observed is None else torch.where(observed, result, 0.0)
+        if observed is None or not self.isolate_padding:
+            return result
+        return torch.where(observed, result, 0.0)
 
 
 def _positive(name: str, value: int) -> int:

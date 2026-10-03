@@ -64,9 +64,9 @@ and arrays from tensors share their memory.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 - fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
 
@@ -205,10 +205,10 @@ NumPy on the cast array, so they match NumPy-based preprocessing bit for bit.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 - real: `reference_projects/kaggle/child_mind` (test `tests/kaggle_portfolio/test_child_mind.py`; runs —)
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 - fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
 
@@ -248,9 +248,9 @@ be declared. Padding is only along axis zero.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 
 ### `dsio.experimental.execution`
 
@@ -299,7 +299,7 @@ fixed. Selection is benchmark-noise sensitive inside the tolerance band.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73, https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; via `dsio.experimental.training:calibrate_training_execution`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
 ### `dsio.experimental.inference`
@@ -334,7 +334,7 @@ optional per-sample shape; `score_field`: probability field (default `score`).
 **Evidence**:
 
 - real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/a0e83b068f4c4146a3d2158bcb933721)
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391, https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 
 #### `dsio.experimental.inference.outputs.binary:BinaryValidator`
 
@@ -361,7 +361,7 @@ Validate shape, finiteness, range, and threshold consistency. — **experimental
 **Evidence**:
 
 - real: `reference_projects/kaggle/titanic` (test `tests/kaggle_portfolio/test_titanic.py`; via `dsio.experimental.inference.outputs.binary:BinaryOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/a0e83b068f4c4146a3d2158bcb933721)
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; via `dsio.experimental.inference.outputs.binary:BinaryOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; via `dsio.experimental.inference.outputs.binary:BinaryOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391, https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 
 #### `dsio.experimental.inference.outputs.multiclass:MulticlassOutput`
 
@@ -392,7 +392,7 @@ to indices; `score_field`: probability field (default `score`).
 **Evidence**:
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
 
 #### `dsio.experimental.inference.outputs.multiclass:MulticlassValidator`
 
@@ -418,7 +418,7 @@ Validate class range, simplex, and argmax consistency. — **experimental**; rea
 **Evidence**:
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; via `dsio.experimental.inference.outputs.multiclass:MulticlassOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; via `dsio.experimental.inference.outputs.multiclass:MulticlassOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; via `dsio.experimental.inference.outputs.multiclass:MulticlassOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
 
 #### `dsio.experimental.inference.outputs.regression:RegressionOutput`
 
@@ -453,7 +453,7 @@ optional field for original values.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b, https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 
 #### `dsio.experimental.inference.outputs.regression:RegressionValidator`
 
@@ -482,7 +482,7 @@ RegressionOutput.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b, https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 
 ### `dsio.experimental.model`
 
@@ -523,8 +523,8 @@ load-and-freeze path is planned with pretrained weights (roadmap v2).
 **Evidence**:
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
 
 #### `dsio.experimental.model.compositions:MLP`
 
@@ -596,7 +596,7 @@ inside a stage carries a note naming that stage's position and class.
 
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 
 #### `dsio.experimental.model.convolution:DenseConv1d`
 
@@ -611,11 +611,14 @@ additional channel contains shared zero-or-one timestep validity.
 the hidden convolution (default 16). `kernel_size`: odd convolution kernel
 (default 5), padded symmetrically to preserve time. `observed_channel`:
 optional index of the structural validity channel; it is not a learned feature.
+`isolate_padding`: zero hidden and output padding so it cannot affect real
+predictions (default true). False preserves legacy unmasked boundary arithmetic.
 
 **Devices**: CPU and accelerators. Inputs are cast to the convolution parameters' dtype.
 
-**Limitations**: Exactly Conv1d -> ReLU -> Conv1d. With validity, hidden and output padding are
-zeroed so real predictions cannot depend on co-batched lengths. There is no
+**Limitations**: Exactly Conv1d -> ReLU -> Conv1d. With validity and isolated padding, hidden and
+output padding are zeroed so real predictions cannot depend on co-batched lengths.
+Disabling isolation is intended only for audited migration parity. There is no
 pooling, residual path, or causal padding.
 
 **Example**
@@ -629,7 +632,7 @@ pooling, residual path, or causal padding.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 
 #### `dsio.experimental.model.layout:ChannelFirstToTimeMajor`
 
@@ -657,7 +660,7 @@ omitted for variable-length padded batches.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 
 #### `dsio.experimental.model.layout:TimeMajorToChannelFirst`
 
@@ -685,7 +688,7 @@ omitted for variable-length padded batches.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 - fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
 
@@ -729,8 +732,8 @@ mask cannot omit more than the final output axis.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 
 #### `dsio.experimental.model.objectives:RootMeanSquaredError`
 
@@ -758,7 +761,7 @@ of that batch's mean, and epoch logging averages those roots.
 **Evidence**:
 
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 
 #### `dsio.experimental.model.objectives:SupervisedObjective`
 
@@ -811,7 +814,7 @@ dense targets need a masked objective. Epoch values are logged per process.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 
 #### `dsio.experimental.model.residual:BaselineResidual`
@@ -847,7 +850,7 @@ identity around the declared baseline. Input and parameters must share a device.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/149b57ff3e67463f947d8379d26369b5)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/149b57ff3e67463f947d8379d26369b5, https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/69a9ad9f8c6948829f938654b6d8c9a1)
 
 #### `dsio.experimental.model.standardization:InstanceStandardize`
 
@@ -864,13 +867,17 @@ a declared validity channel is preserved for padding-aware downstream blocks.
 **Parameters**: `eps`: finite positive minimum scale (default `1e-6`).
 `observed_channel`: optional channel-axis index containing shared timestep
 validity; negative indexes are accepted. With no channel, every timestep is used.
+`reduction`: `"torch"` keeps statistics native and compilable; `"numpy"`
+reproduces NumPy float32 reduction exactly for audited migrations.
 
 **Devices**: CPU and accelerators. Floating dtype/device are preserved; integer inputs become
-float32.
+float32. The NumPy reduction copies through CPU and is intended only for explicit
+parity constraints.
 
 **Limitations**: Rank-three channel-first signals only. One validity channel is shared by every
 value channel; feature-specific missingness needs a different declared block. Half
-and bfloat16 statistics are accumulated in float32, then cast back.
+and bfloat16 statistics are accumulated in float32, then cast back. NumPy reduction
+is non-differentiable.
 
 **Example**
 
@@ -883,7 +890,7 @@ and bfloat16 statistics are accumulated in float32, then cast back.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 
 #### `dsio.experimental.model.standardization:Standardize`
 
@@ -954,7 +961,7 @@ this block.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/71a7cb3803674fb9986fda1928b597e6)
 
 ### `dsio.experimental.telemetry`
 
@@ -988,7 +995,7 @@ True
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181, https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
 #### `dsio.experimental.telemetry:measure_phase`
@@ -1020,7 +1027,7 @@ Measure one phase without introducing a DSIO telemetry abstraction. — **experi
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/e5f5ba230c3d46f69efea8d3045ed181, https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
 ### `dsio.experimental.training`
@@ -1097,7 +1104,7 @@ tolerance band.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73, https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
 #### `dsio.experimental.training:log_calibration`
@@ -1147,7 +1154,7 @@ Record the complete calibration artifact and dashboard-friendly MLflow series. �
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/553bf319fae2401faf4e8bd1eb63ef73, https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/5dddb9d97cc04e6ca725a7dfaa03fb1a)
 - real: `reference_projects/kaggle/child_mind/sequence` (test `tests/kaggle_portfolio/test_child_mind_sequence.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/d471559820e94a3ba6e0df666c91a05d)
 
 ## Legacy experimental components
