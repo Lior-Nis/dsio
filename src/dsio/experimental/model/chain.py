@@ -48,7 +48,7 @@ class ComponentChain(nn.Module):
 
 
 class LossObjective(nn.Module):
-    """Adapt an established `(prediction, target)` loss to the generic objective contract."""
+    """Adapt a `(prediction, target)` loss; superseded by ``objectives.SupervisedObjective``."""
 
     def __init__(self, loss: nn.Module) -> None:
         super().__init__()

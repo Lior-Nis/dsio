@@ -7,7 +7,6 @@ from typing import Any
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
 
@@ -23,16 +22,13 @@ DATASET: ComponentConfig = {
 }
 
 
-class DemandObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        prediction = model(batch["x"])
-        return {
-            "loss": F.mse_loss(prediction, batch["y"].float()),
-            "mae": F.l1_loss(prediction, batch["y"].float()),
-        }
+OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.objectives:SupervisedObjective",
+    "parameters": {
+        "loss": {"reference": "torch.nn:MSELoss"},
+        "metrics": {"mae": {"reference": "torch.nn:L1Loss"}},
+    },
+}
 
 
 class NonNegativeOutput(nn.Module):

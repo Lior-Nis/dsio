@@ -7,7 +7,6 @@ from typing import Any
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
 
@@ -23,12 +22,10 @@ DATASET: ComponentConfig = {
 }
 
 
-class PassengerObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        return {"loss": F.binary_cross_entropy_with_logits(model(batch["x"]), batch["y"].float())}
+OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.objectives:SupervisedObjective",
+    "parameters": {"loss": {"reference": "torch.nn:BCEWithLogitsLoss"}},
+}
 
 
 class BinaryPrediction(nn.Module):

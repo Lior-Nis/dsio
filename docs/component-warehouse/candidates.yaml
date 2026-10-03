@@ -26,16 +26,14 @@ Verified encoder handoff:
     verify (#17) has one consumer; a DSio load-and-freeze path waits for pretrained weights (v2).
 Local objectives:
   consumers:
-    - reference_projects/kaggle/titanic
-    - reference_projects/kaggle/bike_sharing
-    - reference_projects/kaggle/digit_recognizer
     - reference_projects/kaggle/essay_scoring
     - reference_projects/kaggle/parkinsons_fog
     - reference_projects/kaggle/rogii
-    - reference_projects/kaggle/store_sales
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: Supervised, masked dense and reconstruction objectives (#18-#20), Stories 7.4, 8.2.
+  reason: >-
+    Masked dense objectives (#19), Story 8.2; essay and CMI move to SupervisedObjective (#18)
+    with their sequence and weighting stories (8.3-8.5, 9.2-9.4).
 Pad collate functions:
   consumers:
     - reference_projects/kaggle/essay_scoring

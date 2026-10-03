@@ -7,7 +7,6 @@ from typing import Any
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
 
@@ -74,20 +73,17 @@ CLASSIFIER: ComponentConfig = {
 }
 
 
-class ReconstructionObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        return {"loss": F.mse_loss(model(batch["x"]), batch["x"].float())}
+# Reconstruction: the input is the target.
+RECONSTRUCTION_OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.objectives:SupervisedObjective",
+    "parameters": {"loss": {"reference": "torch.nn:MSELoss"}, "target": "x"},
+}
 
 
-class ClassificationObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        return {"loss": F.cross_entropy(model(batch["x"]), batch["y"].long())}
+CLASSIFICATION_OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.objectives:SupervisedObjective",
+    "parameters": {"loss": {"reference": "torch.nn:CrossEntropyLoss"}},
+}
 
 
 class DigitPrediction(nn.Module):

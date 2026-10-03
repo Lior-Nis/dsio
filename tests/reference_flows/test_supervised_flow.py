@@ -15,7 +15,7 @@ from tests.golden import assert_golden_metrics
 from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
-from dsio.experimental.model import MLP
+from dsio.experimental.model import MLP, SupervisedObjective
 from dsio.model.module import DsioModule
 from dsio.tracking import TrackingError, canonical_dataset_digest, resolve_experiment
 
@@ -76,10 +76,7 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
 ) -> None:
     del reference_services
     from prefect.testing.utilities import prefect_test_harness
-    from reference_projects.supervised.components import (
-        RegressionObjective,
-        build_synthetic_store,
-    )
+    from reference_projects.supervised.components import build_synthetic_store
     from reference_projects.supervised.flow import reevaluate, supervised_flow
     from reference_projects.supervised.tasks import infer, split_data
 
@@ -144,7 +141,7 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
     expected_runtime = {
         "types": (DsioModule, DsioDataModule),
         "model_type": MLP,
-        "objective_type": RegressionObjective,
+        "objective_type": SupervisedObjective,
         "optimizer_factory": torch.optim.SGD,
         "optimizer_parameters": {"lr": 0.05},
         "drop_last": {
