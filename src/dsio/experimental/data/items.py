@@ -22,9 +22,10 @@ _DTYPES = {
     "bool": np.bool_,
 }
 _LAYOUTS = ("time_major", "channel_first")
+_VALUE_KEYS = {"dtype", "offset", "log1p", "divide", "shape", "finite", "allowed_values"}
 _KEYS = {
-    "data": {"from", "columns", "dtype", "layout", "offset", "log1p", "divide", "shape"},
-    "attribute": {"from", "attribute", "dtype", "offset", "log1p", "divide", "shape"},
+    "data": {"from", "columns", "layout", *_VALUE_KEYS},
+    "attribute": {"from", "attribute", *_VALUE_KEYS},
 }
 
 
@@ -57,8 +58,11 @@ class StoredItems:
           8-bit inputs, e.g. pixels a predictor scales itself) or ``bool``.
         - ``offset`` (added), ``log1p`` (``true``) and ``divide`` (divisor), applied in
           that order after the cast. Float fields accept all three, ``int64`` fields an
-          integer ``offset`` only, ``uint8`` and ``bool`` fields none, so the declared dtype is the
-          produced dtype. ``shape``: final shape, e.g. ``[1]`` or ``[]`` (one ``-1`` at most).
+          integer ``offset`` only, ``uint8`` and ``bool`` fields none, so the declared dtype
+          is the produced dtype. ``finite`` requires finite source values and
+          ``allowed_values`` restricts source values to a non-empty finite list; both run
+          before casting. ``shape``: final shape, e.g. ``[1]`` or ``[]`` (one ``-1`` at
+          most).
 
     Devices:
         CPU; items are moved to the accelerator by Lightning after collation.
@@ -192,6 +196,21 @@ def _field(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(f"field {name!r}: divide must be non-zero")
     if not isinstance(spec.get("log1p", False), bool):
         raise ValueError(f"field {name!r}: log1p must be true or false")
+    if not isinstance(spec.get("finite", False), bool):
+        raise ValueError(f"field {name!r}: finite must be true or false")
+    allowed = spec.get("allowed_values")
+    if allowed is not None and not (
+        isinstance(allowed, Sequence)
+        and not isinstance(allowed, str | bytes)
+        and bool(allowed)
+        and all(
+            isinstance(value, int | float)
+            and not isinstance(value, complex)
+            and math.isfinite(value)
+            for value in allowed
+        )
+    ):
+        raise ValueError(f"field {name!r}: allowed_values must be non-empty finite numbers")
     dtype = spec.get("dtype", "float32")
     transforms = [
         key for key in ("offset", "log1p", "divide") if spec.get(key) not in (None, False)
@@ -223,7 +242,7 @@ def _value(name: str, spec: Mapping[str, Any], sample: Mapping[str, Any]) -> np.
     dtype = _DTYPES[spec.get("dtype", "float32")]
     array: np.ndarray[Any, Any]
     if spec["from"] == "data":
-        array = np.array(sample["data"], dtype=dtype, copy=True)
+        array = np.array(sample["data"], copy=True)
         columns = spec.get("columns")
         if columns is not None:
             if array.ndim != 2 or columns[1] > array.shape[1]:
@@ -247,7 +266,15 @@ def _value(name: str, spec: Mapping[str, Any], sample: Mapping[str, Any]) -> np.
                 f"field {name!r} reads attribute {attribute!r}, which is null for sample "
                 f"{sample['sample_id']!r}"
             )
-        array = np.array(attrs[attribute], dtype=dtype, copy=True)
+        array = np.array(attrs[attribute], copy=True)
+    _validate_values(name, spec, sample, array)
+    try:
+        array = np.array(array, dtype=dtype, copy=True)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise LoadingError(
+            f"field {name!r} cannot cast sample {sample['sample_id']!r} to "
+            f"{spec.get('dtype', 'float32')}: {error}"
+        ) from error
     if spec.get("offset") is not None:
         array = array + array.dtype.type(spec["offset"])
     if spec.get("log1p"):
@@ -266,6 +293,32 @@ def _value(name: str, spec: Mapping[str, Any], sample: Mapping[str, Any]) -> np.
             ) from error
     # np.ascontiguousarray would promote a 0-d scalar target to shape (1,).
     return np.asarray(array, order="C")
+
+
+def _validate_values(
+    name: str,
+    spec: Mapping[str, Any],
+    sample: Mapping[str, Any],
+    array: np.ndarray[Any, Any],
+) -> None:
+    if spec.get("finite"):
+        try:
+            finite = bool(np.isfinite(array).all())
+        except TypeError as error:
+            raise LoadingError(
+                f"field {name!r} in sample {sample['sample_id']!r} cannot be checked for "
+                "finite values"
+            ) from error
+        if not finite:
+            raise LoadingError(
+                f"field {name!r} in sample {sample['sample_id']!r} must contain finite values"
+            )
+    allowed = spec.get("allowed_values")
+    if allowed is not None and not bool(np.isin(array, allowed).all()):
+        raise LoadingError(
+            f"field {name!r} in sample {sample['sample_id']!r} must contain only "
+            f"allowed values {list(allowed)!r}"
+        )
 
 
 __all__ = ["StoredItems"]

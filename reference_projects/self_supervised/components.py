@@ -10,9 +10,6 @@ from torch import Tensor, nn
 
 from dsio.config.components import ComponentConfig
 from dsio.experimental.model.components import NTXent
-from reference_projects.supervised.components import (
-    TimeMajorToChannelFirst as TimeMajorToChannelFirst,
-)
 
 DATASET: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",

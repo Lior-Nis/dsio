@@ -27,7 +27,7 @@ A batch is a flat mapping. These names are reserved:
 Rules:
 
 - **`hidden` stays out of batches today.** The strategies in `dsio.experimental.model.masking` return `hidden` tensors. `MaskedReconstruction` keeps its tensor internal: hidden positions are zeroed in `x`, and visible positions are NaN in `y`. It emits no batch `mask` and passes a consumer's `mask` through untouched.
-- **Validity a model needs travels inside `x`** *(from Stories 8.4, 8.5 and 9.4)*. This covers masked pooling, residual validity and modality presence. Declare it as a channel of `x`, or derive it from a declared padding value.
+- **Validity a model needs travels inside `x`** *(from Stories 8.3-8.5 and 9.4)*. This covers padding-aware preprocessing, masked pooling, residual validity and modality presence. Declare it as a channel of `x`, or derive it from a declared padding value.
 - **Multimodal inputs are declared slices of `x`** *(from Story 9.4)*, plus declared presence channels. There is no container class.
 - **Datasets and collators fail on a missing declared field.** They never invent one. `StoredItems` enforces this for datasets; collators follow *(from Story 8.1)*.
 
@@ -39,7 +39,7 @@ Rules:
 ## Tensor layouts and targets
 
 - **Signal-sequence backbones** consume channel-first `[B, C, T]`.
-- **Datasets declare their layout** (`StoredItems` `layout`). Convert time-major data with the layout adapter *(from Story 8.3)*, not an ad hoc transpose inside a model.
+- **Datasets declare their layout** (`StoredItems` `layout`). Convert time-major data with the layout adapter, not an ad hoc transpose inside a model.
 - **Output shapes.** Dense per-timestep outputs are `[B, T, K]`, and sequence-level outputs are `[B, K]`.
 - **Scalar regression** is `[B]` or `[B, 1]` as declared, and is never silently squeezed.
 - **Multiclass and ordinal targets** are zero-based int64 indices. An ordinal label offset is applied only by the output.

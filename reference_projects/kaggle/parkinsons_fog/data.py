@@ -160,7 +160,9 @@ def iter_recording_windows(
                     _boolean(row["Valid"], path.name, row_number, "Valid")
                     and _boolean(row["Task"], path.name, row_number, "Task")
                 )
-            buffer.append([*features, *targets, valid])
+            # A declared model-input channel distinguishes real timesteps from collation
+            # padding without widening Predictor's single ``x`` input.
+            buffer.append([*features, 1.0, *targets, valid])
             times.append(time)
             rows += 1
             if len(buffer) == window_size:

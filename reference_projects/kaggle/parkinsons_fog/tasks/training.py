@@ -18,8 +18,8 @@ from dsio.data.examples import Examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
-from dsio.experimental.data import PadCollator
-from dsio.experimental.model import MaskedObjective
+from dsio.experimental.data import PadCollator, StoredItems
+from dsio.experimental.model import Chain, MaskedObjective
 from dsio.experimental.telemetry import log_phase_evidence, measure_phase
 from dsio.experimental.training import calibrate_training_execution, log_calibration
 from dsio.model.module import DsioModule
@@ -33,10 +33,9 @@ from dsio.train.capabilities import (
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.parkinsons_fog.components import (
     COLLATOR,
-    FEATURE_COUNT,
+    DATASET,
+    MODEL,
     OBJECTIVE,
-    FogDetector,
-    fog_windows,
 )
 from reference_projects.kaggle.parkinsons_fog.tasks.data import labelled_examples
 
@@ -56,7 +55,6 @@ DROP_LAST = {"train": False, "validate": False, "test": False, "predict": False}
 BATCH_SIZE = 16
 NUM_WORKERS = 2
 OPTIMIZER_PARAMETERS = {"lr": 0.001}
-MODEL_PARAMETERS = {"features": FEATURE_COUNT, "hidden": 16}
 PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters": {}}
 
 
@@ -77,10 +75,7 @@ def train(
         manifest = load_split_evidence(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
-        model_config: ComponentConfig = {
-            "reference": "reference_projects.kaggle.parkinsons_fog.components:FogDetector",
-            "parameters": MODEL_PARAMETERS,
-        }
+        model_config = MODEL
 
         def module_factory() -> DsioModule:
             return _module(model_config)
@@ -160,9 +155,7 @@ def train(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
-                "dataset_factory": (
-                    "reference_projects.kaggle.parkinsons_fog.components:fog_windows"
-                ),
+                "dataset_factory": DATASET,
                 "collator": COLLATOR,
                 "model": model_config,
                 "objective": OBJECTIVE,
@@ -250,7 +243,7 @@ def _unmeasured_phase() -> Any:
 
 def _module(model_config: ComponentConfig) -> DsioModule:
     return DsioModule(
-        model=resolve_component(model_config, expected=FogDetector),
+        model=resolve_component(model_config, expected=Chain),
         objective=resolve_component(OBJECTIVE, expected=MaskedObjective),
         optimizer_factory=torch.optim.Adam,
         optimizer_parameters=OPTIMIZER_PARAMETERS,
@@ -270,7 +263,7 @@ def _data_module(
         manifest,
         fold=0,
         roles=ROLES,
-        dataset_factory=fog_windows,
+        dataset_factory=resolve_component(DATASET, expected=StoredItems),
         batch_size=execution["batch_size"],
         num_workers=execution.get("num_workers", 0),
         pin_memory=execution.get("pin_memory", False),

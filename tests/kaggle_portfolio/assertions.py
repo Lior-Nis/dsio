@@ -22,6 +22,7 @@ def assert_execution_evidence(
     dataset: object | None = None,
     collator: Mapping[str, Any] | None = None,
     objective: object | None = None,
+    model: object | None = None,
 ) -> None:
     client = MlflowClient()
     run = client.get_run(run_id)
@@ -45,6 +46,8 @@ def assert_execution_evidence(
     assert provenance["components"]["optimizer"] == optimizer
     if objective is not None:
         assert provenance["components"]["objective"] == objective
+    if model is not None:
+        assert provenance["components"]["model"] == model
     if dataset is not None:
         assert collator is not None
         assert provenance["components"]["dataset_factory"] == dataset

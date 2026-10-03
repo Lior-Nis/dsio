@@ -147,7 +147,7 @@ Log fitted values as an MLflow evidence artifact and return its run-relative pat
 
 #### `dsio.experimental.data.items:StoredItems`
 
-Map stored samples into identity-bearing training items, field by field. — **experimental**; real uses: 7 (bike_sharing, child_mind, digit_recognizer, essay_scoring, rogii, store_sales, titanic).
+Map stored samples into identity-bearing training items, field by field. — **experimental**; real uses: 8 (bike_sharing, child_mind, digit_recognizer, essay_scoring, parkinsons_fog, rogii, store_sales, titanic).
 
 **Consumes**: A `SignalStore` whose samples are `[rows, channels]` arrays with entity
 attributes, the `Examples` that describe that exact store (name and content
@@ -165,8 +165,11 @@ digest), and the assigned `sample_ids`.
   8-bit inputs, e.g. pixels a predictor scales itself) or `bool`.
 - `offset` (added), `log1p` (`true`) and `divide` (divisor), applied in
   that order after the cast. Float fields accept all three, `int64` fields an
-  integer `offset` only, `uint8` and `bool` fields none, so the declared dtype is the
-  produced dtype. `shape`: final shape, e.g. `[1]` or `[]` (one `-1` at most).
+  integer `offset` only, `uint8` and `bool` fields none, so the declared dtype
+  is the produced dtype. `finite` requires finite source values and
+  `allowed_values` restricts source values to a non-empty finite list; both run
+  before casting. `shape`: final shape, e.g. `[1]` or `[]` (one `-1` at
+  most).
 
 **Devices**: CPU; items are moved to the accelerator by Lightning after collation.
 
@@ -205,6 +208,7 @@ NumPy on the cast array, so they match NumPy-based preprocessing bit for bit.
 - real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
 - real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
 - real: `reference_projects/kaggle/child_mind` (test `tests/kaggle_portfolio/test_child_mind.py`; runs —)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 - fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
 
@@ -501,7 +505,7 @@ Validate a :class:`RegressionOutput` result: shape, finiteness and sign. — **e
 
 #### `dsio.experimental.model.compositions:Chain`
 
-Preprocessor, backbone and head as one model that can also `encode`. — **experimental**; real uses: 1 (digit_recognizer).
+Preprocessor, backbone and head as one model that can also `encode`. — **experimental**; real uses: 2 (digit_recognizer, parkinsons_fog).
 
 **Consumes**: What the preprocessor (or, without one, the backbone) consumes.
 
@@ -536,6 +540,7 @@ load-and-freeze path is planned with pretrained weights (roadmap v2).
 **Evidence**:
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
 
 #### `dsio.experimental.model.compositions:MLP`
 
@@ -577,7 +582,7 @@ width; `hidden`: hidden widths (default none: a single linear layer);
 
 #### `dsio.experimental.model.compositions:Stages`
 
-Run configured components one after another. — **experimental**; real uses: 2 (bike_sharing, digit_recognizer).
+Run configured components one after another. — **experimental**; real uses: 3 (bike_sharing, digit_recognizer, parkinsons_fog).
 
 **Consumes**: Whatever the first stage consumes.
 
@@ -607,6 +612,98 @@ inside a stage carries a note naming that stage's position and class.
 
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+
+#### `dsio.experimental.model.convolution:DenseConv1d`
+
+Apply two same-length convolutions without pooling. — **experimental**; real uses: 1 (parkinsons_fog).
+
+**Consumes**: A tensor `[batch, channels, time]`. When `observed_channel` is set, one
+additional channel contains shared zero-or-one timestep validity.
+
+**Produces**: A tensor `[batch, output, time]`; the temporal extent is unchanged.
+
+**Parameters**: `channels`: input channels. `output`: output channels. `hidden`: width of
+the hidden convolution (default 16). `kernel_size`: odd convolution kernel
+(default 5), padded symmetrically to preserve time. `observed_channel`:
+optional index of the structural validity channel; it is not a learned feature.
+
+**Devices**: CPU and accelerators. Inputs are cast to the convolution parameters' dtype.
+
+**Limitations**: Exactly Conv1d -> ReLU -> Conv1d. With validity, hidden and output padding are
+zeroed so real predictions cannot depend on co-batched lengths. There is no
+pooling, residual path, or causal padding.
+
+**Example**
+
+```python
+>>> import torch
+>>> model = DenseConv1d(channels=3, output=2)
+>>> tuple(model(torch.ones(4, 3, 9)).shape)
+(4, 2, 9)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+
+#### `dsio.experimental.model.layout:ChannelFirstToTimeMajor`
+
+Transpose a channel-first signal into a public time-major output. — **experimental**; real uses: 1 (parkinsons_fog).
+
+**Consumes**: A rank-three tensor `[batch, channels, time]`.
+
+**Produces**: A contiguous tensor `[batch, time, channels]` with identical values.
+
+**Parameters**: `channels`: required channel extent. `time`: optional fixed time extent;
+omitted for variable-length padded batches.
+
+**Devices**: CPU and accelerators; dtype and device are preserved.
+
+**Limitations**: Rank-three signals only. This module only changes layout.
+
+**Example**
+
+```python
+>>> import torch
+>>> stage = ChannelFirstToTimeMajor(channels=2)
+>>> tuple(stage(torch.ones(3, 2, 5)).shape)
+(3, 5, 2)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+
+#### `dsio.experimental.model.layout:TimeMajorToChannelFirst`
+
+Transpose a time-major signal into the layout expected by PyTorch Conv1d. — **experimental**; real uses: 1 (parkinsons_fog).
+
+**Consumes**: A rank-three tensor `[batch, time, channels]`.
+
+**Produces**: A contiguous tensor `[batch, channels, time]` with identical values.
+
+**Parameters**: `channels`: required channel extent. `time`: optional fixed time extent;
+omitted for variable-length padded batches.
+
+**Devices**: CPU and accelerators; dtype and device are preserved.
+
+**Limitations**: Rank-three signals only. This module only changes layout.
+
+**Example**
+
+```python
+>>> import torch
+>>> stage = TimeMajorToChannelFirst(channels=2)
+>>> tuple(stage(torch.ones(3, 5, 2)).shape)
+(3, 2, 5)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
+- fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
 
 #### `dsio.experimental.model.masked_objective:MaskedObjective`
 
@@ -731,6 +828,42 @@ dense targets need a masked objective. Epoch values are logged per process.
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
+
+#### `dsio.experimental.model.standardization:InstanceStandardize`
+
+Standardize each sample and channel over its observed timesteps. — **experimental**; real uses: 1 (parkinsons_fog).
+
+**Consumes**: A floating tensor `[batch, channels, time]`. When `observed_channel` is set,
+that channel must contain zero-or-one validity; invalid value positions may be
+non-finite because they are selected out before arithmetic.
+
+**Produces**: `[batch, channels, time]` with per-instance, per-value-channel population mean
+zero and scale one where variance is non-zero. Invalid positions are exact zero;
+a declared validity channel is preserved for padding-aware downstream blocks.
+
+**Parameters**: `eps`: finite positive minimum scale (default `1e-6`).
+`observed_channel`: optional channel-axis index containing shared timestep
+validity; negative indexes are accepted. With no channel, every timestep is used.
+
+**Devices**: CPU and accelerators. Floating dtype/device are preserved; integer inputs become
+float32.
+
+**Limitations**: Rank-three channel-first signals only. One validity channel is shared by every
+value channel; feature-specific missingness needs a different declared block. Half
+and bfloat16 statistics are accumulated in float32, then cast back.
+
+**Example**
+
+```python
+>>> import torch
+>>> x = torch.tensor([[[1., 3., 99.], [1., 1., 0.]]])
+>>> InstanceStandardize(observed_channel=1)(x).tolist()
+[[[-1.0, 1.0, 0.0], [1.0, 1.0, 0.0]]]
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
 
 #### `dsio.experimental.model.standardization:Standardize`
 
@@ -982,7 +1115,6 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.model.components:EmbeddingEncoder` | Token ids to a pooled representation. The baseline any sequence model over text must beat, and the reason a token corpus needs a backbone of its own at all. | — |
 | `dsio.experimental.model.components:FixedStandardize` | Standardise by outside statistics; superseded by ``standardization.Standardize``. | — |
 | `dsio.experimental.model.components:IdentityAugmentation` | Generator-aware identity for an explicitly configured two-view baseline. | — |
-| `dsio.experimental.model.components:InstanceStandardize` | Per-window, per-channel standardisation. | — |
 | `dsio.experimental.model.components:Jitter` | Additive Gaussian noise, scaled per channel by that channel's own spread. | self_supervised |
 | `dsio.experimental.model.components:MLP1d` | Flatten and project; superseded by ``compositions.MLP``. | — |
 | `dsio.experimental.model.components:MaskedMSE` | Reconstruction loss for a target that carries NaN outside masked positions. | — |
@@ -1155,10 +1287,9 @@ local on purpose.
 | Evaluation array builders | 1 | `reference_projects/kaggle/child_mind` | collate_arrays (#5) once its dataset is a warehouse block, Stories 9.1-9.4. |
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
-| Local nn.Module models | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10-#13, |
+| Local nn.Module models | 4 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10, |
 | Local objectives | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Essay and CMI move to SupervisedObjective (#18) with their sequence and weighting stories (8.3-8.5, 9.2-9.4). |
 | Prediction normalizers and validators | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay and CMI move to MulticlassOutput (#25) with their sequence and weighting stories. |
-| Stored-sample Dataset classes | 1 | `reference_projects/kaggle/parkinsons_fog` | Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
 | Train and export task wiring | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |
 | Train-fold statistics and weight fitting | 2 | `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Observed-only statistics and class/group weights (#4a-#4c), Stories 9.2, 9.3. |

@@ -173,7 +173,7 @@ def ingest(
                 "ignored_points": ignored_points,
                 "dropped_windows": dropped_windows,
                 "staged_points": staged_points,
-                "schema": "kaggle-parkinsons-fog-v1",
+                "schema": "kaggle-parkinsons-fog-v2",
                 **(
                     {"source_manifest_digest": source_inventory["manifest_digest"]}
                     if source_inventory is not None

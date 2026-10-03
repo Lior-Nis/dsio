@@ -21,10 +21,10 @@ from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.parkinsons_fog.components import (
     COLLATOR,
+    DATASET,
     INPUT_COLLATOR,
+    INPUTS,
     FogOutput,
-    fog_inputs,
-    fog_windows,
     validate_fog_prediction,
 )
 from reference_projects.kaggle.parkinsons_fog.data import TARGETS
@@ -48,7 +48,7 @@ def export(
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         sample_id = next(iter(split["assignments"]["validate"]))
         arrays = collate_arrays(
-            fog_inputs,
+            INPUTS,
             SignalStore(data["store_path"]),
             [sample_id],
             collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
@@ -71,9 +71,7 @@ def export(
                 "validator": (
                     "reference_projects.kaggle.parkinsons_fog.components:validate_fog_prediction"
                 ),
-                "dataset_factory": (
-                    "reference_projects.kaggle.parkinsons_fog.components:fog_inputs"
-                ),
+                "dataset_factory": INPUTS,
                 "collator": INPUT_COLLATOR,
             },
         )
@@ -112,7 +110,7 @@ def evaluate_model(
     with attempt(experiment_id) as run:
         sample_ids = list(split["assignments"]["validate"])
         arrays = collate_arrays(
-            fog_windows,
+            DATASET,
             SignalStore(data["store_path"]),
             sample_ids,
             collate_fn=resolve_component(COLLATOR, expected=PadCollator),
@@ -132,9 +130,7 @@ def evaluate_model(
             },
             components={
                 "evaluation": "dsio.eval.execution:evaluate",
-                "dataset_factory": (
-                    "reference_projects.kaggle.parkinsons_fog.components:fog_windows"
-                ),
+                "dataset_factory": DATASET,
                 "collator": COLLATOR,
             },
         )
@@ -159,7 +155,7 @@ def infer_and_submit(
     with attempt(experiment_id) as run:
         sample_ids = list(data["test_sample_ids"])
         arrays = collate_arrays(
-            fog_inputs,
+            INPUTS,
             SignalStore(data["store_path"]),
             sample_ids,
             collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
@@ -194,9 +190,7 @@ def infer_and_submit(
             },
             components={
                 "inference": "dsio.inference.loading:predict",
-                "dataset_factory": (
-                    "reference_projects.kaggle.parkinsons_fog.components:fog_inputs"
-                ),
+                "dataset_factory": INPUTS,
                 "collator": INPUT_COLLATOR,
             },
         )

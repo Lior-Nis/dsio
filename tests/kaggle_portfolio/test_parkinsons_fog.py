@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -631,19 +632,19 @@ def test_parkinsons_boundary_streams_windows_and_excludes_test_subjects(
         load_competition_data(parkinsons_fog_csvs)
 
 
-def test_parkinsons_evaluation_rejects_malformed_dense_evidence() -> None:
-    from typing import cast
-
+def test_parkinsons_evaluation_rejects_malformed_dense_evidence(tmp_path: Path) -> None:
     from reference_projects.kaggle.parkinsons_fog.components import (
+        CHANNEL_COUNT,
         COLLATOR,
+        DATASET,
         INPUT_COLLATOR,
-        fog_inputs,
-        fog_windows,
+        INPUTS,
         validate_fog_prediction,
     )
 
     from dsio.config.components import resolve_component
-    from dsio.data.examples import Examples
+    from dsio.data.adapters import entity_examples
+    from dsio.data.loading import LoadingError
     from dsio.data.store import SignalStore
     from dsio.experimental.data import PadCollator, collate_arrays
 
@@ -653,42 +654,44 @@ def test_parkinsons_evaluation_rejects_malformed_dense_evidence() -> None:
             {"prediction": torch.zeros_like(probability), "probability": probability}
         )
 
-    class FakeStore:
-        sample = np.zeros((1, 7), dtype=np.float32)
-
-        def read_sample(self, sample_id: str) -> dict[str, object]:
-            return {"sample_id": sample_id, "data": self.sample}
-
-    FakeStore.sample = np.zeros((1, 7), dtype=np.float32)
-    FakeStore.sample[0, 3] = np.nan
-    with pytest.raises(ValueError, match="labels.*finite binary"):
-        collate_arrays(
-            fog_windows,
-            cast("SignalStore", FakeStore()),
-            ["bad-label"],
-            examples=cast("Examples", object()),
-            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
-        )
-
-    FakeStore.sample = np.zeros((1, 7), dtype=np.float32)
-    FakeStore.sample[0, -1] = np.nan
-    with pytest.raises(ValueError, match="mask.*zero or one"):
-        collate_arrays(
-            fog_windows,
-            cast("SignalStore", FakeStore()),
-            ["bad-mask"],
-            examples=cast("Examples", object()),
-            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
-        )
+    store_path = tmp_path / "fog-arrays"
+    short = np.zeros((1, CHANNEL_COUNT), dtype=np.float32)
+    short[:, 3] = 1.0
+    long = np.zeros((2, CHANNEL_COUNT), dtype=np.float32)
+    long[:, 3] = 1.0
+    with SignalStore.builder(store_path, channels=CHANNEL_COUNT, dtype="float32") as builder:
+        builder.add("short", short, group="short")
+        builder.add("long", long, group="long")
+        bad_target = short.copy()
+        bad_target[:, 4] = np.nan
+        builder.add("bad-target", bad_target, group="bad-target")
+        bad_mask = short.copy()
+        bad_mask[:, -1] = 0.5
+        builder.add("bad-mask", bad_mask, group="bad-mask")
+    store = SignalStore(store_path)
 
     arrays = collate_arrays(
-        fog_inputs,
-        cast("SignalStore", FakeStore()),
-        ["input-only"],
-        examples=cast("Examples", object()),
+        INPUTS,
+        store,
+        ["short", "long"],
         collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
     )
     assert set(arrays) == {"sample_id", "x"}
+    assert arrays["x"].shape == (2, 2, 4)
+    assert arrays["x"][:, :, 3].tolist() == [[1.0, 0.0], [1.0, 1.0]]
+    labelled = collate_arrays(
+        DATASET,
+        store,
+        ["short", "long"],
+        collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+    )
+    assert labelled["y"].shape == (2, 2, 3)
+    assert labelled["mask"].shape == (2, 2)
+    dataset = resolve_component(DATASET)
+    with pytest.raises(LoadingError, match="field 'y'.*finite"):
+        _ = dataset(store, entity_examples(store), ["bad-target"])[0]
+    with pytest.raises(LoadingError, match="field 'mask'.*allowed values"):
+        _ = dataset(store, entity_examples(store), ["bad-mask"])[0]
 
 
 def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
@@ -766,7 +769,10 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
     assert run.data.params["evaluation.target_names"] == ('["StartHesitation", "Turn", "Walking"]')
     from reference_projects.kaggle.parkinsons_fog.components import (
         COLLATOR,
+        DATASET,
         INPUT_COLLATOR,
+        INPUTS,
+        MODEL,
         OBJECTIVE,
     )
 
@@ -777,19 +783,18 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         optimizer_parameters={"lr": 0.001},
         batch_size=16,
         num_workers=2,
-        dataset="reference_projects.kaggle.parkinsons_fog.components:fog_windows",
+        dataset=DATASET,
         collator=COLLATOR,
         objective=OBJECTIVE,
+        model=MODEL,
     )
-    fog_dataset = "reference_projects.kaggle.parkinsons_fog.components:fog_windows"
-    fog_inputs_dataset = "reference_projects.kaggle.parkinsons_fog.components:fog_inputs"
     assert_downstream_evidence(
         result,
         tmp_path / "parkinsons-downstream",
         datasets={
-            "export": fog_inputs_dataset,
-            "evaluation": fog_dataset,
-            "inference": fog_inputs_dataset,
+            "export": INPUTS,
+            "evaluation": DATASET,
+            "inference": INPUTS,
         },
         collators={
             "export": INPUT_COLLATOR,
@@ -798,3 +803,54 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         },
         dynamic_axes={"x": [1], "prediction": [1], "probability": [1]},
     )
+
+    from reference_projects.kaggle.parkinsons_fog.components import (
+        FogOutput,
+        validate_fog_prediction,
+    )
+
+    from dsio.config.components import resolve_component
+    from dsio.data.store import SignalStore
+    from dsio.experimental.data import PadCollator, collate_arrays
+    from dsio.inference import build_predictor, predict
+    from dsio.train.artifacts import ArtifactRef
+
+    checkpoint_path = MlflowClient().download_artifacts(
+        result["train_run_id"],
+        "outputs/checkpoint.json",
+        str(tmp_path / "parkinsons-checkpoint"),
+    )
+    checkpoint = ArtifactRef.model_validate(json.loads(Path(checkpoint_path).read_text()))
+    sample_id = result["assignments"]["validate"][0]
+    store = SignalStore(tmp_path / "work" / result["data_run_id"] / "parkinsons-fog")
+    arrays = collate_arrays(
+        INPUTS,
+        store,
+        [sample_id],
+        collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
+    )
+    local = build_predictor(
+        checkpoint,
+        model=resolve_component(MODEL, expected=torch.nn.Module),
+        preprocessor=torch.nn.Identity(),
+        normalizer=FogOutput(),
+        validator=validate_fog_prediction,
+        input_example={
+            "sample_id": arrays["sample_id"].tolist(),
+            "x": torch.from_numpy(arrays["x"]),
+        },
+    )(
+        {
+            "sample_id": arrays["sample_id"].tolist(),
+            "x": torch.from_numpy(arrays["x"]),
+        }
+    )
+    loaded = predict(
+        result["model_uri"],
+        {"sample_id": arrays["sample_id"], "x": arrays["x"]},
+    )
+    for name, value in local.items():
+        local_array = (
+            value.detach().numpy() if isinstance(value, torch.Tensor) else np.asarray(value)
+        )
+        np.testing.assert_array_equal(local_array, loaded[name])
