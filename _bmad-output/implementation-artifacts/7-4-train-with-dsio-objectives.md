@@ -1,6 +1,6 @@
 # Story 7.4: Train with DSio objectives
 
-Status: review
+Status: done
 
 ## Story
 
