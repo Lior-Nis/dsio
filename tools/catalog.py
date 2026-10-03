@@ -131,7 +131,6 @@ LEGACY = frozenset(
         "dsio.experimental.model.chain:export_encoder",
         "dsio.experimental.model.components:Conv1dEncoder",
         "dsio.experimental.model.components:CrossEntropy",
-        "dsio.experimental.model.components:EmbeddingEncoder",
         "dsio.experimental.model.components:FixedStandardize",
         "dsio.experimental.model.components:IdentityAugmentation",
         "dsio.experimental.model.components:Jitter",

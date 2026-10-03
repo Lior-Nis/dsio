@@ -12,8 +12,8 @@ which the ``conv1d`` backbone happily convolved into meaningless numbers, the wo
 two failures because it trains and converges. ``payload_dtype`` is the opt-in that stops it.
 
 **There was no backbone that consumes ids.** ``EmbeddingEncoder`` is that backbone, and it
-is an ordinary registered one: the split, the leakage proof, the loader, the head, the loss
-and the module below are all the existing signal machinery, unchanged.
+is an ordinary configured one: the split, leakage proof, loader, composition, objective,
+and module below are shared machinery.
 
 A document is an entity, a training sequence is a window, and the leakage boundary is the
 document — which is why the split here is by group and why ``assert_no_row_overlap``, the
@@ -40,12 +40,8 @@ from dsio.data.splits.resolve import assert_no_row_overlap, resolve  # noqa: E40
 from dsio.data.store import SignalStore  # noqa: E402
 from dsio.data.views import WindowSpec, build_index  # noqa: E402
 from dsio.experimental.data import WindowDataset  # noqa: E402
-from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.experimental.model.components import (  # noqa: E402
-    CrossEntropy,
-    EmbeddingEncoder,
-    linear_head,
-)
+from dsio.experimental.model import Chain, SupervisedObjective  # noqa: E402
+from dsio.experimental.model.tokens import EmbeddingEncoder  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
 
 VOCAB, LENGTH, STRIDE, DIM = 64, 32, 16, 16
@@ -56,15 +52,16 @@ PARTS = {"train": ["doc0", "doc1", "doc2"], "val": ["doc3"], "test": ["doc4", "d
 def corpus(tmp_path: Path) -> SignalStore:
     """Six documents of int32 token ids, of different lengths.
 
-    ``channels=1`` because a document is one stream of ids, and the lengths differ because
-    real documents do — the index, not the store, is what makes them uniform sequences.
+    Channel zero is the token stream and channel one is structural validity. Lengths differ
+    because real documents do; the index, not the store, makes uniform sequences.
     """
     path = tmp_path / "corpus"
     rng = np.random.default_rng(0)
-    with SignalStore.builder(path, channels=1, dtype="int32") as builder:
+    with SignalStore.builder(path, channels=2, dtype="int32") as builder:
         for doc, length in enumerate((300, 260, 240, 220, 200, 180)):
-            ids = rng.integers(0, VOCAB, size=(length, 1), dtype=np.int32)
-            builder.add(f"doc{doc}", ids, group=f"doc{doc}")
+            values = np.ones((length, 2), dtype=np.int32)
+            values[:, 0] = rng.integers(0, VOCAB, size=length, dtype=np.int32)
+            builder.add(f"doc{doc}", values, group=f"doc{doc}")
     return SignalStore(path)
 
 
@@ -103,7 +100,7 @@ def test_the_corpus_becomes_overlapping_context_windows(corpus: SignalStore, ind
     assert index.spec.stride < index.spec.length, "the windows must actually overlap"
     first = corpus.read(int(index.starts[0]), LENGTH)
     second = corpus.read(int(index.starts[1]), LENGTH)
-    assert np.array_equal(first[STRIDE:], second[:-STRIDE]), "half the tokens are shared"
+    assert np.array_equal(first[STRIDE:], second[:-STRIDE]), "half the rows are shared"
 
 
 def test_a_document_split_leaks_no_token(corpus: SignalStore, index, split: SplitFile) -> None:
@@ -128,22 +125,44 @@ def test_the_float_default_is_what_blocked_an_embedding(corpus: SignalStore, ind
         nn.Embedding(VOCAB, 8)(batch["x"])
 
 
+def _model() -> Chain:
+    return Chain(
+        preprocessor={
+            "reference": "dsio.experimental.model.layout:ChannelFirstToTimeMajor",
+            "parameters": {"channels": 2},
+        },
+        backbone={
+            "reference": "dsio.experimental.model.tokens:EmbeddingEncoder",
+            "parameters": {"vocab_size": VOCAB, "embed_dim": 8},
+        },
+        head={
+            "reference": "torch.nn:Linear",
+            "parameters": {"in_features": 8, "out_features": 2},
+        },
+    )
+
+
+def _module() -> DsioModule:
+    return DsioModule(
+        model=_model(),
+        objective=SupervisedObjective(loss={"reference": "torch.nn:CrossEntropyLoss"}),
+    )
+
+
 def test_the_gradient_reaches_the_embedding_table(corpus: SignalStore, index) -> None:
     """embedding -> head -> loss, through the shared step every other paradigm uses."""
     torch.manual_seed(0)
     dataset = WindowDataset(corpus, index, labels=_labels(index), payload_dtype=torch.long)
     batch = next(iter(build_loader(dataset, batch_size=8)))
-    backbone = EmbeddingEncoder(vocab_size=VOCAB, embed_dim=8, out_dim=DIM)
-    module = DsioModule(
-        model=ComponentChain(backbone=backbone, head=linear_head(DIM, 2)),
-        objective=LossObjective(CrossEntropy()),
-    )
+    module = _module()
 
     loss = module._common_step(batch, "train")
     assert torch.isfinite(loss)
     loss.backward()
-    assert backbone.embedding.weight.grad is not None
-    assert backbone.embedding.weight.grad.abs().sum() > 0
+    assert isinstance(module.model, Chain)
+    assert isinstance(module.model.backbone, EmbeddingEncoder)
+    assert module.model.backbone.embedding.weight.grad is not None
+    assert module.model.backbone.embedding.weight.grad.abs().sum() > 0
 
 
 def test_a_token_corpus_trains_through_lightning(
@@ -163,12 +182,10 @@ def test_a_token_corpus_trains_through_lightning(
         WindowDataset(corpus, index, fold.val, labels=labels, payload_dtype=torch.long),
         batch_size=8,
     )
-    backbone = EmbeddingEncoder(vocab_size=VOCAB, embed_dim=8, out_dim=DIM)
-    module = DsioModule(
-        model=ComponentChain(backbone=backbone, head=linear_head(DIM, 2)),
-        objective=LossObjective(CrossEntropy()),
-    )
-    before = backbone.embedding.weight.detach().clone()
+    module = _module()
+    assert isinstance(module.model, Chain)
+    assert isinstance(module.model.backbone, EmbeddingEncoder)
+    before = module.model.backbone.embedding.weight.detach().clone()
 
     lightning.Trainer(
         fast_dev_run=True,
@@ -178,42 +195,4 @@ def test_a_token_corpus_trains_through_lightning(
         enable_progress_bar=False,
     ).fit(module, train_loader, val_loader)
 
-    assert not torch.equal(before, backbone.embedding.weight.detach())
-
-
-# --- the vocabulary check costs one sync per run, not one per step -----------------------
-
-
-def test_a_vocabulary_mismatch_is_named_rather_than_left_to_torch() -> None:
-    """`nn.Embedding` says "index out of range in self", naming neither knob."""
-    encoder = EmbeddingEncoder(vocab_size=10)
-    with pytest.raises(ValueError, match="vocab_size is 10"):
-        encoder(torch.tensor([[[0.0, 1.0, 42.0]]]))
-
-
-def test_the_range_check_runs_once_rather_than_once_per_step(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`int(ids.max())` blocks the CPU until the GPU drains — once is fine, per-step is not.
-
-    A GPU runs asynchronously; pulling a Python int out of a tensor forces a device
-    synchronisation. In `forward` that is one stall per training step, and
-    `assert_no_row_overlap`'s docstring already states this codebase's position: a check
-    this expensive belongs outside the training path. A vocabulary mismatch is a config
-    error — wrong on the first batch or never wrong — so the first batch is where it is
-    worth paying for.
-    """
-    calls: list[int] = []
-    real_max = torch.Tensor.max
-
-    def counting_max(self: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
-        calls.append(1)
-        return real_max(self, *args, **kwargs)
-
-    monkeypatch.setattr(torch.Tensor, "max", counting_max)
-
-    encoder = EmbeddingEncoder(vocab_size=10)
-    for _ in range(5):
-        encoder(torch.zeros(2, 1, 4))
-
-    assert len(calls) == 1, f"the range check synced the device {len(calls)} times in 5 steps"
+    assert not torch.equal(before, module.model.backbone.embedding.weight.detach())

@@ -8,11 +8,10 @@ Window Dataset class:
   reason: Window dataset with weights and groups (#2), Story 9.1.
 Local nn.Module models:
   consumers:
-    - reference_projects/kaggle/essay_scoring
     - reference_projects/kaggle/rogii
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: Sequence backbones, heads and adapters (#10, #12, #15, #16), Stories 8.4-8.5, 9.4.
+  reason: Pooled temporal, residual, and multimodal models (#10, #15, #16), Stories 8.5, 9.4.
 Verified encoder handoff:
   consumers:
     - reference_projects/kaggle/digit_recognizer
@@ -22,12 +21,10 @@ Verified encoder handoff:
     pretrained weights (v2).
 Local objectives:
   consumers:
-    - reference_projects/kaggle/essay_scoring
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
   reason: >-
-    Essay and CMI move to SupervisedObjective (#18) with their sequence and weighting
-    stories (8.3-8.5, 9.2-9.4).
+    CMI moves to SupervisedObjective (#18) with its weighting stories (9.2-9.4).
 Prediction normalizers and validators:
   consumers:
     - reference_projects/kaggle/essay_scoring

@@ -14,7 +14,6 @@ from dsio.experimental.model.chain import (
 from dsio.experimental.model.components import (
     Conv1dEncoder,
     CrossEntropy,
-    EmbeddingEncoder,
     FixedStandardize,
     IdentityAugmentation,
     Jitter,
@@ -45,6 +44,7 @@ from dsio.experimental.model.masking import (
 )
 from dsio.experimental.model.objectives import RootMeanSquaredError, SupervisedObjective
 from dsio.experimental.model.standardization import InstanceStandardize, Standardize
+from dsio.experimental.model.tokens import EmbeddingEncoder
 
 __all__ = [
     "MLP",

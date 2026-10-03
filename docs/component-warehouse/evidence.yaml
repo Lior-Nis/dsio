@@ -38,6 +38,8 @@ dsio.experimental.data.items:StoredItems:
   - consumer: reference_projects/kaggle/essay_scoring
     test: tests/kaggle_portfolio/test_essay_scoring.py
     kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
   - consumer: reference_projects/kaggle/rogii
     test: tests/kaggle_portfolio/test_rogii.py
     kind: real
@@ -98,9 +100,6 @@ dsio.experimental.model.components:Conv1dEncoder:
   legacy: true
   uses: []
 dsio.experimental.model.components:CrossEntropy:
-  legacy: true
-  uses: []
-dsio.experimental.model.components:EmbeddingEncoder:
   legacy: true
   uses: []
 dsio.experimental.model.components:FixedStandardize:
@@ -313,6 +312,11 @@ dsio.experimental.model.compositions:Chain:
   - consumer: reference_projects/kaggle/parkinsons_fog
     test: tests/kaggle_portfolio/test_parkinsons_fog.py
     kind: real
+  - consumer: reference_projects/kaggle/essay_scoring
+    test: tests/kaggle_portfolio/test_essay_scoring.py
+    kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
 dsio.experimental.model.compositions:Stages:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -382,9 +386,22 @@ dsio.experimental.model.objectives:SupervisedObjective:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9
+  - consumer: reference_projects/kaggle/essay_scoring
+    test: tests/kaggle_portfolio/test_essay_scoring.py
+    kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
+dsio.experimental.model.tokens:EmbeddingEncoder:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/essay_scoring
+    test: tests/kaggle_portfolio/test_essay_scoring.py
+    kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37
 dsio.experimental.model.objectives:RootMeanSquaredError:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:

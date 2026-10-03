@@ -9,7 +9,6 @@ from typing import Any
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
 
@@ -53,33 +52,26 @@ COLLATOR: ComponentConfig = {
         "emit_mask": False,
     },
 }
-
-
-class EssayRegressor(nn.Module):
-    def __init__(self, vocab_size: int = VOCAB_SIZE, embed_dim: int = 32) -> None:
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        self.output = nn.Linear(embed_dim, 6)
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or x.shape[2] != 2:
-            raise ValueError(f"expected [batch, tokens, 2], got {tuple(x.shape)}")
-        tokens = x[:, :, 0].long()
-        mask = x[:, :, 1].bool()
-        if not bool(mask.any(dim=1).all()):
-            raise ValueError("every essay must contain at least one unpadded token")
-        embedded = self.embedding(tokens)
-        pooled = (embedded * mask.unsqueeze(-1)).sum(dim=1) / mask.sum(dim=1, keepdim=True)
-        return self.output(pooled)
-
-
-class EssayObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        logits = model(batch["x"])
-        return {"loss": F.cross_entropy(logits, batch["y"].long())}
+MODEL: ComponentConfig = {
+    "reference": "dsio.experimental.model.compositions:Chain",
+    "parameters": {
+        "backbone": {
+            "reference": "dsio.experimental.model.tokens:EmbeddingEncoder",
+            "parameters": {"vocab_size": VOCAB_SIZE, "embed_dim": 32},
+        },
+        "head": {
+            "reference": "torch.nn:Linear",
+            "parameters": {"in_features": 32, "out_features": 6},
+        },
+    },
+}
+OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.objectives:SupervisedObjective",
+    "parameters": {
+        "loss": {"reference": "torch.nn:CrossEntropyLoss"},
+        "target_dtype": "int64",
+    },
+}
 
 
 class OrdinalPrediction(nn.Module):

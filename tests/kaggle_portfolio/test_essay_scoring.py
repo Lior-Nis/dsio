@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import numpy as np
@@ -130,7 +131,13 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
     assert run.data.metrics["quadratic_weighted_kappa"] == pytest.approx(
         result["metrics"]["quadratic_weighted_kappa"]
     )
-    from reference_projects.kaggle.essay_scoring.components import COLLATOR, DATASET, INPUTS
+    from reference_projects.kaggle.essay_scoring.components import (
+        COLLATOR,
+        DATASET,
+        INPUTS,
+        MODEL,
+        OBJECTIVE,
+    )
 
     assert_execution_evidence(
         result["train_run_id"],
@@ -141,6 +148,8 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
         num_workers=2,
         dataset=DATASET,
         collator=COLLATOR,
+        model=MODEL,
+        objective=OBJECTIVE,
     )
     assert_downstream_evidence(
         result,
@@ -149,3 +158,48 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
         collator=COLLATOR,
         dynamic_axes={"x": [1]},
     )
+
+    from reference_projects.kaggle.essay_scoring.components import (
+        OrdinalPrediction,
+        validate_ordinal_prediction,
+    )
+
+    from dsio.config.components import resolve_component
+    from dsio.data.store import SignalStore
+    from dsio.experimental.data import PadCollator, collate_arrays
+    from dsio.inference import build_predictor, predict
+    from dsio.train.artifacts import ArtifactRef
+
+    checkpoint_path = MlflowClient().download_artifacts(
+        result["train_run_id"],
+        "outputs/checkpoint.json",
+        str(tmp_path / "essay-checkpoint"),
+    )
+    checkpoint = ArtifactRef.model_validate(json.loads(Path(checkpoint_path).read_text()))
+    sample_id = result["assignments"]["validate"][0]
+    store = SignalStore(tmp_path / "work" / result["data_run_id"] / "essay-scoring")
+    arrays = collate_arrays(
+        INPUTS,
+        store,
+        [sample_id],
+        collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+    )
+    inputs = {"sample_id": arrays["sample_id"].tolist(), "x": torch.from_numpy(arrays["x"])}
+    local = build_predictor(
+        checkpoint,
+        model=resolve_component(MODEL, expected=torch.nn.Module),
+        preprocessor=torch.nn.Identity(),
+        normalizer=OrdinalPrediction(),
+        validator=validate_ordinal_prediction,
+        input_example=inputs,
+    )(inputs)
+    loaded = predict(
+        result["model_uri"],
+        {"sample_id": arrays["sample_id"], "x": arrays["x"]},
+    )
+    assert set(local) == set(loaded)
+    for name, value in local.items():
+        local_array = (
+            value.detach().numpy() if isinstance(value, torch.Tensor) else np.asarray(value)
+        )
+        np.testing.assert_array_equal(local_array, loaded[name])
