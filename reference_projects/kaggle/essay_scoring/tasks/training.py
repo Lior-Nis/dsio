@@ -15,7 +15,7 @@ from prefect import task
 from dsio.config.components import ComponentConfig, resolve_component
 from dsio.data.loading import DsioDataModule
 from dsio.data.store import SignalStore
-from dsio.experimental.data import StoredItems
+from dsio.experimental.data import PadCollator, StoredItems
 from dsio.model.module import DsioModule
 from dsio.tracking import attempt, load_split_evidence, record_provenance
 from dsio.train.artifacts import save_artifact
@@ -26,10 +26,10 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.essay_scoring.components import (
+    COLLATOR,
     DATASET,
     EssayObjective,
     EssayRegressor,
-    pad_essays,
 )
 from reference_projects.kaggle.essay_scoring.tasks.data import labelled_examples
 
@@ -69,6 +69,7 @@ def train(
             "parameters": MODEL_PARAMETERS,
         }
         seed_everything(seed, workers=True, verbose=False)
+        collator = resolve_component(COLLATOR, expected=PadCollator)
         data_module = DsioDataModule(
             store,
             examples,
@@ -81,7 +82,7 @@ def train(
             seed=seed,
             shuffle=SHUFFLE,
             drop_last=DROP_LAST,
-            collate_fn=pad_essays,
+            collate_fn=collator,
         )
         module = DsioModule(
             model=resolve_component(model_config, expected=EssayRegressor),
@@ -123,7 +124,7 @@ def train(
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
                 "dataset_factory": DATASET,
-                "collator": "reference_projects.kaggle.essay_scoring.components:pad_essays",
+                "collator": COLLATOR,
                 "model": model_config,
                 "objective": ("reference_projects.kaggle.essay_scoring.components:EssayObjective"),
                 "optimizer": "torch.optim:Adam",

@@ -19,7 +19,7 @@ def assert_execution_evidence(
     fold: int = 0,
     batch_size: int = 4,
     num_workers: int = 0,
-    dataset: Mapping[str, Any] | None = None,
+    dataset: object | None = None,
     collator: Mapping[str, Any] | None = None,
 ) -> None:
     client = MlflowClient()
@@ -60,8 +60,10 @@ def assert_downstream_evidence(
     result: dict[str, object],
     destination: Path,
     *,
-    datasets: Mapping[str, Mapping[str, Any]] | None = None,
+    datasets: Mapping[str, object] | None = None,
     collator: Mapping[str, Any] | None = None,
+    collators: Mapping[str, Mapping[str, Any]] | None = None,
+    dynamic_axes: Mapping[str, list[int]] | None = None,
 ) -> None:
     client = MlflowClient()
     identities = result["identities"]
@@ -74,8 +76,10 @@ def assert_downstream_evidence(
         assert configuration["export_identity"] == identities["export"]
 
     if datasets is not None:
-        assert collator is not None
+        assert (collator is None) != (collators is None)
         assert set(datasets) == {"export", "evaluation", "inference"}
+        if collators is not None:
+            assert set(collators) == set(datasets)
         for stage, dataset in datasets.items():
             run_id = result[f"{stage}_run_id"]
             assert isinstance(run_id, str)
@@ -84,9 +88,12 @@ def assert_downstream_evidence(
                 "provenance.json",
                 str(destination / f"{stage}-components"),
             )
-            components = json.loads(Path(artifact).read_text())["components"]
+            provenance = json.loads(Path(artifact).read_text())
+            components = provenance["components"]
             assert components["dataset_factory"] == dataset
-            assert components["collator"] == collator
+            assert components["collator"] == (collator if collators is None else collators[stage])
+            if stage == "export" and dynamic_axes is not None:
+                assert provenance["configuration"]["dynamic_axes"] == dynamic_axes
 
     inference_run_id = result["inference_run_id"]
     assert isinstance(inference_run_id, str)

@@ -9,9 +9,9 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
+from dsio.config.components import ComponentConfig
 from dsio.data.store import SignalStore
 
 FEATURE_COUNT = 3
@@ -26,32 +26,34 @@ def normalize_signal(values: np.ndarray) -> np.ndarray:
     return (signal - mean) / np.maximum(scale, 1e-6)
 
 
-def pad_windows(items: list[Mapping[str, Any]]) -> Mapping[str, Any]:
-    if not items:
-        raise ValueError("cannot collate an empty window batch")
-    x = [torch.as_tensor(item["x"], dtype=torch.float32) for item in items]
-    y = [torch.as_tensor(item["y"], dtype=torch.float32) for item in items]
-    mask = [torch.as_tensor(item["mask"], dtype=torch.bool) for item in items]
-    if any(value.ndim != 2 or value.shape[1] != FEATURE_COUNT for value in x):
-        raise ValueError(f"window x values must have shape [points, {FEATURE_COUNT}]")
-    if any(value.ndim != 2 or value.shape[1] != TARGET_COUNT for value in y):
-        raise ValueError(f"window y values must have shape [points, {TARGET_COUNT}]")
-    if any(
-        len(left) != len(right) or len(left) != len(valid)
-        for left, right, valid in zip(x, y, mask, strict=True)
-    ):
-        raise ValueError("window x, y, and mask lengths must match")
-    return {
-        "sample_id": [str(item["sample_id"]) for item in items],
-        "x": pad_sequence(x, batch_first=True),
-        "y": pad_sequence(y, batch_first=True),
-        "mask": pad_sequence(mask, batch_first=True),
-    }
+COLLATOR: ComponentConfig = {
+    "reference": "dsio.experimental.data.padding:PadCollator",
+    "parameters": {
+        "padded_fields": {"x": 0.0, "y": 0.0, "mask": False},
+        "fixed_fields": [],
+        "emit_mask": False,
+    },
+}
+INPUT_COLLATOR: ComponentConfig = {
+    "reference": "dsio.experimental.data.padding:PadCollator",
+    "parameters": {
+        "padded_fields": {"x": 0.0},
+        "fixed_fields": [],
+        "emit_mask": False,
+    },
+}
 
 
 class FogWindows(Dataset[Mapping[str, Any]]):
-    def __init__(self, store: SignalStore, sample_ids: Sequence[str]) -> None:
+    def __init__(
+        self,
+        store: SignalStore,
+        sample_ids: Sequence[str],
+        *,
+        include_targets: bool = True,
+    ) -> None:
         self.store, self.sample_ids = store, tuple(sample_ids)
+        self.include_targets = include_targets
 
     def __len__(self) -> int:
         return len(self.sample_ids)
@@ -59,12 +61,30 @@ class FogWindows(Dataset[Mapping[str, Any]]):
     def __getitem__(self, position: int) -> Mapping[str, Any]:
         sample = self.store.read_sample(self.sample_ids[position])
         data = np.asarray(sample["data"], dtype=np.float32)
-        return {
+        if data.ndim != 2 or data.shape[1] != CHANNEL_COUNT:
+            raise ValueError(
+                f"FoG sample {sample['sample_id']!r} must have shape "
+                f"[points, {CHANNEL_COUNT}], got {data.shape}"
+            )
+        item: dict[str, Any] = {
             "sample_id": sample["sample_id"],
             "x": torch.from_numpy(normalize_signal(data[:, :FEATURE_COUNT])),
-            "y": torch.from_numpy(np.array(data[:, FEATURE_COUNT:6], copy=True)),
-            "mask": torch.from_numpy(np.array(data[:, -1], dtype=bool, copy=True)),
         }
+        if not self.include_targets:
+            return item
+        labels = data[:, FEATURE_COUNT:6]
+        valid = data[:, -1]
+        if not bool(np.isfinite(labels).all()) or not bool(((labels == 0) | (labels == 1)).all()):
+            raise ValueError(
+                f"FoG sample {sample['sample_id']!r} labels must be finite binary values"
+            )
+        if not bool(np.isfinite(valid).all()) or not bool(((valid == 0) | (valid == 1)).all()):
+            raise ValueError(
+                f"FoG sample {sample['sample_id']!r} mask must contain only zero or one"
+            )
+        item["y"] = torch.from_numpy(np.array(labels, copy=True))
+        item["mask"] = torch.from_numpy(np.array(valid, dtype=bool, copy=True))
+        return item
 
 
 def fog_windows(
@@ -72,6 +92,13 @@ def fog_windows(
 ) -> Dataset[Mapping[str, Any]]:
     del examples
     return FogWindows(store, sample_ids)
+
+
+def fog_inputs(
+    store: SignalStore, examples: object, sample_ids: Sequence[str]
+) -> Dataset[Mapping[str, Any]]:
+    del examples
+    return FogWindows(store, sample_ids, include_targets=False)
 
 
 class FogDetector(nn.Module):

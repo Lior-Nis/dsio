@@ -631,12 +631,21 @@ def test_parkinsons_boundary_streams_windows_and_excludes_test_subjects(
         load_competition_data(parkinsons_fog_csvs)
 
 
-def test_parkinsons_evaluation_rejects_malformed_dense_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import reference_projects.kaggle.parkinsons_fog.tasks.downstream as downstream
-    from reference_projects.kaggle.parkinsons_fog.components import validate_fog_prediction
-    from reference_projects.kaggle.parkinsons_fog.data import WINDOW_SIZE
+def test_parkinsons_evaluation_rejects_malformed_dense_evidence() -> None:
+    from typing import cast
+
+    from reference_projects.kaggle.parkinsons_fog.components import (
+        COLLATOR,
+        INPUT_COLLATOR,
+        fog_inputs,
+        fog_windows,
+        validate_fog_prediction,
+    )
+
+    from dsio.config.components import resolve_component
+    from dsio.data.examples import Examples
+    from dsio.data.store import SignalStore
+    from dsio.experimental.data import PadCollator, collate_arrays
 
     probability = torch.tensor([[[0.7, 0.2, 0.8]]])
     with pytest.raises(ValueError, match="thresholded"):
@@ -647,27 +656,39 @@ def test_parkinsons_evaluation_rejects_malformed_dense_evidence(
     class FakeStore:
         sample = np.zeros((1, 7), dtype=np.float32)
 
-        def __init__(self, path: str) -> None:
-            del path
-
         def read_sample(self, sample_id: str) -> dict[str, object]:
-            del sample_id
-            return {"data": self.sample}
+            return {"sample_id": sample_id, "data": self.sample}
 
-    monkeypatch.setattr(downstream, "SignalStore", FakeStore)
     FakeStore.sample = np.zeros((1, 7), dtype=np.float32)
     FakeStore.sample[0, 3] = np.nan
     with pytest.raises(ValueError, match="labels.*finite binary"):
-        downstream._targets_and_mask("unused", ["bad-label"])
+        collate_arrays(
+            fog_windows,
+            cast("SignalStore", FakeStore()),
+            ["bad-label"],
+            examples=cast("Examples", object()),
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
 
     FakeStore.sample = np.zeros((1, 7), dtype=np.float32)
     FakeStore.sample[0, -1] = np.nan
     with pytest.raises(ValueError, match="mask.*zero or one"):
-        downstream._targets_and_mask("unused", ["bad-mask"])
+        collate_arrays(
+            fog_windows,
+            cast("SignalStore", FakeStore()),
+            ["bad-mask"],
+            examples=cast("Examples", object()),
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
 
-    FakeStore.sample = np.zeros((WINDOW_SIZE + 1, 7), dtype=np.float32)
-    with pytest.raises(ValueError, match="maximum"):
-        downstream._targets_and_mask("unused", ["too-long"])
+    arrays = collate_arrays(
+        fog_inputs,
+        cast("SignalStore", FakeStore()),
+        ["input-only"],
+        examples=cast("Examples", object()),
+        collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
+    )
+    assert set(arrays) == {"sample_id", "x"}
 
 
 def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
@@ -743,6 +764,8 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         assert run.data.metrics[name] == pytest.approx(value)
     assert run.data.params["evaluation.masked"] == "true"
     assert run.data.params["evaluation.target_names"] == ('["StartHesitation", "Turn", "Walking"]')
+    from reference_projects.kaggle.parkinsons_fog.components import COLLATOR, INPUT_COLLATOR
+
     assert_execution_evidence(
         result["train_run_id"],
         tmp_path / "parkinsons-provenance",
@@ -750,5 +773,23 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         optimizer_parameters={"lr": 0.001},
         batch_size=16,
         num_workers=2,
+        dataset="reference_projects.kaggle.parkinsons_fog.components:fog_windows",
+        collator=COLLATOR,
     )
-    assert_downstream_evidence(result, tmp_path / "parkinsons-downstream")
+    fog_dataset = "reference_projects.kaggle.parkinsons_fog.components:fog_windows"
+    fog_inputs_dataset = "reference_projects.kaggle.parkinsons_fog.components:fog_inputs"
+    assert_downstream_evidence(
+        result,
+        tmp_path / "parkinsons-downstream",
+        datasets={
+            "export": fog_inputs_dataset,
+            "evaluation": fog_dataset,
+            "inference": fog_inputs_dataset,
+        },
+        collators={
+            "export": INPUT_COLLATOR,
+            "evaluation": COLLATOR,
+            "inference": INPUT_COLLATOR,
+        },
+        dynamic_axes={"x": [1], "prediction": [1], "probability": [1]},
+    )

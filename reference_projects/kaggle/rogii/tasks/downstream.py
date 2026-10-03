@@ -15,46 +15,17 @@ from prefect import task
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
+from dsio.experimental.data import PadCollator, collate_arrays
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.rogii.components import (
-    FEATURES,
+    COLLATOR,
+    DATASET,
     TARGET_SCALE,
     TvtOutput,
     validate_tvt_prediction,
 )
-
-
-def _arrays(store_path: str, sample_ids: list[str], width: int) -> dict[str, np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    values = np.zeros((len(sample_ids), width, FEATURES), dtype=np.float32)
-    for index, sample_id in enumerate(sample_ids):
-        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
-        _require_width(sample_id, sample, width)
-        values[index, : len(sample)] = sample[:, :FEATURES]
-    return {"sample_id": np.asarray(sample_ids, dtype=np.str_), "x": values}
-
-
-def _targets_and_mask(
-    store_path: str, sample_ids: list[str], width: int
-) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    targets = np.zeros((len(sample_ids), width), dtype=np.float32)
-    mask = np.zeros((len(sample_ids), width), dtype=bool)
-    for index, sample_id in enumerate(sample_ids):
-        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
-        _require_width(sample_id, sample, width)
-        targets[index, : len(sample)] = sample[:, FEATURES] * TARGET_SCALE
-        mask[index, : len(sample)] = True
-    return targets, mask
-
-
-def _require_width(sample_id: str, sample: np.ndarray[Any, Any], width: int) -> None:
-    if len(sample) > width:
-        raise ValueError(
-            f"ROGII sample {sample_id!r} has {len(sample)} points; evaluation width is {width}"
-        )
 
 
 @task(persist_result=False)
@@ -74,7 +45,13 @@ def export(
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         sample_id = next(iter(split["assignments"]["validate"]))
-        inputs = _arrays(data["store_path"], [sample_id], data["max_tail_points"])
+        arrays = collate_arrays(
+            DATASET,
+            SignalStore(data["store_path"]),
+            [sample_id],
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
         identity = record_provenance(
             run.info.run_id,
             {
@@ -82,6 +59,7 @@ def export(
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
                 "export_form": "pyfunc",
+                "dynamic_axes": {"x": [1], "prediction": [1]},
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
@@ -89,6 +67,8 @@ def export(
                 "preprocessor": components["preprocessor"],
                 "normalizer": "reference_projects.kaggle.rogii.components:TvtOutput",
                 "validator": "reference_projects.kaggle.rogii.components:validate_tvt_prediction",
+                "dataset_factory": DATASET,
+                "collator": COLLATOR,
             },
         )
         example = {
@@ -109,6 +89,7 @@ def export(
             input_example=example,
             forms=("pyfunc",),
             name="rogii",
+            dynamic_axes={"x": [1], "prediction": [1]},
         )["pyfunc"]
         return {
             "export_run_id": run.info.run_id,
@@ -124,9 +105,16 @@ def evaluate_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         sample_ids = list(split["assignments"]["validate"])
-        inputs = _arrays(data["store_path"], sample_ids, data["max_tail_points"])
-        targets, mask = _targets_and_mask(data["store_path"], sample_ids, data["max_tail_points"])
         store = SignalStore(data["store_path"])
+        arrays = collate_arrays(
+            DATASET,
+            store,
+            sample_ids,
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        targets = arrays["y"] * TARGET_SCALE
+        mask = arrays["mask"]
         baseline_residuals = []
         for index, sample_id in enumerate(sample_ids):
             sample = store.read_sample(sample_id)
@@ -144,7 +132,11 @@ def evaluate_model(
                 "baseline": "last-known-TVT",
                 "sample_ids": sample_ids,
             },
-            components={"evaluation": "dsio.eval.execution:evaluate"},
+            components={
+                "evaluation": "dsio.eval.execution:evaluate",
+                "dataset_factory": DATASET,
+                "collator": COLLATOR,
+            },
         )
         metrics = evaluate(
             run_id=run.info.run_id,
@@ -171,9 +163,15 @@ def infer_and_submit(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         sample_ids = list(data["test_sample_ids"])
+        arrays = collate_arrays(
+            DATASET,
+            SignalStore(data["store_path"]),
+            sample_ids,
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
         outputs = predict(
             exported["model_uri"],
-            _arrays(data["store_path"], sample_ids, data["max_tail_points"]),
+            {"sample_id": arrays["sample_id"], "x": arrays["x"]},
         )
         matrix = np.asarray(outputs["prediction"], dtype=np.float64)
         values = [
@@ -190,7 +188,11 @@ def infer_and_submit(
                 "sample_ids": sample_ids,
                 "submission_ids": data["submission_ids"],
             },
-            components={"inference": "dsio.inference.loading:predict"},
+            components={
+                "inference": "dsio.inference.loading:predict",
+                "dataset_factory": DATASET,
+                "collator": COLLATOR,
+            },
         )
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer, lineterminator="\n")

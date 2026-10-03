@@ -16,23 +16,16 @@ from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.eval.metrics import quadratic_weighted_kappa
+from dsio.experimental.data import PadCollator, collate_arrays
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.essay_scoring.components import (
-    MAX_TOKENS,
+    COLLATOR,
+    INPUTS,
     OrdinalPrediction,
     validate_ordinal_prediction,
 )
-
-
-def _arrays(store_path: str, sample_ids: list[str]) -> dict[str, np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    values = np.zeros((len(sample_ids), MAX_TOKENS, 2), dtype=np.int64)
-    for index, sample_id in enumerate(sample_ids):
-        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.int64)
-        values[index, : len(sample)] = sample
-    return {"sample_id": np.asarray(sample_ids, dtype=np.str_), "x": values}
 
 
 @task(persist_result=False)
@@ -51,7 +44,14 @@ def export(
         )
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
-        inputs = _arrays(data["store_path"], list(split["assignments"]["validate"]))
+        store = SignalStore(data["store_path"])
+        arrays = collate_arrays(
+            INPUTS,
+            store,
+            list(split["assignments"]["validate"]),
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
         identity = record_provenance(
             run.info.run_id,
             {
@@ -59,6 +59,7 @@ def export(
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
                 "export_form": "pyfunc",
+                "dynamic_axes": {"x": [1]},
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
@@ -70,6 +71,8 @@ def export(
                 "validator": (
                     "reference_projects.kaggle.essay_scoring.components:validate_ordinal_prediction"
                 ),
+                "dataset_factory": INPUTS,
+                "collator": COLLATOR,
             },
         )
         example = {
@@ -90,6 +93,7 @@ def export(
             input_example=example,
             forms=("pyfunc",),
             name="essay-scoring",
+            dynamic_axes={"x": [1]},
         )["pyfunc"]
         return {
             "export_run_id": run.info.run_id,
@@ -110,7 +114,13 @@ def evaluate_model(
             [int(store.read_sample(value)["attrs"]["target"]) for value in sample_ids],
             dtype=np.int64,
         )
-        inputs = _arrays(data["store_path"], sample_ids)
+        arrays = collate_arrays(
+            INPUTS,
+            store,
+            sample_ids,
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
         identity = record_provenance(
             run.info.run_id,
             {
@@ -123,6 +133,8 @@ def evaluate_model(
             components={
                 "evaluation": "dsio.eval.execution:evaluate",
                 "qwk": ("dsio.eval.metrics:quadratic_weighted_kappa"),
+                "dataset_factory": INPUTS,
+                "collator": COLLATOR,
             },
         )
         metrics = evaluate(
@@ -147,7 +159,16 @@ def infer_and_submit(
     with attempt(experiment_id) as run:
         test_ids = list(data["test_ids"])
         test_sample_ids = list(data["test_sample_ids"])
-        outputs = predict(exported["model_uri"], _arrays(data["store_path"], test_sample_ids))
+        arrays = collate_arrays(
+            INPUTS,
+            SignalStore(data["store_path"]),
+            test_sample_ids,
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
+        outputs = predict(
+            exported["model_uri"],
+            {"sample_id": arrays["sample_id"], "x": arrays["x"]},
+        )
         values = np.asarray(outputs["prediction"], dtype=np.int64).reshape(-1).tolist()
         identity = record_provenance(
             run.info.run_id,
@@ -158,7 +179,11 @@ def infer_and_submit(
                 "sample_ids": test_sample_ids,
                 "submission_ids": test_ids,
             },
-            components={"inference": "dsio.inference.loading:predict"},
+            components={
+                "inference": "dsio.inference.loading:predict",
+                "dataset_factory": INPUTS,
+                "collator": COLLATOR,
+            },
         )
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer, lineterminator="\n")

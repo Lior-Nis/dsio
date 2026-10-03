@@ -10,7 +10,6 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.nn.utils.rnn import pad_sequence
 
 from dsio.config.components import ComponentConfig
 
@@ -30,21 +29,6 @@ def tokenize(text: str) -> list[int]:
     return values
 
 
-def pad_essays(items: list[Mapping[str, Any]]) -> Mapping[str, Any]:
-    if not items:
-        raise ValueError("cannot collate an empty essay batch")
-    sequences = [torch.as_tensor(item["x"], dtype=torch.long) for item in items]
-    if any(value.ndim != 2 or value.shape[1] != 2 or value.shape[0] == 0 for value in sequences):
-        raise ValueError("essay x values must have shape [tokens, 2]")
-    result: dict[str, Any] = {
-        "sample_id": [str(item["sample_id"]) for item in items],
-        "x": pad_sequence(sequences, batch_first=True, padding_value=0),
-    }
-    if all("y" in item for item in items):
-        result["y"] = torch.stack([torch.as_tensor(item["y"], dtype=torch.long) for item in items])
-    return result
-
-
 DATASET: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",
     "parameters": {
@@ -55,6 +39,18 @@ DATASET: ComponentConfig = {
             "dtype": "int64",
             "offset": -1,
         },
+    },
+}
+INPUTS: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {"x": {"from": "data", "dtype": "int64"}},
+}
+COLLATOR: ComponentConfig = {
+    "reference": "dsio.experimental.data.padding:PadCollator",
+    "parameters": {
+        "padded_fields": {"x": 0},
+        "fixed_fields": ["y"],
+        "emit_mask": False,
     },
 }
 

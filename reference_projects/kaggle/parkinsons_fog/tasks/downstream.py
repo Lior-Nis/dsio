@@ -15,54 +15,19 @@ from prefect import task
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
+from dsio.experimental.data import PadCollator, collate_arrays
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.parkinsons_fog.components import (
-    FEATURE_COUNT,
-    TARGET_COUNT,
+    COLLATOR,
+    INPUT_COLLATOR,
     FogOutput,
-    normalize_signal,
+    fog_inputs,
+    fog_windows,
     validate_fog_prediction,
 )
-from reference_projects.kaggle.parkinsons_fog.data import TARGETS, WINDOW_SIZE
-
-
-def _arrays(store_path: str, sample_ids: list[str]) -> dict[str, np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    values = np.zeros((len(sample_ids), WINDOW_SIZE, FEATURE_COUNT), dtype=np.float32)
-    for index, sample_id in enumerate(sample_ids):
-        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
-        _require_window_size(sample_id, sample)
-        values[index, : len(sample)] = normalize_signal(sample[:, :FEATURE_COUNT])
-    return {"sample_id": np.asarray(sample_ids, dtype=np.str_), "x": values}
-
-
-def _targets_and_mask(
-    store_path: str, sample_ids: list[str]
-) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    targets = np.zeros((len(sample_ids), WINDOW_SIZE, TARGET_COUNT), dtype=np.int64)
-    mask = np.zeros((len(sample_ids), WINDOW_SIZE), dtype=bool)
-    for index, sample_id in enumerate(sample_ids):
-        sample = np.asarray(store.read_sample(sample_id)["data"], dtype=np.float32)
-        _require_window_size(sample_id, sample)
-        labels = sample[:, FEATURE_COUNT : FEATURE_COUNT + TARGET_COUNT]
-        valid = sample[:, -1]
-        if not bool(np.isfinite(labels).all()) or not bool(((labels == 0) | (labels == 1)).all()):
-            raise ValueError(f"FoG sample {sample_id!r} labels must be finite binary values")
-        if not bool(np.isfinite(valid).all()) or not bool(((valid == 0) | (valid == 1)).all()):
-            raise ValueError(f"FoG sample {sample_id!r} mask must contain only zero or one")
-        targets[index, : len(sample)] = labels.astype(np.int64)
-        mask[index, : len(sample)] = valid.astype(bool)
-    return targets, mask
-
-
-def _require_window_size(sample_id: str, sample: np.ndarray[Any, Any]) -> None:
-    if len(sample) > WINDOW_SIZE:
-        raise ValueError(
-            f"FoG sample {sample_id!r} has {len(sample)} points; maximum is {WINDOW_SIZE}"
-        )
+from reference_projects.kaggle.parkinsons_fog.data import TARGETS
 
 
 @task(persist_result=False)
@@ -82,7 +47,13 @@ def export(
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         sample_id = next(iter(split["assignments"]["validate"]))
-        inputs = _arrays(data["store_path"], [sample_id])
+        arrays = collate_arrays(
+            fog_inputs,
+            SignalStore(data["store_path"]),
+            [sample_id],
+            collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
+        )
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
         identity = record_provenance(
             run.info.run_id,
             {
@@ -90,6 +61,7 @@ def export(
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
                 "export_form": "pyfunc",
+                "dynamic_axes": {"x": [1], "prediction": [1], "probability": [1]},
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
@@ -99,6 +71,10 @@ def export(
                 "validator": (
                     "reference_projects.kaggle.parkinsons_fog.components:validate_fog_prediction"
                 ),
+                "dataset_factory": (
+                    "reference_projects.kaggle.parkinsons_fog.components:fog_inputs"
+                ),
+                "collator": INPUT_COLLATOR,
             },
         )
         example = {
@@ -119,6 +95,7 @@ def export(
             input_example=example,
             forms=("pyfunc",),
             name="parkinsons-fog",
+            dynamic_axes={"x": [1], "prediction": [1], "probability": [1]},
         )["pyfunc"]
         return {
             "export_run_id": run.info.run_id,
@@ -134,8 +111,15 @@ def evaluate_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         sample_ids = list(split["assignments"]["validate"])
-        inputs = _arrays(data["store_path"], sample_ids)
-        targets, mask = _targets_and_mask(data["store_path"], sample_ids)
+        arrays = collate_arrays(
+            fog_windows,
+            SignalStore(data["store_path"]),
+            sample_ids,
+            collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+        )
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        targets = arrays["y"].astype(np.int64)
+        mask = arrays["mask"]
         identity = record_provenance(
             run.info.run_id,
             {
@@ -146,7 +130,13 @@ def evaluate_model(
                 "sample_ids": sample_ids,
                 "scoreable_points": int(mask.sum()),
             },
-            components={"evaluation": "dsio.eval.execution:evaluate"},
+            components={
+                "evaluation": "dsio.eval.execution:evaluate",
+                "dataset_factory": (
+                    "reference_projects.kaggle.parkinsons_fog.components:fog_windows"
+                ),
+                "collator": COLLATOR,
+            },
         )
         metrics = evaluate(
             run_id=run.info.run_id,
@@ -168,7 +158,16 @@ def infer_and_submit(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         sample_ids = list(data["test_sample_ids"])
-        outputs = predict(exported["model_uri"], _arrays(data["store_path"], sample_ids))
+        arrays = collate_arrays(
+            fog_inputs,
+            SignalStore(data["store_path"]),
+            sample_ids,
+            collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
+        )
+        outputs = predict(
+            exported["model_uri"],
+            {"sample_id": arrays["sample_id"], "x": arrays["x"]},
+        )
         matrix = np.asarray(outputs["probability"], dtype=np.float64)
         store = SignalStore(data["store_path"])
         by_id: dict[str, list[float]] = {}
@@ -193,7 +192,13 @@ def infer_and_submit(
                 "sample_ids": sample_ids,
                 "submission_ids": data["submission_ids"],
             },
-            components={"inference": "dsio.inference.loading:predict"},
+            components={
+                "inference": "dsio.inference.loading:predict",
+                "dataset_factory": (
+                    "reference_projects.kaggle.parkinsons_fog.components:fog_inputs"
+                ),
+                "collator": INPUT_COLLATOR,
+            },
         )
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer, lineterminator="\n")

@@ -20,8 +20,11 @@ from dsio.model.module import DsioModule
 
 
 def test_rogii_boundary_joins_wells_and_reconstructs_hidden_tail(rogii_csvs: Path) -> None:
-    from reference_projects.kaggle.rogii.components import pad_wells
+    from reference_projects.kaggle.rogii.components import COLLATOR
     from reference_projects.kaggle.rogii.data import load_competition_data
+
+    from dsio.config.components import resolve_component
+    from dsio.experimental.data import PadCollator
 
     loaded = load_competition_data(rogii_csvs)
 
@@ -33,7 +36,7 @@ def test_rogii_boundary_joins_wells_and_reconstructs_hidden_tail(rogii_csvs: Pat
         *[f"well00_{index}" for index in range(5, 9)],
         *[f"well01_{index}" for index in range(6, 11)],
     ]
-    batch = pad_wells(
+    batch = resolve_component(COLLATOR, expected=PadCollator)(
         [
             {
                 "sample_id": "short",
@@ -49,29 +52,15 @@ def test_rogii_boundary_joins_wells_and_reconstructs_hidden_tail(rogii_csvs: Pat
     )
     assert tuple(batch["x"].shape) == (2, 5, 13)
     assert batch["x"][0, 3:, -1].eq(0).all()
+    assert batch["mask"].tolist() == [
+        [True, True, True, False, False],
+        [True, True, True, True, True],
+    ]
 
     paired = rogii_csvs / "train" / "well07__typewell.csv"
     paired.unlink()
     with pytest.raises(ValueError, match="paired typewell"):
         load_competition_data(rogii_csvs)
-
-
-def test_rogii_evaluation_rejects_samples_wider_than_the_declared_batch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import reference_projects.kaggle.rogii.tasks.downstream as downstream
-
-    class FakeStore:
-        def __init__(self, path: str) -> None:
-            del path
-
-        def read_sample(self, sample_id: str) -> dict[str, object]:
-            del sample_id
-            return {"data": np.zeros((3, 14), dtype=np.float32)}
-
-    monkeypatch.setattr(downstream, "SignalStore", FakeStore)
-    with pytest.raises(ValueError, match="evaluation width is 2"):
-        downstream._targets_and_mask("unused", ["too-long"], 2)
 
 
 def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
@@ -143,6 +132,8 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         result["metrics"]["last_value_rmse"]
     )
     assert run.data.params["evaluation.masked"] == "true"
+    from reference_projects.kaggle.rogii.components import COLLATOR, DATASET
+
     assert_execution_evidence(
         result["train_run_id"],
         tmp_path / "rogii-provenance",
@@ -150,5 +141,13 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         optimizer_parameters={"lr": 0.001},
         batch_size=8,
         num_workers=2,
+        dataset=DATASET,
+        collator=COLLATOR,
     )
-    assert_downstream_evidence(result, tmp_path / "rogii-downstream")
+    assert_downstream_evidence(
+        result,
+        tmp_path / "rogii-downstream",
+        datasets={"export": DATASET, "evaluation": DATASET, "inference": DATASET},
+        collator=COLLATOR,
+        dynamic_axes={"x": [1], "prediction": [1]},
+    )

@@ -15,8 +15,10 @@ from mlflow.entities import Run
 from mlflow.exceptions import MlflowException
 from mlflow.models import infer_signature
 from mlflow.models.model import ModelInfo
+from mlflow.models.signature import ModelSignature
 from mlflow.pyfunc import PythonModel, PythonModelContext
 from mlflow.tracking import MlflowClient
+from mlflow.types.schema import Schema, TensorSpec
 from torch import Tensor
 
 from dsio.inference.predictor import Predictor, PredictorError, _preserve_rng
@@ -71,8 +73,14 @@ def log_predictor(
     input_example: Mapping[str, Any],
     forms: Sequence[ExportForm],
     name: str = "predictor",
+    dynamic_axes: Mapping[str, Sequence[int]] | None = None,
 ) -> dict[ExportForm, ModelInfo]:
-    """Log exactly the declared representations against one existing MLflow Run."""
+    """Log exactly the declared representations against one existing MLflow Run.
+
+    ``dynamic_axes`` marks non-batch tensor dimensions whose extent may vary between
+    calls, such as the time axis of a padded sequence. All other dimensions keep MLflow's
+    inferred contract.
+    """
     declared = _forms(forms)
     if not isinstance(predictor, Predictor):
         raise ExportError("predictor export requires a dsio.inference.Predictor")
@@ -86,7 +94,7 @@ def log_predictor(
     example = _input_arrays(input_example, declared)
     expected = _arrays(output, f"{_form_scope(declared)} predictor output")
     try:
-        signature = infer_signature(example, expected)
+        signature = _dynamic_signature(infer_signature(example, expected), dynamic_axes)
     except Exception as error:
         raise ExportError(f"export form signature is incompatible: {error}") from error
     _preflight(predictor, input_example, example, expected, declared)
@@ -131,6 +139,83 @@ def log_predictor(
         _running_run(run_id)
     _running_run(run_id)
     return infos
+
+
+def _dynamic_signature(
+    signature: ModelSignature,
+    configured: Mapping[str, Sequence[int]] | None,
+) -> ModelSignature:
+    if configured is None:
+        return signature
+    if not isinstance(configured, Mapping):
+        raise ExportError("dynamic_axes must be a field-to-axes mapping")
+    if "sample_id" in configured:
+        raise ExportError("dynamic_axes cannot change the sample_id identity shape")
+    input_names = _tensor_names(signature.inputs)
+    output_names = _tensor_names(signature.outputs)
+    ambiguous = sorted(set(configured) & input_names & output_names)
+    if ambiguous:
+        raise ExportError(
+            f"dynamic_axes fields {ambiguous} are ambiguous across predictor input and output"
+        )
+    schemas = [schema for schema in (signature.inputs, signature.outputs) if schema is not None]
+    specs = {
+        spec.name: spec
+        for schema in schemas
+        for spec in schema.inputs
+        if isinstance(spec, TensorSpec) and spec.name is not None
+    }
+    unknown = sorted(set(configured) - set(specs))
+    if unknown:
+        raise ExportError(f"dynamic_axes names unknown tensor fields {unknown}")
+    axes_by_field: dict[str, tuple[int, ...]] = {}
+    for field, raw_axes in configured.items():
+        if isinstance(raw_axes, str) or not isinstance(raw_axes, Sequence):
+            raise ExportError(f"dynamic_axes for field {field!r} must be a sequence")
+        axes = tuple(raw_axes)
+        if any(isinstance(axis, bool) or not isinstance(axis, int) for axis in axes):
+            raise ExportError(f"dynamic_axes for field {field!r} must contain integers")
+        if len(set(axes)) != len(axes):
+            raise ExportError(f"dynamic_axes for field {field!r} contains duplicate axes")
+        if 0 in axes:
+            raise ExportError("dynamic_axes cannot redeclare batch axis 0")
+        rank = len(specs[field].shape)
+        invalid = [axis for axis in axes if axis < 0 or axis >= rank]
+        if invalid:
+            raise ExportError(
+                f"dynamic_axes {invalid} for field {field!r} are out of range for rank {rank}"
+            )
+        axes_by_field[field] = axes
+
+    def update(schema: Schema | None) -> Schema | None:
+        if schema is None:
+            return None
+        updated = []
+        for spec in schema.inputs:
+            if not isinstance(spec, TensorSpec) or spec.name not in axes_by_field:
+                updated.append(spec)
+                continue
+            shape = list(spec.shape)
+            for axis in axes_by_field[spec.name]:
+                shape[axis] = -1
+            updated.append(TensorSpec(spec.type, tuple(shape), spec.name))
+        return Schema(updated)
+
+    return ModelSignature(
+        inputs=update(signature.inputs),
+        outputs=update(signature.outputs),
+        params=signature.params,
+    )
+
+
+def _tensor_names(schema: Schema | None) -> set[str]:
+    if schema is None:
+        return set()
+    return {
+        spec.name
+        for spec in schema.inputs
+        if isinstance(spec, TensorSpec) and spec.name is not None
+    }
 
 
 def _forms(forms: Sequence[ExportForm]) -> tuple[ExportForm, ...]:

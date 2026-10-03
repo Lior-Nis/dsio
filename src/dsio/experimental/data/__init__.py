@@ -10,6 +10,7 @@ from dsio.experimental.data.items import StoredItems
 from dsio.experimental.data.labels import (
     entity_attribute_labels,
 )
+from dsio.experimental.data.padding import PadCollator
 from dsio.experimental.data.samples import (
     StoredSamples,
     stored_samples,
@@ -19,6 +20,7 @@ from dsio.experimental.data.windows import (
 )
 
 __all__ = [
+    "PadCollator",
     "StoredItems",
     "StoredSamples",
     "WindowDataset",

@@ -18,6 +18,7 @@ from dsio.data.examples import Examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
+from dsio.experimental.data import PadCollator
 from dsio.experimental.telemetry import log_phase_evidence, measure_phase
 from dsio.experimental.training import calibrate_training_execution, log_calibration
 from dsio.model.module import DsioModule
@@ -30,11 +31,11 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.parkinsons_fog.components import (
+    COLLATOR,
     FEATURE_COUNT,
     FogDetector,
     FogObjective,
     fog_windows,
-    pad_windows,
 )
 from reference_projects.kaggle.parkinsons_fog.tasks.data import labelled_examples
 
@@ -161,7 +162,7 @@ def train(
                 "dataset_factory": (
                     "reference_projects.kaggle.parkinsons_fog.components:fog_windows"
                 ),
-                "collator": "reference_projects.kaggle.parkinsons_fog.components:pad_windows",
+                "collator": COLLATOR,
                 "model": model_config,
                 "objective": ("reference_projects.kaggle.parkinsons_fog.components:FogObjective"),
                 "optimizer": "torch.optim:Adam",
@@ -276,5 +277,5 @@ def _data_module(
         seed=seed,
         shuffle=SHUFFLE,
         drop_last=DROP_LAST,
-        collate_fn=pad_windows,
+        collate_fn=resolve_component(COLLATOR, expected=PadCollator),
     )
