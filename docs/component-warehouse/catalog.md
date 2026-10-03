@@ -205,7 +205,7 @@ NumPy on the cast array, so they match NumPy-based preprocessing bit for bit.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
 - real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
 - real: `reference_projects/kaggle/child_mind` (test `tests/kaggle_portfolio/test_child_mind.py`; runs —)
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
@@ -505,7 +505,7 @@ Validate a :class:`RegressionOutput` result: shape, finiteness and sign. — **e
 
 #### `dsio.experimental.model.compositions:Chain`
 
-Preprocessor, backbone and head as one model that can also `encode`. — **experimental**; real uses: 2 (digit_recognizer, parkinsons_fog).
+Preprocessor, backbone and head as one model that can also `encode`. — **experimental**; real uses: 3 (digit_recognizer, essay_scoring, parkinsons_fog).
 
 **Consumes**: What the preprocessor (or, without one, the backbone) consumes.
 
@@ -541,6 +541,7 @@ load-and-freeze path is planned with pretrained weights (roadmap v2).
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
 
 #### `dsio.experimental.model.compositions:MLP`
 
@@ -778,7 +779,7 @@ of that batch's mean, and epoch logging averages those roots.
 
 #### `dsio.experimental.model.objectives:SupervisedObjective`
 
-Compute a native loss between the model's prediction and a declared batch field. — **experimental**; real uses: 4 (bike_sharing, digit_recognizer, store_sales, titanic).
+Compute a native loss between the model's prediction and a declared batch field. — **experimental**; real uses: 5 (bike_sharing, digit_recognizer, essay_scoring, store_sales, titanic).
 
 **Consumes**: A batch with `x` (the model input), the target field, and, when
 `sample_weighted`, `sample_weight` shaped `[batch]` or `[batch, 1]`.
@@ -827,6 +828,7 @@ dense targets need a masked objective. Epoch values are logged per process.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 
 #### `dsio.experimental.model.standardization:InstanceStandardize`
@@ -899,6 +901,42 @@ Missing values (NaN) propagate.
 
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
+
+#### `dsio.experimental.model.tokens:EmbeddingEncoder`
+
+Embed a token sequence and mean-pool only structurally valid positions. — **experimental**; real uses: 1 (essay_scoring).
+
+**Consumes**: An integer tensor `[batch, tokens, 2]`. `token_channel` contains token IDs
+and `validity_channel` contains exactly zero or one. Validity, never a token
+value, determines padding.
+
+**Produces**: A tensor `[batch, embed_dim]` containing the arithmetic mean of each sample's
+valid token embeddings.
+
+**Parameters**: `vocab_size`: number of embedding rows. `embed_dim`: embedding width (default
+64). `token_channel` and `validity_channel`: the two input-channel positions.
+`safe_token_id`: in-vocabulary row substituted before lookup at invalid
+positions (default 0); it does not determine validity.
+
+**Devices**: CPU and accelerators. The returned dtype and device follow the embedding table.
+
+**Limitations**: Exactly one token stream and one validity stream are accepted. Each sample must
+contain at least one valid token; tokenization and multi-stream fusion are outside
+this block.
+
+**Example**
+
+```python
+>>> import torch
+>>> encoder = EmbeddingEncoder(vocab_size=16, embed_dim=4)
+>>> x = torch.tensor([[[2, 1], [3, 1], [99, 0]]])
+>>> tuple(encoder(x).shape)
+(1, 4)
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
 
 ### `dsio.experimental.telemetry`
 
@@ -1112,7 +1150,6 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.model.chain:export_encoder` | Export the encoder portion of a DSio module configured with `ComponentChain`. | — |
 | `dsio.experimental.model.components:Conv1dEncoder` | Strided dilated convolutions with global pooling. | — |
 | `dsio.experimental.model.components:CrossEntropy` | Cross-entropy that accepts either hard integer labels or soft ratios. | — |
-| `dsio.experimental.model.components:EmbeddingEncoder` | Token ids to a pooled representation. The baseline any sequence model over text must beat, and the reason a token corpus needs a backbone of its own at all. | — |
 | `dsio.experimental.model.components:FixedStandardize` | Standardise by outside statistics; superseded by ``standardization.Standardize``. | — |
 | `dsio.experimental.model.components:IdentityAugmentation` | Generator-aware identity for an explicitly configured two-view baseline. | — |
 | `dsio.experimental.model.components:Jitter` | Additive Gaussian noise, scaled per channel by that channel's own spread. | self_supervised |
@@ -1287,8 +1324,8 @@ local on purpose.
 | Evaluation array builders | 1 | `reference_projects/kaggle/child_mind` | collate_arrays (#5) once its dataset is a warehouse block, Stories 9.1-9.4. |
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
-| Local nn.Module models | 4 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10, |
-| Local objectives | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Essay and CMI move to SupervisedObjective (#18) with their sequence and weighting stories (8.3-8.5, 9.2-9.4). |
+| Local nn.Module models | 3 | `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Pooled temporal, residual, and multimodal models (#10, |
+| Local objectives | 2 | `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | CMI moves to SupervisedObjective (#18) with its weighting stories (9.2-9.4). |
 | Prediction normalizers and validators | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay and CMI move to MulticlassOutput (#25) with their sequence and weighting stories. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
 | Train and export task wiring | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |

@@ -93,75 +93,6 @@ class Conv1dEncoder(nn.Module):
         return self.project(pooled)
 
 
-class EmbeddingEncoder(nn.Module):
-    """Token ids to a pooled representation. The baseline any sequence model over text
-    must beat, and the reason a token corpus needs a backbone of its own at all.
-
-    ``conv1d`` over token ids runs and produces numbers. That is the failure this exists to
-    remove: an id is a symbol, not a magnitude, so convolving 39 against 41 as though they
-    were neighbouring amplitudes trains a model that converges to something meaningless
-    rather than erroring. A lookup table is the smallest thing that treats them as symbols.
-
-    Pools over time (and over channels, so a store of several parallel id streams works
-    unchanged) instead of flattening, exactly as :class:`Conv1dEncoder` does and for the
-    same reason: a backbone whose parameter count depends on the context length forces a
-    retrain for every change to a view, which is the coupling the index layer removed.
-
-    A float payload is accepted as well as an integer one, because
-    :class:`~dsio.experimental.data.windows.WindowDataset`'s float path is the default and a caller
-    who has not set ``payload_dtype=torch.long`` should get a working model rather than a
-    dtype error. The cast back is lossless only up to 2**24 (16,777,216) — the largest
-    integer float32 represents without gaps — so above that vocabulary size two adjacent
-    ids collide on one float and the wrong row is embedded, silently. Setting
-    ``payload_dtype`` makes the cast a no-op and the bound irrelevant, which is why it is
-    the preferred path rather than a convenience.
-    """
-
-    def __init__(self, vocab_size: int, embed_dim: int = 64, out_dim: int = 64) -> None:
-        super().__init__()
-        if vocab_size < 1:
-            raise ValueError(f"vocab_size must be at least 1, got {vocab_size}")
-        self.vocab_size = vocab_size
-        # Plain attribute, not a buffer: it is a fact about this process having already
-        # looked, not model state, and it has no business in a checkpoint.
-        self._range_checked = False
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.project = nn.Linear(embed_dim, out_dim)
-        self.out_dim = out_dim
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _check_3d(x, "EmbeddingEncoder")
-        ids = x.long()
-        if not self._range_checked:
-            self._check_range(ids)
-            self._range_checked = True
-        pooled = self.embedding(ids).mean(dim=(1, 2))
-        return self.project(pooled)
-
-    def _check_range(self, ids: torch.Tensor) -> None:
-        """Name a vocabulary mismatch, once per process rather than once per step.
-
-        Worth doing, because ``nn.Embedding``'s own complaint is "index out of range in
-        self" on CPU and a device-side assert that takes the process down on CUDA --
-        neither names the knob that is wrong, and a tokenizer whose vocabulary disagrees
-        with the configured ``vocab_size`` is by far the most likely way to arrive here.
-
-        Worth doing *once*, because ``int(ids.max())`` pulls a Python number off the
-        device, which blocks the caller until the queue drains. Per step that is a
-        synchronisation on every training iteration, which is the cost
-        :func:`~dsio.data.splits.resolve.assert_no_row_overlap` keeps out of the training path
-        for the same reason. A vocabulary mismatch is a configuration error: it is wrong
-        on the first batch or it is not wrong, since no later batch can hold an id the
-        corpus does not contain. The first batch is the whole of what checking buys.
-        """
-        low, high = int(ids.min()), int(ids.max())
-        if high >= self.vocab_size or low < 0:
-            raise ValueError(
-                f"token ids run [{low}, {high}] but vocab_size is {self.vocab_size}; "
-                "the configured vocabulary does not match the corpus"
-            )
-
-
 # --- heads --------------------------------------------------------------------------
 
 
@@ -506,7 +437,6 @@ def no_augmentation() -> nn.Module:
 __all__ = [
     "Conv1dEncoder",
     "CrossEntropy",
-    "EmbeddingEncoder",
     "FixedStandardize",
     "IdentityAugmentation",
     "Jitter",

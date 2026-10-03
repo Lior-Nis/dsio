@@ -73,7 +73,7 @@ so that the signal model is configuration only (cohort #9b, #11, #13).
 - Do not infer padding from zero or another sensor value. A real all-zero timestep is valid data.
 - The validity channel is structural, not a learned feature. `InstanceStandardize` validates and preserves it; `DenseConv1d` removes it before learned convolution and masks hidden/output padding so convolution cannot leak padded context into real boundary predictions.
 - Statistics are per sample and feature over the time axis. Invalid/padded locations are ignored and returned as zero after normalization, reproducing normalization-before-padding while allowing the component to live inside the Predictor's deterministic model path.
-- Keep layouts explicit: model preprocessing receives `[B,T,C+1]`, transposes to `[B,C+1,T]`, standardizes to `[B,C,T]`, the encoder returns `[B,K,T]`, and the final adapter returns `[B,T,K]`.
+- Keep layouts explicit: model preprocessing receives `[B,T,C+1]`, transposes to `[B,C+1,T]`, standardizes while preserving `[B,C+1,T]`, the encoder consumes validity and returns `[B,K,T]`, and the final adapter returns `[B,T,K]`.
 - `DenseConv1d` is the proven architecture only: Conv1d -> ReLU -> Conv1d. Do not add depth lists, pooling, residuals, normalization, or activation registries.
 - The consumer owns the added store channel and schema version. DSio source and docstrings must not name the consumer.
 - New blocks remain experimental despite future second-use plans. Promotion belongs to Story 11.1.

@@ -19,7 +19,7 @@ from lightning import Trainer  # noqa: E402
 
 import dsio.train.capabilities as capabilities  # noqa: E402
 from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
-from dsio.experimental.model.components import CrossEntropy, EmbeddingEncoder  # noqa: E402
+from dsio.experimental.model.components import CrossEntropy  # noqa: E402
 from dsio.model.module import DsioModule  # noqa: E402
 from dsio.train.capabilities import (  # noqa: E402
     CapabilityError,
@@ -274,20 +274,6 @@ def test_module_transfer_failures_keep_capability_context() -> None:
     message = str(caught.value)
     assert "module transfer for ComponentChain + LossObjective to cpu/32-true" in message
     assert "experimental admission" in message
-
-
-def test_the_probe_cannot_consume_lazy_state_from_the_real_module() -> None:
-    encoder = EmbeddingEncoder(vocab_size=16, embed_dim=4, out_dim=8)
-    module = _module(backbone=encoder)
-
-    check_training_capabilities(
-        _trainer(),
-        module,
-        _batch(),
-        requested=TrainerConfig(accelerator="cpu", devices=1),
-    )
-
-    assert not encoder._range_checked
 
 
 def test_the_probe_isolates_parameters_lazy_modules_and_seeded_rngs() -> None:
