@@ -18,5 +18,3 @@ with `--compare`; runs must match exactly unless the story pre-declared a tolera
 | `rogii` | `fe37300c844d` | CPU x12 | 79.1 | last_value_rmse=16.5338, rmse=16.4913 | `https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35d889f9dd3d4b6ebaeb04c4606b3d2b` |
 | `store_sales` | `fe37300c844d` | CPU x12 | 32.5 | rmsle=0.528159, seasonal_naive_rmsle=0.61704 | `https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/26ca9ccfa07b4cafa12caa16c87cdde9` |
 | `titanic` | `38845c45060f` | CPU x12 | 28.1 | accuracy=0.63141 | `https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/865a9dd5eb4d42518f766e98a34c771a` |
-
-Contract tier only (no representative data under `~/Datasets`): `bike_sharing`.

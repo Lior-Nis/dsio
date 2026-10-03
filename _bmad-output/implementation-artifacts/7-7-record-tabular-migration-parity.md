@@ -4,7 +4,7 @@ baseline_commit: 6db3eea1538de68106e9199ce8dbf134239a9150
 
 # Story 7.7: Record tabular migration parity
 
-Status: review
+Status: done
 
 ## Story
 
@@ -45,6 +45,17 @@ so that Epic 7 proves the warehouse preserved behavior at real-data scale.
   - [x] Run the four contract-tier consumer suites without editing `tests/golden_metrics.json`.
   - [x] Run the full test, static, import-contract, catalog, admission and distribution gates.
   - [x] Confirm baseline metric values and all contract-tier goldens are byte-for-byte unchanged.
+
+### Review Findings
+
+- [x] [Review][Patch] Reject dirty source trees before certifying parity [tools/representative.py:146]
+- [x] [Review][Patch] Require finite non-negative tolerance and non-empty finite metrics [tools/representative.py:168]
+- [x] [Review][Patch] Reject credential-bearing tracking URIs before persisting evidence [tools/representative.py:298]
+- [x] [Review][Patch] Keep parity tags consistent when evidence logging fails [tools/representative.py:202]
+- [x] [Review][Patch] Print complete signed deltas and raw run ID, then stop on the first mismatch [tools/representative.py:471]
+- [x] [Review][Patch] Record and validate the accelerator actually used, plus the observed hardware class [tools/representative.py:328]
+- [x] [Review][Patch] Preflight baselines and validate every referenced evaluation run before expensive execution/evidence creation [tools/representative.py:449]
+- [x] [Review][Patch] Keep the generated baseline report byte-identical to `render(baseline)` [docs/component-warehouse/parity-baseline.md:22]
 
 ## Dev Notes
 
@@ -106,7 +117,9 @@ GPT-5
 - All four migrated consumers matched their real-data baselines exactly at absolute tolerance zero; their MLflow parity runs are `FINISHED` with zero deltas.
 - Four-consumer non-ingestion code fell from 2,207 lines at the Story 6.6 baseline to 2,184 lines now (`-23`); none of the four consumers has a remaining banned local definition.
 - Verification completed: four consumer suites `22 passed`; full suite `1183 passed, 1 deselected`; Ruff, format, mypy, import contracts, catalog, admission, build and distribution contracts all pass.
-- Golden metrics and the completed four-consumer baseline remained byte-for-byte unchanged throughout migrated execution and final verification.
+- Golden metrics and baseline metric values remained byte-for-byte unchanged; review regenerated the Markdown view to remove its stale pre-Bike footer.
+- Adversarial review resolved all eight actionable findings; one request to probe UI reachability inside the runner was dismissed because reachability is an operational acceptance check and was verified separately with HTTP 200.
+- Post-review verification completed: `1188 passed, 1 deselected`; Ruff, format, mypy, import contracts, catalog, build and eight distribution contracts pass.
 
 ### File List
 
@@ -123,3 +136,4 @@ GPT-5
 
 - 2026-10-03: Recovered Bike baseline and added generic MLflow parity recording.
 - 2026-10-03: Recorded exact real-data parity, attached evidence, and measured Epic 7 deletion.
+- 2026-10-03: Closed adversarial review findings and marked Story 7.7 done.
