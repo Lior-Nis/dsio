@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -133,7 +134,7 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         result["metrics"]["last_value_rmse"]
     )
     assert run.data.params["evaluation.masked"] == "true"
-    from reference_projects.kaggle.rogii.components import COLLATOR, DATASET, OBJECTIVE
+    from reference_projects.kaggle.rogii.components import COLLATOR, DATASET, MODEL, OBJECTIVE
 
     assert_execution_evidence(
         result["train_run_id"],
@@ -145,6 +146,7 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         dataset=DATASET,
         collator=COLLATOR,
         objective=OBJECTIVE,
+        model=MODEL,
     )
     assert_downstream_evidence(
         result,
@@ -153,3 +155,48 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         collator=COLLATOR,
         dynamic_axes={"x": [1], "prediction": [1]},
     )
+
+    from reference_projects.kaggle.rogii.components import (
+        TvtOutput,
+        validate_tvt_prediction,
+    )
+
+    from dsio.config.components import resolve_component
+    from dsio.data.store import SignalStore
+    from dsio.experimental.data import PadCollator, collate_arrays
+    from dsio.inference import build_predictor, predict
+    from dsio.train.artifacts import ArtifactRef
+
+    checkpoint_path = MlflowClient().download_artifacts(
+        result["train_run_id"],
+        "outputs/checkpoint.json",
+        str(tmp_path / "rogii-checkpoint"),
+    )
+    checkpoint = ArtifactRef.model_validate(json.loads(Path(checkpoint_path).read_text()))
+    sample_id = result["assignments"]["validate"][0]
+    store = SignalStore(tmp_path / "work" / result["data_run_id"] / "rogii")
+    arrays = collate_arrays(
+        DATASET,
+        store,
+        [sample_id],
+        collate_fn=resolve_component(COLLATOR, expected=PadCollator),
+    )
+    inputs = {"sample_id": arrays["sample_id"].tolist(), "x": torch.from_numpy(arrays["x"])}
+    local = build_predictor(
+        checkpoint,
+        model=resolve_component(MODEL, expected=torch.nn.Module),
+        preprocessor=torch.nn.Identity(),
+        normalizer=TvtOutput(),
+        validator=validate_tvt_prediction,
+        input_example=inputs,
+    )(inputs)
+    loaded = predict(
+        result["model_uri"],
+        {"sample_id": arrays["sample_id"], "x": arrays["x"]},
+    )
+    assert set(local) == set(loaded)
+    for name, value in local.items():
+        local_array = (
+            value.detach().numpy() if isinstance(value, torch.Tensor) else np.asarray(value)
+        )
+        np.testing.assert_array_equal(local_array, loaded[name])
