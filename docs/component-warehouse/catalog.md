@@ -64,9 +64,9 @@ and arrays from tensors share their memory.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 - fixture: `reference_projects/self_supervised` (test `tests/reference_flows/test_self_supervised_flow.py`; runs —)
 
@@ -205,8 +205,8 @@ NumPy on the cast array, so they match NumPy-based preprocessing bit for bit.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 - real: `reference_projects/kaggle/child_mind` (test `tests/kaggle_portfolio/test_child_mind.py`; runs —)
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
@@ -248,9 +248,9 @@ be declared. Padding is only along axis zero.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs —)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 
 ### `dsio.experimental.execution`
 
@@ -392,7 +392,7 @@ to indices; `score_field`: probability field (default `score`).
 **Evidence**:
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
 
 #### `dsio.experimental.inference.outputs.multiclass:MulticlassValidator`
 
@@ -418,7 +418,7 @@ Validate class range, simplex, and argmax consistency. — **experimental**; rea
 **Evidence**:
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; via `dsio.experimental.inference.outputs.multiclass:MulticlassOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; via `dsio.experimental.inference.outputs.multiclass:MulticlassOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; via `dsio.experimental.inference.outputs.multiclass:MulticlassOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
 
 #### `dsio.experimental.inference.outputs.regression:RegressionOutput`
 
@@ -453,7 +453,7 @@ optional field for original values.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b, https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 
 #### `dsio.experimental.inference.outputs.regression:RegressionValidator`
 
@@ -482,7 +482,7 @@ RegressionOutput.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; via `dsio.experimental.inference.outputs.regression:RegressionOutput`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b, https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 
 ### `dsio.experimental.model`
 
@@ -524,7 +524,7 @@ load-and-freeze path is planned with pretrained weights (roadmap v2).
 
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
 
 #### `dsio.experimental.model.compositions:MLP`
 
@@ -730,7 +730,7 @@ mask cannot omit more than the final output axis.
 **Evidence**:
 
 - real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 
 #### `dsio.experimental.model.objectives:RootMeanSquaredError`
 
@@ -758,7 +758,7 @@ of that batch's mean, and epoch logging averages those roots.
 **Evidence**:
 
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 
 #### `dsio.experimental.model.objectives:SupervisedObjective`
 
@@ -811,7 +811,7 @@ dense targets need a masked objective. Epoch values are logged per process.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
 - fixture: `reference_projects/supervised` (test `tests/reference_flows/test_supervised_flow.py`; runs —)
 
 #### `dsio.experimental.model.residual:BaselineResidual`
@@ -847,7 +847,7 @@ identity around the declared baseline. Input and parameters must share a device.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/149b57ff3e67463f947d8379d26369b5)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/149b57ff3e67463f947d8379d26369b5, https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35a20d415049437292803405a0debcda)
 
 #### `dsio.experimental.model.standardization:InstanceStandardize`
 
@@ -954,7 +954,7 @@ this block.
 
 **Evidence**:
 
-- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37)
+- real: `reference_projects/kaggle/essay_scoring` (test `tests/kaggle_portfolio/test_essay_scoring.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/421f6f2834d64d11ba569bcbfd5e0a37, https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/6f30153764734bfe90ff637bcc123830)
 
 ### `dsio.experimental.telemetry`
 

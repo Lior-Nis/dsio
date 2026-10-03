@@ -9,6 +9,16 @@ import torch
 from torch import Tensor, nn
 
 
+def _weighted_time_sum(values: Tensor, observed: Tensor) -> Tensor:
+    """Reduce time in the same float32 order as a strided NumPy feature reduction."""
+    weights = observed[:, 0].to(values.dtype)
+    batch = values.shape[0]
+    if batch == 1:
+        values = values.expand(2, -1, -1)
+        weights = weights.expand(2, -1)
+    return torch.vmap(torch.mv)(values, weights)[:batch].unsqueeze(2)
+
+
 class Standardize(nn.Module):
     """Subtract a fixed per-feature mean and divide by a fixed per-feature scale.
 
@@ -175,9 +185,9 @@ class InstanceStandardize(nn.Module):
         )
         stats = safe.to(stats_dtype)
         stats_count = count.to(stats_dtype)
-        mean = stats.sum(dim=2, keepdim=True) / stats_count
+        mean = _weighted_time_sum(stats, observed) / stats_count
         centered = torch.where(observed, signal.to(stats_dtype) - mean, 0.0)
-        scale = (centered.square().sum(dim=2, keepdim=True) / stats_count).sqrt()
+        scale = (_weighted_time_sum(centered.square(), observed) / stats_count).sqrt()
         minimum = max(self.eps, torch.finfo(stats_dtype).tiny)
         normalized = torch.where(observed, centered / scale.clamp_min(minimum), 0.0).to(
             values.dtype

@@ -27,6 +27,11 @@ so that the signal model is configuration only (cohort #9b, #11, #13).
 - Contract metrics use the already committed golden harness tolerance (`rel_tol=1e-6`, `abs_tol=1e-9`). `tests/golden_metrics.json` must remain byte-for-byte unchanged. No wider tolerance may be selected after observing results.
 - Conv1d modules are constructed in the former order, with no parameter-bearing stage before them, so seeded parameter initialization is expected to remain exact.
 
+### Representative Evidence Correction
+
+- Story 8.7 found that a generic Torch sum did not preserve the declared NumPy float32 reduction tolerance on realistic 512-timestep windows. The clean zero-tolerance failure is preserved in MLflow.
+- `InstanceStandardize` now uses a batched native Torch matrix-vector reduction, which preserves GPU execution while matching the former CPU NumPy accumulation within the declared tolerance. Story 8.7 requires a fresh zero-tolerance representative pass before certification.
+
 ## Tasks / Subtasks
 
 - [x] Task 1: Specify the signal-block contracts with failing tests (AC 1-3).
@@ -161,3 +166,4 @@ GPT-5
 
 - 2026-10-03: Created Story 8.3 with an explicit padding-validity channel and predeclared normalization tolerance.
 - 2026-10-03: Added, migrated, reviewed, and verified the shared dense-signal components and padding-safe FoG configuration.
+- 2026-10-03: Story 8.7 corrected the real-window reduction-order defect exposed by its zero-tolerance parity run.
