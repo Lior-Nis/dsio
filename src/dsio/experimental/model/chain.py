@@ -16,7 +16,7 @@ from dsio.config.components import ComponentError
 
 
 class ComponentChain(nn.Module):
-    """Compose optional preprocessing with a transform, backbone, and task head."""
+    """Compose preprocessing, transform, backbone and head; superseded by ``compositions.Chain``."""
 
     def __init__(
         self,

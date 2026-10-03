@@ -27,23 +27,51 @@ LABELLED_DATASET: ComponentConfig = {
 }
 
 
-def _encoder() -> nn.Sequential:
-    return nn.Sequential(nn.Flatten(), nn.Linear(784, 32), nn.ReLU(), nn.Linear(32, 16))
+# The encoder pretrains inside the autoencoder and transfers, frozen, into the classifier.
+ENCODER: ComponentConfig = {
+    "reference": "dsio.experimental.model.compositions:MLP",
+    "parameters": {"input_shape": [28, 28], "hidden": [32], "output": 16},
+}
 
+AUTOENCODER: ComponentConfig = {
+    "reference": "dsio.experimental.model.compositions:Chain",
+    "parameters": {
+        "backbone": ENCODER,
+        "head": {
+            "reference": "dsio.experimental.model.compositions:Stages",
+            "parameters": {
+                "stages": [
+                    {"reference": "torch.nn:ReLU"},
+                    {
+                        "reference": "dsio.experimental.model.compositions:MLP",
+                        "parameters": {
+                            "input_shape": [16],
+                            "hidden": [32],
+                            "output": 784,
+                            "output_activation": "sigmoid",
+                        },
+                    },
+                    {
+                        "reference": "torch.nn:Unflatten",
+                        "parameters": {"dim": 1, "unflattened_size": [28, 28]},
+                    },
+                ]
+            },
+        },
+    },
+}
 
-class DigitAutoencoder(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.encoder = _encoder()
-        self.decoder = nn.Sequential(
-            nn.ReLU(), nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, 784), nn.Sigmoid()
-        )
-
-    def encode(self, x: Tensor) -> Tensor:
-        return self.encoder(x.float())
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self.decoder(self.encode(x)).reshape(-1, 28, 28)
+CLASSIFIER: ComponentConfig = {
+    "reference": "dsio.experimental.model.compositions:Chain",
+    "parameters": {
+        "backbone": ENCODER,
+        "head": {
+            "reference": "torch.nn:Linear",
+            "parameters": {"in_features": 16, "out_features": 10},
+        },
+        "frozen_backbone": True,
+    },
+}
 
 
 class ReconstructionObjective(nn.Module):
@@ -52,22 +80,6 @@ class ReconstructionObjective(nn.Module):
     ) -> Mapping[str, Tensor]:
         del stage
         return {"loss": F.mse_loss(model(batch["x"]), batch["x"].float())}
-
-
-class FrozenDigitClassifier(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.encoder = _encoder()
-        self.classifier = nn.Linear(16, 10)
-
-    def freeze_encoder(self) -> None:
-        for parameter in self.encoder.parameters():
-            parameter.requires_grad_(False)
-
-    def forward(self, x: Tensor) -> Tensor:
-        with torch.no_grad():
-            encoded = self.encoder(x.float())
-        return self.classifier(encoded)
 
 
 class ClassificationObjective(nn.Module):

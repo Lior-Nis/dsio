@@ -30,7 +30,10 @@ def _check_3d(x: torch.Tensor, who: str) -> None:
 
 
 class MLP1d(nn.Module):
-    """Flatten and project. The baseline every other backbone must beat."""
+    """Flatten and project; superseded by ``compositions.MLP``.
+
+    The baseline every other backbone must beat.
+    """
 
     def __init__(self, channels: int, length: int, hidden: int = 128, out_dim: int = 64) -> None:
         super().__init__()
@@ -471,7 +474,7 @@ class InstanceStandardize(nn.Module):
 
 
 class FixedStandardize(nn.Module):
-    """Standardise by statistics supplied from outside — fitted on the train fold only."""
+    """Standardise by outside statistics; superseded by ``standardization.Standardize``."""
 
     mean: torch.Tensor
     std: torch.Tensor

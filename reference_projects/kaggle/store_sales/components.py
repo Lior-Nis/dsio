@@ -10,7 +10,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
-from reference_projects.kaggle.store_sales.data import CONTEXT_DAYS, HORIZON_DAYS
+from reference_projects.kaggle.store_sales.data import HORIZON_DAYS
 
 FEATURES = 5
 
@@ -22,35 +22,6 @@ DATASET: ComponentConfig = {
         "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "log1p": True},
     },
 }
-
-
-class ForecastRegressor(nn.Module):
-    def __init__(
-        self,
-        context_days: int = CONTEXT_DAYS,
-        horizon_days: int = HORIZON_DAYS,
-        features: int = FEATURES,
-        hidden: int = 32,
-    ) -> None:
-        super().__init__()
-        self.context_days = context_days
-        self.horizon_days = horizon_days
-        self.features = features
-        self.network = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear((context_days + horizon_days) * features, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, horizon_days),
-            nn.Softplus(),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        expected = (self.context_days + self.horizon_days, self.features)
-        if x.ndim != 3 or tuple(x.shape[1:]) != expected:
-            raise ValueError(
-                f"expected [batch, {expected[0]}, {expected[1]}], got {tuple(x.shape)}"
-            )
-        return self.network(x.float())
 
 
 class ForecastObjective(nn.Module):

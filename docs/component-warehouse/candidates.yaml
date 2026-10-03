@@ -12,16 +12,18 @@ Window Dataset class:
   reason: Window dataset with weights and groups (#2), Story 9.1.
 Local nn.Module models:
   consumers:
-    - reference_projects/kaggle/titanic
-    - reference_projects/kaggle/bike_sharing
-    - reference_projects/kaggle/digit_recognizer
     - reference_projects/kaggle/essay_scoring
     - reference_projects/kaggle/parkinsons_fog
     - reference_projects/kaggle/rogii
-    - reference_projects/kaggle/store_sales
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: Backbones, heads, adapters and compositions (#7-#17), Stories 7.3, 8.3-8.5, 9.4.
+  reason: Sequence backbones, heads and adapters (#10-#13, #15, #16), Stories 8.3-8.5, 9.4.
+Verified encoder handoff:
+  consumers:
+    - reference_projects/kaggle/digit_recognizer
+  reason: >-
+    Loading a pretrained backbone only after its run, identity, digest and label-free lineage
+    verify (#17) has one consumer; a DSio load-and-freeze path waits for pretrained weights (v2).
 Local objectives:
   consumers:
     - reference_projects/kaggle/titanic

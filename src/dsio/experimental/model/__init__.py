@@ -34,6 +34,7 @@ from dsio.experimental.model.components import (
     simclr_projector_head,
     vicreg_projector_head,
 )
+from dsio.experimental.model.compositions import MLP, Chain, Stages
 from dsio.experimental.model.masking import (
     CausalMask,
     PatchMask,
@@ -44,7 +45,9 @@ from dsio.experimental.model.masking import (
 from dsio.experimental.model.standardization import Standardize
 
 __all__ = [
+    "MLP",
     "CausalMask",
+    "Chain",
     "ComponentChain",
     "Conv1dEncoder",
     "CrossEntropy",
@@ -61,6 +64,7 @@ __all__ = [
     "RandomMask",
     "RandomScale",
     "SpanMask",
+    "Stages",
     "Standardize",
     "VICReg",
     "apply_mask",

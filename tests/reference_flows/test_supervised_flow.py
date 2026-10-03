@@ -15,6 +15,7 @@ from tests.golden import assert_golden_metrics
 from tests.replay import assert_same_identities
 
 from dsio.data.loading import DsioDataModule
+from dsio.experimental.model import MLP
 from dsio.model.module import DsioModule
 from dsio.tracking import TrackingError, canonical_dataset_digest, resolve_experiment
 
@@ -60,10 +61,12 @@ def test_training_and_inference_share_channel_first_signal_layout(
 
 def test_regressor_rejects_time_major_input(reference_services: None) -> None:
     del reference_services
-    from reference_projects.supervised.components import TinyRegressor
+    from reference_projects.supervised.tasks.training import _MODEL
 
-    with pytest.raises(ValueError, match=r"\[batch, channels, time\].*\(batch, 1, 4\)"):
-        TinyRegressor()(torch.ones(2, 4, 1))
+    from dsio.config.components import resolve_component
+
+    with pytest.raises(ValueError, match=r"expects \[batch, 1, 4\], got \(2, 4, 1\)"):
+        resolve_component(_MODEL)(torch.ones(2, 4, 1))
 
 
 def test_supervised_reference_flow_replays_and_reevaluates_without_training(
@@ -75,7 +78,6 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
     from prefect.testing.utilities import prefect_test_harness
     from reference_projects.supervised.components import (
         RegressionObjective,
-        TinyRegressor,
         build_synthetic_store,
     )
     from reference_projects.supervised.flow import reevaluate, supervised_flow
@@ -141,7 +143,7 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
 
     expected_runtime = {
         "types": (DsioModule, DsioDataModule),
-        "model_type": TinyRegressor,
+        "model_type": MLP,
         "objective_type": RegressionObjective,
         "optimizer_factory": torch.optim.SGD,
         "optimizer_parameters": {"lr": 0.05},
@@ -285,8 +287,8 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
             "dsio.inference.predictor:build_predictor"
         )
         assert export_provenance["components"]["model"] == {
-            "reference": "reference_projects.supervised.components:TinyRegressor",
-            "parameters": {},
+            "reference": "dsio.experimental.model.compositions:MLP",
+            "parameters": {"input_shape": [1, 4], "output": 1},
         }
         assert export_provenance["components"]["normalizer"] == (
             "dsio.experimental.inference.outputs:TensorOutput"

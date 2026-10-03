@@ -278,3 +278,39 @@ dsio.experimental.model.standardization:Standardize:
   - consumer: reference_projects/kaggle/digit_recognizer
     test: tests/kaggle_portfolio/test_digit_recognizer.py
     kind: real
+dsio.experimental.model.compositions:MLP:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/titanic
+    test: tests/kaggle_portfolio/test_titanic.py
+    kind: real
+  - consumer: reference_projects/kaggle/bike_sharing
+    test: tests/kaggle_portfolio/test_bike_sharing.py
+    kind: real
+  - consumer: reference_projects/kaggle/store_sales
+    test: tests/kaggle_portfolio/test_store_sales.py
+    kind: real
+  - consumer: reference_projects/kaggle/digit_recognizer
+    test: tests/kaggle_portfolio/test_digit_recognizer.py
+    kind: real
+  - consumer: reference_projects/supervised
+    test: tests/reference_flows/test_supervised_flow.py
+    kind: fixture
+  - consumer: reference_projects/self_supervised
+    test: tests/reference_flows/test_self_supervised_flow.py
+    kind: fixture
+dsio.experimental.model.compositions:Chain:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/digit_recognizer
+    test: tests/kaggle_portfolio/test_digit_recognizer.py
+    kind: real
+dsio.experimental.model.compositions:Stages:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/bike_sharing
+    test: tests/kaggle_portfolio/test_bike_sharing.py
+    kind: real
+  - consumer: reference_projects/kaggle/digit_recognizer
+    test: tests/kaggle_portfolio/test_digit_recognizer.py
+    kind: real

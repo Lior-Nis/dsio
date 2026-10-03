@@ -100,3 +100,9 @@ def test_fitted_values_are_logged_as_run_relative_evidence() -> None:
     assert downloaded.read_text(encoding="utf-8").count('"mean"') == 1
     with pytest.raises(ValueError, match="invalid fitted artifact name"):
         record_fitted(run.info.run_id, "../escape", {})
+
+
+def test_standardize_casts_to_its_statistics_dtype() -> None:
+    stage = Standardize([1.0], [2.0])
+    assert stage(torch.ones(2, 1, dtype=torch.float64)).dtype == torch.float32
+    assert stage.double()(torch.ones(2, 1)).dtype == torch.float64
