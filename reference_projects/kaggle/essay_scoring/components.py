@@ -4,11 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping
-from typing import Any
-
-import torch
-from torch import Tensor, nn
 
 from dsio.config.components import ComponentConfig
 
@@ -72,23 +67,7 @@ OBJECTIVE: ComponentConfig = {
         "target_dtype": "int64",
     },
 }
-
-
-class OrdinalPrediction(nn.Module):
-    def forward(self, logits: Tensor) -> Mapping[str, Tensor]:
-        probabilities = torch.softmax(logits, dim=1)
-        return {"prediction": torch.argmax(probabilities, dim=1) + 1, "score": probabilities}
-
-
-def validate_ordinal_prediction(output: Mapping[str, Any]) -> None:
-    prediction, score = output.get("prediction"), output.get("score")
-    if not isinstance(prediction, Tensor) or prediction.ndim != 1:
-        raise ValueError("ordinal prediction must have shape [batch]")
-    if not bool(torch.all((prediction >= 1) & (prediction <= 6))):
-        raise ValueError("ordinal predictions must be in [1, 6]")
-    if not isinstance(score, Tensor) or score.shape != (prediction.shape[0], 6):
-        raise ValueError("ordinal score must have shape [batch, 6]")
-    if not bool(torch.isfinite(score).all()) or not torch.allclose(
-        score.sum(dim=1), torch.ones_like(score[:, 0]), atol=1e-6
-    ):
-        raise ValueError("ordinal scores must be finite probability distributions")
+OUTPUT: ComponentConfig = {
+    "reference": "dsio.experimental.inference.outputs.multiclass:MulticlassOutput",
+    "parameters": {"classes": 6, "scores": True, "label_offset": 1},
+}

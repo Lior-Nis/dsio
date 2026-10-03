@@ -40,6 +40,6 @@ OBJECTIVE: ComponentConfig = {
 
 
 OUTPUT: ComponentConfig = {
-    "reference": "dsio.experimental.inference.outputs:BinaryOutput",
+    "reference": "dsio.experimental.inference.outputs.binary:BinaryOutput",
     "parameters": {},
 }

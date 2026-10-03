@@ -300,7 +300,7 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
             "parameters": {"input_shape": [1, 4], "output": 1},
         }
         assert export_provenance["components"]["output"] == {
-            "reference": "dsio.experimental.inference.outputs:RegressionOutput",
+            "reference": "dsio.experimental.inference.outputs.regression:RegressionOutput",
             "parameters": {"shape": [1]},
         }
         assert export_provenance["components"]["preprocessor"] == {

@@ -70,6 +70,7 @@ def assert_downstream_evidence(
     collator: Mapping[str, Any] | None = None,
     collators: Mapping[str, Mapping[str, Any]] | None = None,
     dynamic_axes: Mapping[str, list[int]] | None = None,
+    output: Mapping[str, Any] | None = None,
 ) -> None:
     client = MlflowClient()
     identities = result["identities"]
@@ -100,6 +101,8 @@ def assert_downstream_evidence(
             assert components["collator"] == (collator if collators is None else collators[stage])
             if stage == "export" and dynamic_axes is not None:
                 assert provenance["configuration"]["dynamic_axes"] == dynamic_axes
+            if stage == "export" and output is not None:
+                assert components["output"] == output
 
     inference_run_id = result["inference_run_id"]
     assert isinstance(inference_run_id, str)

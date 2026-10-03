@@ -17,14 +17,14 @@ from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.eval.metrics import quadratic_weighted_kappa
 from dsio.experimental.data import PadCollator, collate_arrays
+from dsio.experimental.inference import MulticlassOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.essay_scoring.components import (
     COLLATOR,
     INPUTS,
-    OrdinalPrediction,
-    validate_ordinal_prediction,
+    OUTPUT,
 )
 
 
@@ -52,6 +52,7 @@ def export(
             collate_fn=resolve_component(COLLATOR, expected=PadCollator),
         )
         inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        output = resolve_component(OUTPUT, expected=MulticlassOutput)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -65,12 +66,7 @@ def export(
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
-                "normalizer": (
-                    "reference_projects.kaggle.essay_scoring.components:OrdinalPrediction"
-                ),
-                "validator": (
-                    "reference_projects.kaggle.essay_scoring.components:validate_ordinal_prediction"
-                ),
+                "output": OUTPUT,
                 "dataset_factory": INPUTS,
                 "collator": COLLATOR,
             },
@@ -83,8 +79,8 @@ def export(
             reference,
             model=model,
             preprocessor=preprocessor,
-            normalizer=OrdinalPrediction(),
-            validator=validate_ordinal_prediction,
+            normalizer=output,
+            validator=output.validator,
             input_example=example,
         )
         info = log_predictor(

@@ -639,7 +639,7 @@ def test_parkinsons_evaluation_rejects_malformed_dense_evidence(tmp_path: Path) 
         DATASET,
         INPUT_COLLATOR,
         INPUTS,
-        validate_fog_prediction,
+        OUTPUT,
     )
 
     from dsio.config.components import resolve_component
@@ -647,12 +647,18 @@ def test_parkinsons_evaluation_rejects_malformed_dense_evidence(tmp_path: Path) 
     from dsio.data.loading import LoadingError
     from dsio.data.store import SignalStore
     from dsio.experimental.data import PadCollator, collate_arrays
+    from dsio.experimental.inference import BinaryOutput, PredictionViolation
 
     probability = torch.tensor([[[0.7, 0.2, 0.8]]])
-    with pytest.raises(ValueError, match="thresholded"):
-        validate_fog_prediction(
-            {"prediction": torch.zeros_like(probability), "probability": probability}
+    output = resolve_component(OUTPUT, expected=BinaryOutput)
+    with pytest.raises(PredictionViolation) as raised:
+        output.validator(
+            {
+                "prediction": torch.zeros_like(probability, dtype=torch.int64),
+                "probability": probability,
+            }
         )
+    assert raised.value.kind == "threshold consistency"
 
     store_path = tmp_path / "fog-arrays"
     short = np.zeros((1, CHANNEL_COUNT), dtype=np.float32)
@@ -774,6 +780,7 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         INPUTS,
         MODEL,
         OBJECTIVE,
+        OUTPUT,
     )
 
     assert_execution_evidence(
@@ -802,16 +809,13 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
             "inference": INPUT_COLLATOR,
         },
         dynamic_axes={"x": [1], "prediction": [1], "probability": [1]},
-    )
-
-    from reference_projects.kaggle.parkinsons_fog.components import (
-        FogOutput,
-        validate_fog_prediction,
+        output=OUTPUT,
     )
 
     from dsio.config.components import resolve_component
     from dsio.data.store import SignalStore
     from dsio.experimental.data import PadCollator, collate_arrays
+    from dsio.experimental.inference import BinaryOutput
     from dsio.inference import build_predictor, predict
     from dsio.train.artifacts import ArtifactRef
 
@@ -829,12 +833,13 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         [sample_id],
         collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
     )
+    output = resolve_component(OUTPUT, expected=BinaryOutput)
     local = build_predictor(
         checkpoint,
         model=resolve_component(MODEL, expected=torch.nn.Module),
         preprocessor=torch.nn.Identity(),
-        normalizer=FogOutput(),
-        validator=validate_fog_prediction,
+        normalizer=output,
+        validator=output.validator,
         input_example={
             "sample_id": arrays["sample_id"].tolist(),
             "x": torch.from_numpy(arrays["x"]),

@@ -137,6 +137,7 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
         INPUTS,
         MODEL,
         OBJECTIVE,
+        OUTPUT,
     )
 
     assert_execution_evidence(
@@ -157,16 +158,13 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
         datasets={"export": INPUTS, "evaluation": INPUTS, "inference": INPUTS},
         collator=COLLATOR,
         dynamic_axes={"x": [1]},
-    )
-
-    from reference_projects.kaggle.essay_scoring.components import (
-        OrdinalPrediction,
-        validate_ordinal_prediction,
+        output=OUTPUT,
     )
 
     from dsio.config.components import resolve_component
     from dsio.data.store import SignalStore
     from dsio.experimental.data import PadCollator, collate_arrays
+    from dsio.experimental.inference import MulticlassOutput
     from dsio.inference import build_predictor, predict
     from dsio.train.artifacts import ArtifactRef
 
@@ -185,12 +183,13 @@ def test_essay_flow_trains_variable_length_ordinal_predictions(
         collate_fn=resolve_component(COLLATOR, expected=PadCollator),
     )
     inputs = {"sample_id": arrays["sample_id"].tolist(), "x": torch.from_numpy(arrays["x"])}
+    output = resolve_component(OUTPUT, expected=MulticlassOutput)
     local = build_predictor(
         checkpoint,
         model=resolve_component(MODEL, expected=torch.nn.Module),
         preprocessor=torch.nn.Identity(),
-        normalizer=OrdinalPrediction(),
-        validator=validate_ordinal_prediction,
+        normalizer=output,
+        validator=output.validator,
         input_example=inputs,
     )(inputs)
     loaded = predict(

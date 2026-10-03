@@ -134,7 +134,13 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         result["metrics"]["last_value_rmse"]
     )
     assert run.data.params["evaluation.masked"] == "true"
-    from reference_projects.kaggle.rogii.components import COLLATOR, DATASET, MODEL, OBJECTIVE
+    from reference_projects.kaggle.rogii.components import (
+        COLLATOR,
+        DATASET,
+        MODEL,
+        OBJECTIVE,
+        OUTPUT,
+    )
 
     assert_execution_evidence(
         result["train_run_id"],
@@ -154,16 +160,13 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         datasets={"export": DATASET, "evaluation": DATASET, "inference": DATASET},
         collator=COLLATOR,
         dynamic_axes={"x": [1], "prediction": [1]},
-    )
-
-    from reference_projects.kaggle.rogii.components import (
-        TvtOutput,
-        validate_tvt_prediction,
+        output=OUTPUT,
     )
 
     from dsio.config.components import resolve_component
     from dsio.data.store import SignalStore
     from dsio.experimental.data import PadCollator, collate_arrays
+    from dsio.experimental.inference import RegressionOutput
     from dsio.inference import build_predictor, predict
     from dsio.train.artifacts import ArtifactRef
 
@@ -182,12 +185,13 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         collate_fn=resolve_component(COLLATOR, expected=PadCollator),
     )
     inputs = {"sample_id": arrays["sample_id"].tolist(), "x": torch.from_numpy(arrays["x"])}
+    output = resolve_component(OUTPUT, expected=RegressionOutput)
     local = build_predictor(
         checkpoint,
         model=resolve_component(MODEL, expected=torch.nn.Module),
         preprocessor=torch.nn.Identity(),
-        normalizer=TvtOutput(),
-        validator=validate_tvt_prediction,
+        normalizer=output,
+        validator=output.validator,
         input_example=inputs,
     )(inputs)
     loaded = predict(
