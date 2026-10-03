@@ -230,9 +230,7 @@ def record_parity(
     return {
         "moved": moved,
         "run_id": parity_run_id,
-        "run_uri": (
-            f"{ui_uri.rstrip('/')}/#/experiments/{experiment_id}/runs/{parity_run_id}"
-        ),
+        "run_uri": (f"{ui_uri.rstrip('/')}/#/experiments/{experiment_id}/runs/{parity_run_id}"),
     }
 
 
@@ -327,9 +325,7 @@ def _ui_uri(tracking_uri: str) -> str:
     return uri.rstrip("/")
 
 
-def _require_hardware_class(
-    baseline: Mapping[str, Any], observed: Mapping[str, Any]
-) -> None:
+def _require_hardware_class(baseline: Mapping[str, Any], observed: Mapping[str, Any]) -> None:
     """Reject parity runs made on a different accelerator/device/thread class."""
     expected = {
         "accelerator": "cuda" if baseline.get("cuda") else "cpu",

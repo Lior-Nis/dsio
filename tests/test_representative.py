@@ -44,9 +44,7 @@ def test_ui_uri_is_explicit_and_cannot_persist_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MLFLOW_UI_URI", "https://mlflow.example.test/base/")
-    assert representative._ui_uri("http://localhost:5000") == (
-        "https://mlflow.example.test/base"
-    )
+    assert representative._ui_uri("http://localhost:5000") == ("https://mlflow.example.test/base")
 
     monkeypatch.setenv("MLFLOW_UI_URI", "https://user:secret@mlflow.example.test")
     with pytest.raises(ValueError, match="credentials"):
@@ -74,9 +72,7 @@ def test_single_and_multi_model_results_flatten_to_one_record() -> None:
         "fused.evaluation_run_id": "ef",
         "tabular.evaluation_run_id": "et",
     }
-    assert representative._evaluation_run_ids(
-        {"runs": representative._run_ids(multi)}
-    ) == {
+    assert representative._evaluation_run_ids({"runs": representative._run_ids(multi)}) == {
         "fused.evaluation_run_id": "ef",
         "tabular.evaluation_run_id": "et",
     }

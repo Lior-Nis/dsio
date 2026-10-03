@@ -4,7 +4,7 @@ baseline_commit: 6db3eea1538de68106e9199ce8dbf134239a9150
 
 # Story 7.7: Record tabular migration parity
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -32,19 +32,19 @@ so that Epic 7 proves the warehouse preserved behavior at real-data scale.
   - [x] Preserve raw run IDs separately from browser URIs. Use the live tracking endpoint for MLflow API calls and a configurable HTTP(S) UI base for committed links; never persist credentials or a file-store URI.
   - [x] Print the parity run ID/URI and complete deltas for evidence registration. MLflow and `evidence.yaml` are the sources of truth; do not add a parallel result schema or rewrite the Story 6.6 baseline.
   - [x] Add focused tests for exact parity, mismatches, missing metrics, hardware mismatch, nested/multi-model run selection, MLflow tags/metrics/status, UI URI construction and worker isolation.
-- [ ] Task 3: Run the four real representative consumers (AC 1, 2).
-  - [ ] Set the live MLflow tracking endpoint and tailnet UI base explicitly; use the runner's isolated Prefect subprocess and fresh central run workspace.
-  - [ ] Run `titanic`, `bike_sharing`, `store_sales` and `digit_recognizer` with seed 19 and tolerance zero on the recorded 12-thread CPU class.
-  - [ ] Verify every comparison passes exactly. If any metric moves, stop: no tolerance was pre-declared in Stories 7.1-7.6, so this story may not invent one after observing a delta.
-  - [ ] Verify the parity runs and their metrics are visible at `https://pop.tailee691f.ts.net:8443`.
-- [ ] Task 4: Attach the real evidence and record deletion (AC 3, 4).
-  - [ ] Add each consumer's parity run URI to every corresponding real-use record for `StoredItems`, fitting/standardization, compositions, objectives, outputs/validators and `collate_arrays`; keep fixture uses unchanged.
-  - [ ] Regenerate `docs/component-warehouse/catalog.md` and verify every added URI has a matching consumer use.
-  - [ ] Run `tools/consumer_metrics.py`; record the four-consumer baseline/current non-ingestion totals, delta and remaining banned definitions in the Dev Agent Record and PR.
-- [ ] Task 5: Close Epic 7 with full verification (AC 1-4).
-  - [ ] Run the four contract-tier consumer suites without editing `tests/golden_metrics.json`.
-  - [ ] Run the full test, static, import-contract, catalog, admission and distribution gates.
-  - [ ] Confirm baseline metric values and all contract-tier goldens are byte-for-byte unchanged.
+- [x] Task 3: Run the four real representative consumers (AC 1, 2).
+  - [x] Set the live MLflow tracking endpoint and tailnet UI base explicitly; use the runner's isolated Prefect subprocess and fresh central run workspace.
+  - [x] Run `titanic`, `bike_sharing`, `store_sales` and `digit_recognizer` with seed 19 and tolerance zero on the recorded 12-thread CPU class.
+  - [x] Verify every comparison passes exactly. If any metric moves, stop: no tolerance was pre-declared in Stories 7.1-7.6, so this story may not invent one after observing a delta.
+  - [x] Verify the parity runs and their metrics are visible at `https://pop.tailee691f.ts.net:8443`.
+- [x] Task 4: Attach the real evidence and record deletion (AC 3, 4).
+  - [x] Add each consumer's parity run URI to every corresponding real-use record for `StoredItems`, fitting/standardization, compositions, objectives, outputs/validators and `collate_arrays`; keep fixture uses unchanged.
+  - [x] Regenerate `docs/component-warehouse/catalog.md` and verify every added URI has a matching consumer use.
+  - [x] Run `tools/consumer_metrics.py`; record the four-consumer baseline/current non-ingestion totals, delta and remaining banned definitions in the Dev Agent Record and PR.
+- [x] Task 5: Close Epic 7 with full verification (AC 1-4).
+  - [x] Run the four contract-tier consumer suites without editing `tests/golden_metrics.json`.
+  - [x] Run the full test, static, import-contract, catalog, admission and distribution gates.
+  - [x] Confirm baseline metric values and all contract-tier goldens are byte-for-byte unchanged.
 
 ## Dev Notes
 
@@ -96,12 +96,17 @@ GPT-5
 ### Debug Log References
 
 - Bike Sharing historical run: evaluation `8f38a18dd6744f95afe9215bb8b70f3d`, RMSE `204.82968446829918`.
+- Parity runs: Titanic `a0e83b068f4c4146a3d2158bcb933721`; Bike `6c37805abd37412f99859815517ce85d`; Store Sales `6df24c8d13a14d5bb1b73459f5d2d22f`; Digit `990bcbd49b1147d0a04ecf0af98459e9`.
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Recovered the Bike Sharing baseline from `fe37300c844de7db0c54189ec0c45b9c16cdd101` on the recorded CPU/12-thread hardware class.
 - Added immutable comparison-mode protection and MLflow parity-run coverage without introducing a parallel result model.
+- All four migrated consumers matched their real-data baselines exactly at absolute tolerance zero; their MLflow parity runs are `FINISHED` with zero deltas.
+- Four-consumer non-ingestion code fell from 2,207 lines at the Story 6.6 baseline to 2,184 lines now (`-23`); none of the four consumers has a remaining banned local definition.
+- Verification completed: four consumer suites `22 passed`; full suite `1183 passed, 1 deselected`; Ruff, format, mypy, import contracts, catalog, admission, build and distribution contracts all pass.
+- Golden metrics and the completed four-consumer baseline remained byte-for-byte unchanged throughout migrated execution and final verification.
 
 ### File List
 
@@ -109,9 +114,12 @@ GPT-5
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `docs/component-warehouse/parity-baseline.json`
 - `docs/component-warehouse/parity-baseline.md`
+- `docs/component-warehouse/evidence.yaml`
+- `docs/component-warehouse/catalog.md`
 - `tests/test_representative.py`
 - `tools/representative.py`
 
 ## Change Log
 
 - 2026-10-03: Recovered Bike baseline and added generic MLflow parity recording.
+- 2026-10-03: Recorded exact real-data parity, attached evidence, and measured Epic 7 deletion.
