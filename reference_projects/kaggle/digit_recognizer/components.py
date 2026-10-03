@@ -104,6 +104,6 @@ CLASSIFICATION_OBJECTIVE: ComponentConfig = {
 
 
 OUTPUT: ComponentConfig = {
-    "reference": "dsio.experimental.inference.outputs:MulticlassOutput",
+    "reference": "dsio.experimental.inference.outputs.multiclass:MulticlassOutput",
     "parameters": {"classes": 10},
 }

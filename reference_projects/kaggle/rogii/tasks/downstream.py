@@ -16,15 +16,15 @@ from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.experimental.data import PadCollator, collate_arrays
+from dsio.experimental.inference import RegressionOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.rogii.components import (
     COLLATOR,
     DATASET,
+    OUTPUT,
     TARGET_SCALE,
-    TvtOutput,
-    validate_tvt_prediction,
 )
 
 
@@ -52,6 +52,7 @@ def export(
             collate_fn=resolve_component(COLLATOR, expected=PadCollator),
         )
         inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        output = resolve_component(OUTPUT, expected=RegressionOutput)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -65,8 +66,7 @@ def export(
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
-                "normalizer": "reference_projects.kaggle.rogii.components:TvtOutput",
-                "validator": "reference_projects.kaggle.rogii.components:validate_tvt_prediction",
+                "output": OUTPUT,
                 "dataset_factory": DATASET,
                 "collator": COLLATOR,
             },
@@ -79,8 +79,8 @@ def export(
             reference,
             model=model,
             preprocessor=preprocessor,
-            normalizer=TvtOutput(),
-            validator=validate_tvt_prediction,
+            normalizer=output,
+            validator=output.validator,
             input_example=example,
         )
         info = log_predictor(

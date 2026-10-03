@@ -430,7 +430,7 @@ dsio.experimental.model.masked_objective:MaskedObjective:
   - consumer: reference_projects/kaggle/rogii
     test: tests/kaggle_portfolio/test_rogii.py
     kind: real
-dsio.experimental.inference.outputs:BinaryOutput:
+dsio.experimental.inference.outputs.binary:BinaryOutput:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/titanic
@@ -438,16 +438,27 @@ dsio.experimental.inference.outputs:BinaryOutput:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/a0e83b068f4c4146a3d2158bcb933721
-dsio.experimental.inference.outputs:BinaryValidator:
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391
+dsio.experimental.inference.outputs.binary:BinaryValidator:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/titanic
     test: tests/kaggle_portfolio/test_titanic.py
     kind: real
-    via: dsio.experimental.inference.outputs:BinaryOutput
+    via: dsio.experimental.inference.outputs.binary:BinaryOutput
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/a0e83b068f4c4146a3d2158bcb933721
-dsio.experimental.inference.outputs:MulticlassOutput:
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
+    via: dsio.experimental.inference.outputs.binary:BinaryOutput
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/a6752316da6244e9a5790b188b5c5391
+dsio.experimental.inference.outputs.multiclass:MulticlassOutput:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/digit_recognizer
@@ -455,16 +466,27 @@ dsio.experimental.inference.outputs:MulticlassOutput:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9
-dsio.experimental.inference.outputs:MulticlassValidator:
+  - consumer: reference_projects/kaggle/essay_scoring
+    test: tests/kaggle_portfolio/test_essay_scoring.py
+    kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b
+dsio.experimental.inference.outputs.multiclass:MulticlassValidator:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/digit_recognizer
     test: tests/kaggle_portfolio/test_digit_recognizer.py
     kind: real
-    via: dsio.experimental.inference.outputs:MulticlassOutput
+    via: dsio.experimental.inference.outputs.multiclass:MulticlassOutput
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9
-dsio.experimental.inference.outputs:RegressionOutput:
+  - consumer: reference_projects/kaggle/essay_scoring
+    test: tests/kaggle_portfolio/test_essay_scoring.py
+    kind: real
+    via: dsio.experimental.inference.outputs.multiclass:MulticlassOutput
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8277e41ca3a4957b1b74c968234383b
+dsio.experimental.inference.outputs.regression:RegressionOutput:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/bike_sharing
@@ -480,25 +502,36 @@ dsio.experimental.inference.outputs:RegressionOutput:
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
-dsio.experimental.inference.outputs:RegressionValidator:
+  - consumer: reference_projects/kaggle/rogii
+    test: tests/kaggle_portfolio/test_rogii.py
+    kind: real
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b
+dsio.experimental.inference.outputs.regression:RegressionValidator:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
   - consumer: reference_projects/kaggle/bike_sharing
     test: tests/kaggle_portfolio/test_bike_sharing.py
     kind: real
-    via: dsio.experimental.inference.outputs:RegressionOutput
+    via: dsio.experimental.inference.outputs.regression:RegressionOutput
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d
   - consumer: reference_projects/kaggle/store_sales
     test: tests/kaggle_portfolio/test_store_sales.py
     kind: real
-    via: dsio.experimental.inference.outputs:RegressionOutput
+    via: dsio.experimental.inference.outputs.regression:RegressionOutput
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
-    via: dsio.experimental.inference.outputs:RegressionOutput
+    via: dsio.experimental.inference.outputs.regression:RegressionOutput
+  - consumer: reference_projects/kaggle/rogii
+    test: tests/kaggle_portfolio/test_rogii.py
+    kind: real
+    via: dsio.experimental.inference.outputs.regression:RegressionOutput
+    runs:
+    - https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/4f28d9a464dc4900b4a9689cbde6707b
 dsio.experimental.data.arrays:collate_arrays:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:

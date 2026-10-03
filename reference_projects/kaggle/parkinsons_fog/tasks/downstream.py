@@ -16,6 +16,7 @@ from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.experimental.data import PadCollator, collate_arrays
+from dsio.experimental.inference import BinaryOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
@@ -24,8 +25,7 @@ from reference_projects.kaggle.parkinsons_fog.components import (
     DATASET,
     INPUT_COLLATOR,
     INPUTS,
-    FogOutput,
-    validate_fog_prediction,
+    OUTPUT,
 )
 from reference_projects.kaggle.parkinsons_fog.data import TARGETS
 
@@ -54,6 +54,7 @@ def export(
             collate_fn=resolve_component(INPUT_COLLATOR, expected=PadCollator),
         )
         inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        output = resolve_component(OUTPUT, expected=BinaryOutput)
         identity = record_provenance(
             run.info.run_id,
             {
@@ -67,10 +68,7 @@ def export(
                 "builder": "dsio.inference.predictor:build_predictor",
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
-                "normalizer": ("reference_projects.kaggle.parkinsons_fog.components:FogOutput"),
-                "validator": (
-                    "reference_projects.kaggle.parkinsons_fog.components:validate_fog_prediction"
-                ),
+                "output": OUTPUT,
                 "dataset_factory": INPUTS,
                 "collator": INPUT_COLLATOR,
             },
@@ -83,8 +81,8 @@ def export(
             reference,
             model=model,
             preprocessor=preprocessor,
-            normalizer=FogOutput(),
-            validator=validate_fog_prediction,
+            normalizer=output,
+            validator=output.validator,
             input_example=example,
         )
         info = log_predictor(

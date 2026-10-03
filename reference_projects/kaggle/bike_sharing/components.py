@@ -70,6 +70,6 @@ OBJECTIVE: ComponentConfig = {
 
 
 OUTPUT: ComponentConfig = {
-    "reference": "dsio.experimental.inference.outputs:RegressionOutput",
+    "reference": "dsio.experimental.inference.outputs.regression:RegressionOutput",
     "parameters": {"shape": [1], "non_negative": True},
 }

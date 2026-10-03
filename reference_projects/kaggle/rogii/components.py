@@ -6,8 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
-import torch
-from torch import Tensor, nn
 
 from dsio.config.components import ComponentConfig
 
@@ -83,16 +81,7 @@ MODEL: ComponentConfig = {
         "bound": 0.01,
     },
 }
-
-
-class TvtOutput(nn.Module):
-    def forward(self, normalized: Tensor) -> Mapping[str, Tensor]:
-        return {"prediction": normalized * TARGET_SCALE}
-
-
-def validate_tvt_prediction(output: Mapping[str, Any]) -> None:
-    prediction = output.get("prediction")
-    if not isinstance(prediction, Tensor) or prediction.ndim != 2:
-        raise ValueError("TVT prediction must have shape [batch, points]")
-    if not bool(torch.isfinite(prediction).all()):
-        raise ValueError("TVT prediction must be finite")
+OUTPUT: ComponentConfig = {
+    "reference": "dsio.experimental.inference.outputs.regression:RegressionOutput",
+    "parameters": {"shape": [None], "scale": TARGET_SCALE},
+}

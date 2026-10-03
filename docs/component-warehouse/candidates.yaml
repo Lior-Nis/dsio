@@ -26,14 +26,9 @@ Local objectives:
     CMI moves to SupervisedObjective (#18) with its weighting stories (9.2-9.4).
 Prediction normalizers and validators:
   consumers:
-    - reference_projects/kaggle/essay_scoring
-    - reference_projects/kaggle/parkinsons_fog
-    - reference_projects/kaggle/rogii
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: >-
-    Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay
-    and CMI move to MulticlassOutput (#25) with their sequence and weighting stories.
+  reason: CMI moves to MulticlassOutput (#25) with its weighting stories (9.2-9.4).
 Evaluation array builders:
   consumers:
     - reference_projects/kaggle/child_mind
