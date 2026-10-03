@@ -3,3 +3,5 @@
 Reusable model-side components live in ``dsio.experimental.model`` until real downstream
 use promotes them (docs/component-admission.md).
 """
+
+__all__: list[str] = []

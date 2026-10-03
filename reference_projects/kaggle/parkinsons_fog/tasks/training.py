@@ -103,6 +103,7 @@ def train(
                 expected_epochs=requested.max_epochs,
                 configuration=execution_calibration,
             )
+            _constrain_fog_accumulation(calibration)
             loader_execution = dict(calibration["selected"])
             requested = requested.model_copy(
                 update={"accumulate_grad_batches": loader_execution["accumulate_grad_batches"]}
@@ -214,6 +215,29 @@ def train(
             "telemetry": telemetry or None,
             "execution_calibration": calibration,
         }
+
+
+def _constrain_fog_accumulation(evidence: dict[str, Any]) -> None:
+    """Reject calibrated modes that cannot preserve FogObjective's masked-point mean."""
+    admissible: list[dict[str, Any]] = []
+    for trial in evidence["trials"]:
+        if trial["candidate"]["accumulate_grad_batches"] != 1:
+            trial["status"] = "rejected"
+            trial["reason"] = "objective_accumulation_unsupported"
+        elif trial["status"] == "admissible":
+            admissible.append(trial)
+    if not admissible:
+        raise ValueError(
+            "FogObjective calibration needs an admissible candidate with accumulate_grad_batches=1"
+        )
+    selected = max(
+        admissible,
+        key=lambda trial: float(trial["measurement"]["projected_examples_per_second"]),
+    )
+    evidence["selected"] = dict(selected["candidate"])
+    evidence["policy"]["objective_constraint"] = (
+        "FogObjective masked-point mean requires accumulate_grad_batches=1"
+    )
 
 
 def _unmeasured_phase() -> Any:

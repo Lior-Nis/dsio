@@ -27,8 +27,9 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.bike_sharing.components import (
+    COLLATOR,
     DATASET,
-    FEATURES,
+    MODEL,
     OBJECTIVE,
 )
 from reference_projects.kaggle.bike_sharing.tasks.data import labelled_examples
@@ -64,32 +65,10 @@ def train(
         manifest = load_split_evidence(
             split["split_uri"], examples, consumer_run_id=run.info.run_id
         )
-        standardization = fit_standardization(store, manifest, fold=FOLD)
+        standardization = fit_standardization(store, manifest, partition=FOLD)
         standardization_artifact = record_fitted(
             run.info.run_id, "standardization", standardization
         )
-        model_config: ComponentConfig = {
-            "reference": "dsio.experimental.model.compositions:Stages",
-            "parameters": {
-                "stages": [
-                    {
-                        "reference": "dsio.experimental.model.standardization:Standardize",
-                        "parameters": {
-                            "mean": standardization["mean"],
-                            "scale": standardization["scale"],
-                        },
-                    },
-                    {
-                        "reference": "dsio.experimental.model.compositions:MLP",
-                        "parameters": {
-                            "input_shape": [1, FEATURES],
-                            "output": 1,
-                            "output_activation": "softplus",
-                        },
-                    },
-                ]
-            },
-        }
         seed_everything(seed, workers=True, verbose=False)
         data_module = DsioDataModule(
             store,
@@ -98,6 +77,7 @@ def train(
             fold=FOLD,
             roles=ROLES,
             dataset_factory=resolve_component(DATASET, expected=StoredItems),
+            collate_fn=resolve_component(COLLATOR),
             batch_size=BATCH_SIZE,
             num_workers=NUM_WORKERS,
             seed=seed,
@@ -105,7 +85,12 @@ def train(
             drop_last=DROP_LAST,
         )
         module = DsioModule(
-            model=resolve_component(model_config, expected=Stages),
+            model=resolve_component(
+                MODEL,
+                mean=standardization["mean"],
+                scale=standardization["scale"],
+                expected=Stages,
+            ),
             objective=resolve_component(OBJECTIVE, expected=SupervisedObjective),
             optimizer_factory=torch.optim.SGD,
             optimizer_parameters=OPTIMIZER_PARAMETERS,
@@ -145,8 +130,9 @@ def train(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
+                "collator": COLLATOR,
                 "dataset_factory": DATASET,
-                "model": model_config,
+                "model": MODEL,
                 "objective": OBJECTIVE,
                 "optimizer": "torch.optim:SGD",
                 "preprocessor": PREPROCESSOR,
@@ -165,6 +151,7 @@ def train(
         return {
             "train_run_id": run.info.run_id,
             "checkpoint": reference.model_dump(mode="json"),
+            "standardization": {"artifact": standardization_artifact, **standardization},
             "standardization_sample_ids": standardization["sample_ids"],
             "identity": identity,
         }

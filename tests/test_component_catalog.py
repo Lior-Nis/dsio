@@ -6,6 +6,7 @@ import doctest
 import importlib
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from tools import catalog
@@ -216,3 +217,103 @@ def test_public_names_missing_from_all_are_reported(tmp_path: Path) -> None:
     assert catalog._undeclared_public_names(module) == [
         "dsio.experimental.fake.block: public name 'forgotten' is not in __all__"
     ]
+
+
+def test_stable_component_module_cannot_omit_all(tmp_path: Path) -> None:
+    source = tmp_path / "stable_block.py"
+    source.write_text('"""A stable component module."""\n', encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("dsio.model.stable_block", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert catalog._undeclared_public_names(module, component_module=True) == [
+        "dsio.model.stable_block: component module must define __all__"
+    ]
+
+
+def test_stable_component_module_cannot_hide_public_names_with_empty_all(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "stable_block.py"
+    source.write_text(
+        '"""A stable component module."""\n__all__ = []\ndef hidden():\n    pass\n',
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("dsio.model.stable_block", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert catalog._undeclared_public_names(module, component_module=True) == [
+        "dsio.model.stable_block: public name 'hidden' is not in __all__"
+    ]
+
+
+def test_async_public_names_missing_from_all_are_reported(tmp_path: Path) -> None:
+    source = tmp_path / "async_block.py"
+    source.write_text(
+        '"""An async component module."""\n__all__ = []\nasync def hidden():\n    pass\n',
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("dsio.experimental.fake.async_block", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert catalog._undeclared_public_names(module) == [
+        "dsio.experimental.fake.async_block: public name 'hidden' is not in __all__"
+    ]
+
+
+def test_collect_preserves_every_undeclared_name_problem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "block.py"
+    source.write_text("__all__ = []\ndef first(): ...\ndef second(): ...\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("dsio.experimental.fake.block", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        catalog.pkgutil,
+        "walk_packages",
+        lambda *args, **kwargs: [SimpleNamespace(name=module.__name__)],
+    )
+    monkeypatch.setattr(catalog.importlib, "import_module", lambda _: module)
+
+    problem = next(entry for entry in catalog.collect() if entry.kind == "problem")
+
+    assert problem.problems == (
+        "dsio.experimental.fake.block: public name 'first' is not in __all__",
+        "dsio.experimental.fake.block: public name 'second' is not in __all__",
+    )
+
+
+@pytest.mark.parametrize(
+    "document, duplicate",
+    [
+        ("component:\n  uses: []\ncomponent:\n  uses: []\n", "component"),
+        ("component:\n  uses:\n    - kind: real\n      kind: fixture\n", "kind"),
+    ],
+)
+def test_duplicate_yaml_keys_are_rejected(tmp_path: Path, document: str, duplicate: str) -> None:
+    path = tmp_path / "governance.yaml"
+    path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"{duplicate!r}.*more than once"):
+        catalog.load_yaml(path)
+
+
+def test_superseded_squeezing_loss_factories_are_deleted() -> None:
+    from dsio.experimental import model
+    from dsio.experimental.model import components
+
+    for name in ("bce_loss", "mse_loss"):
+        reference = f"dsio.experimental.model.components:{name}"
+        assert not hasattr(components, name)
+        assert name not in components.__all__
+        assert not hasattr(model, name)
+        assert name not in model.__all__
+        assert reference not in catalog.LEGACY
+        assert reference not in EVIDENCE

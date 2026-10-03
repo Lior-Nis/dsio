@@ -29,21 +29,21 @@ def assert_same_identities(first: Mapping[str, Any], second: Mapping[str, Any]) 
     if first_identities == second_identities:
         return
     lines = ["replay execution identities differ:"]
-    for stage in sorted(set(first_identities) | set(second_identities)):
-        left = first_identities.get(stage)
-        right = second_identities.get(stage)
+    for node in sorted(set(first_identities) | set(second_identities)):
+        left = first_identities.get(node)
+        right = second_identities.get(node)
         if left == right:
             continue
-        lines.append(f"- {stage}: {left} != {right}")
-        left_run = first.get(f"{stage}_run_id")
-        right_run = second.get(f"{stage}_run_id")
+        lines.append(f"- {node}: {left} != {right}")
+        left_run = first.get(f"{node}_run_id")
+        right_run = second.get(f"{node}_run_id")
         if isinstance(left_run, str) and isinstance(right_run, str):
             diff = provenance_diff(left_run, right_run)
             lines.extend(f"    {line}" for line in diff)
             if any(line.startswith("configuration.checkpoint_digest") for line in diff):
                 lines.extend(f"    {line}" for line in _training_checkpoint_diff(first, second))
         else:
-            lines.append(f"    (no {stage}_run_id in both results; provenance not compared)")
+            lines.append(f"    (no {node}_run_id in both results; provenance not compared)")
     raise AssertionError("\n".join(lines))
 
 

@@ -64,7 +64,7 @@ def test_mismatch_names_files_that_dirtied_the_checkout(
     assert "stray-export-output.txt" in message
 
 
-def test_missing_run_ids_still_report_the_stage() -> None:
+def test_missing_run_ids_still_report_the_experiment_node() -> None:
     with pytest.raises(AssertionError, match="train: a != b"):
         assert_same_identities({"identities": {"train": "a"}}, {"identities": {"train": "b"}})
 

@@ -50,20 +50,67 @@ KAGGLE = "reference_projects/kaggle/"
 # other stable module is a component module and must satisfy the stable evidence rules.
 SPINE_MODULES = frozenset(
     {
+        "dsio.batches",
         "dsio.config",
+        "dsio.config.components",
+        "dsio.config.registry",
         "dsio.contracts",
+        "dsio.contracts.base",
+        "dsio.contracts.hashing",
+        "dsio.contracts.io",
+        "dsio.data",
+        "dsio.data.adapters",
+        "dsio.data.examples",
+        "dsio.data.format",
         "dsio.data.loading",
+        "dsio.data.loading.collation",
+        "dsio.data.loading.datasets",
+        "dsio.data.loading.loaders",
+        "dsio.data.loading.module",
+        "dsio.data.readers",
         "dsio.data.splits",
+        "dsio.data.splits.folds",
+        "dsio.data.splits.generate",
         "dsio.data.splits.models",
+        "dsio.data.splits.models.fold",
+        "dsio.data.splits.models.manifest",
+        "dsio.data.splits.resolve",
+        "dsio.data.splits.temporal",
+        "dsio.data.splits.validation",
+        "dsio.data.staging",
         "dsio.data.store",
+        "dsio.data.store.builder",
+        "dsio.data.store.layout",
+        "dsio.data.store.reader",
+        "dsio.data.views",
         "dsio.eval",
+        "dsio.eval.execution",
+        "dsio.eval.metrics",
         "dsio.inference",
+        "dsio.inference.export",
+        "dsio.inference.lineage",
+        "dsio.inference.loading",
         "dsio.inference.predictor",
         "dsio.model.module",
         "dsio.testing",
+        "dsio.testing.examples_contract",
+        "dsio.testing.reader_contract",
         "dsio.tracking",
+        "dsio.tracking._lifecycle",
+        "dsio.tracking.attempt",
+        "dsio.tracking.cache",
+        "dsio.tracking.client",
         "dsio.tracking.evidence",
+        "dsio.tracking.evidence.references",
+        "dsio.tracking.evidence.resolution",
+        "dsio.tracking.evidence.splits",
+        "dsio.tracking.evidence.validation",
         "dsio.tracking.execution",
+        "dsio.tracking.execution.capture",
+        "dsio.tracking.execution.environment",
+        "dsio.tracking.execution.git",
+        "dsio.tracking.experiment",
+        "dsio.tracking.provenance",
         "dsio.train.artifacts",
         "dsio.train.capabilities",
         "dsio.train.trainer",
@@ -94,13 +141,11 @@ LEGACY = frozenset(
         "dsio.experimental.model.components:NTXent",
         "dsio.experimental.model.components:RandomScale",
         "dsio.experimental.model.components:VICReg",
-        "dsio.experimental.model.components:bce_loss",
         "dsio.experimental.model.components:identity_head",
         "dsio.experimental.model.components:identity_transform",
         "dsio.experimental.model.components:linear_head",
         "dsio.experimental.model.components:mae_decoder_head",
         "dsio.experimental.model.components:mlp_head",
-        "dsio.experimental.model.components:mse_loss",
         "dsio.experimental.model.components:no_augmentation",
         "dsio.experimental.model.components:simclr_projector_head",
         "dsio.experimental.model.components:vicreg_projector_head",
@@ -164,7 +209,7 @@ def collect() -> list[Entry]:
             continue  # the auditor, not a component
         module = importlib.import_module(info.name)
         kind = "spine" if info.name in SPINE_MODULES else "component"
-        problems = _undeclared_public_names(module)
+        problems = _undeclared_public_names(module, component_module=kind == "component")
         for reference, value in _public(module):
             if reference.startswith("dsio.experimental.admission"):
                 continue  # re-exported auditor
@@ -174,9 +219,9 @@ def collect() -> list[Entry]:
                 reference,
                 Entry(reference, kind, _summary(doc), sections, tuple(section_problems)),
             )
-        for problem in problems:
+        if problems:
             key = f"{info.name}:<module>"
-            entries[key] = Entry(key, "problem", "", problems=(problem,))
+            entries[key] = Entry(key, "problem", "", problems=tuple(problems))
     from dsio.data.splits.models.manifest import STABLE_ALGORITHMS
     from dsio.eval.metrics import METRICS
 
@@ -211,7 +256,11 @@ def parse_sections(doc: str) -> tuple[dict[str, str], list[str]]:
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    data = (
+        yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
+        if path.exists()
+        else None
+    )
     return dict(data or {})
 
 
@@ -452,7 +501,7 @@ def _public(module: Any) -> list[tuple[str, Any]]:
     return found
 
 
-def _undeclared_public_names(module: Any) -> list[str]:
+def _undeclared_public_names(module: Any, *, component_module: bool = False) -> list[str]:
     """Public top-level classes/functions defined in a module but missing from __all__."""
     if not getattr(module, "__file__", None) or module.__name__.endswith("__main__"):
         return []
@@ -461,10 +510,17 @@ def _undeclared_public_names(module: Any) -> list[str]:
     defined = [
         node.name
         for node in tree.body
-        if isinstance(node, ast.ClassDef | ast.FunctionDef) and not node.name.startswith("_")
+        if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+        and not node.name.startswith("_")
     ]
-    if not module.__name__.startswith("dsio.experimental.") and not declared:
-        return []  # stable internals without __all__ are implementation modules
+    if component_module and not hasattr(module, "__all__"):
+        return [f"{module.__name__}: component module must define __all__"]
+    if (
+        not component_module
+        and not module.__name__.startswith("dsio.experimental.")
+        and not declared
+    ):
+        return []
     return [
         f"{module.__name__}: public name {name!r} is not in __all__"
         for name in defined
@@ -484,6 +540,28 @@ def _summary(doc: str) -> str:
 
 def _cell(text: str) -> str:
     return text.replace("|", "\\|")
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that refuses governance entries hidden by duplicate keys."""
+
+
+def _construct_unique_mapping(
+    loader: _UniqueKeyLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[Any, Any]:
+    loader.flatten_mapping(node)
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"YAML key {key!r} appears more than once")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -12,13 +13,14 @@ import torch
 from lightning import Trainer
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 from torchmetrics import MeanMetric
 
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import DsioDataModule
 from dsio.data.splits import generate
 from dsio.data.store import SignalStore
+from dsio.experimental.model import SupervisedObjective
 from dsio.model.module import DsioModule, ModuleError
 
 
@@ -277,6 +279,107 @@ def test_native_lightning_trains_and_resumes_the_exact_dsio_classes(tmp_path: Pa
 
     assert resumed_trainer.global_step > first_steps
     assert int(resumed.objective.calls) > first_objective_calls  # type: ignore[union-attr]
+
+
+def test_uneven_gradient_accumulation_matches_one_effective_batch(tmp_path: Path) -> None:
+    torch.manual_seed(19)
+    x = torch.randn(8, 2)
+    y = torch.randn(8, 1)
+    rows = [
+        {"sample_id": f"sample-{index}", "x": x[index], "y": y[index]} for index in range(len(x))
+    ]
+
+    def module() -> DsioModule:
+        torch.manual_seed(23)
+        return DsioModule(
+            model=nn.Linear(2, 1),
+            objective=SupervisedObjective(loss={"reference": "torch.nn:MSELoss"}),
+            optimizer_factory=torch.optim.SGD,
+            optimizer_parameters={"lr": 0.1},
+        )
+
+    full = module()
+    accumulated = module()
+    common = {
+        "max_epochs": 1,
+        "accelerator": "cpu",
+        "devices": 1,
+        "logger": False,
+        "enable_checkpointing": False,
+        "enable_progress_bar": False,
+        "enable_model_summary": False,
+        "num_sanity_val_steps": 0,
+    }
+    Trainer(default_root_dir=tmp_path / "full", **common).fit(
+        full, train_dataloaders=DataLoader(rows, batch_size=8)
+    )
+    Trainer(
+        default_root_dir=tmp_path / "accumulated",
+        accumulate_grad_batches=3,
+        **common,
+    ).fit(accumulated, train_dataloaders=DataLoader(rows, batch_size=3))
+
+    for expected, actual in zip(full.parameters(), accumulated.parameters(), strict=True):
+        assert torch.allclose(actual, expected, atol=1e-7, rtol=1e-6)
+
+
+def test_unmarked_objective_keeps_native_semantics_without_accumulation() -> None:
+    loss = torch.tensor(2.0, requires_grad=True)
+    module = DsioModule(model=nn.Identity(), objective=StaticObjective({"loss": loss}))
+    module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
+    module._trainer = SimpleNamespace(
+        accumulate_grad_batches=1,
+        world_size=1,
+        strategy=SimpleNamespace(handles_gradient_accumulation=False),
+    )
+
+    returned = module.training_step({"sample_id": ["a", "b"], "x": torch.ones(2, 1)}, 0)
+
+    assert returned is loss
+    assert module._accumulated_training_samples == 0
+    assert module._accumulation_factor is None
+
+
+def test_unmarked_objective_rejects_automatic_accumulation() -> None:
+    module = DsioModule(
+        model=nn.Identity(),
+        objective=StaticObjective({"loss": torch.tensor(2.0, requires_grad=True)}),
+    )
+    module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
+    module._trainer = SimpleNamespace(
+        accumulate_grad_batches=3,
+        world_size=1,
+        strategy=SimpleNamespace(handles_gradient_accumulation=False),
+    )
+
+    with pytest.raises(ModuleError, match="objective with sample-mean loss"):
+        module.training_step({"sample_id": ["a", "b"], "x": torch.ones(2, 1)}, 0)
+
+
+def test_sample_normalized_accumulation_rejects_closure_replaying_optimizers(
+    tmp_path: Path,
+) -> None:
+    module = DsioModule(
+        model=nn.Linear(1, 1),
+        objective=SupervisedObjective(loss={"reference": "torch.nn:MSELoss"}),
+        optimizer_factory=torch.optim.LBFGS,
+        optimizer_parameters={"lr": 0.1},
+    )
+    rows = [{"sample_id": "sample", "x": torch.ones(1), "y": torch.zeros(1)}]
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        devices=1,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        accumulate_grad_batches=2,
+        default_root_dir=tmp_path,
+    )
+
+    with pytest.raises(ModuleError, match="closure-replaying"):
+        trainer.fit(module, train_dataloaders=DataLoader(rows, batch_size=1))
 
 
 @pytest.mark.parametrize(

@@ -125,9 +125,6 @@ dsio.experimental.model.components:RandomScale:
 dsio.experimental.model.components:VICReg:
   legacy: true
   uses: []
-dsio.experimental.model.components:bce_loss:
-  legacy: true
-  uses: []
 dsio.experimental.model.components:identity_head:
   legacy: true
   uses: []
@@ -141,9 +138,6 @@ dsio.experimental.model.components:mae_decoder_head:
   legacy: true
   uses: []
 dsio.experimental.model.components:mlp_head:
-  legacy: true
-  uses: []
-dsio.experimental.model.components:mse_loss:
   legacy: true
   uses: []
 dsio.experimental.model.components:no_augmentation:

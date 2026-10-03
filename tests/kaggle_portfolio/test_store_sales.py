@@ -59,6 +59,7 @@ def test_store_sales_flow_trains_a_causal_multi_horizon_forecaster(
     del kaggle_services
     from lightning import Trainer
     from prefect.testing.utilities import prefect_test_harness
+    from reference_projects.kaggle.store_sales.components import DATASET, INPUTS
     from reference_projects.kaggle.store_sales.flow import store_sales_flow
 
     observed: list[tuple[list[str], list[str]]] = []
@@ -126,5 +127,18 @@ def test_store_sales_flow_trains_a_causal_multi_horizon_forecaster(
         optimizer_parameters={"lr": 0.01},
         fold=1,
         batch_size=64,
+        dataset=DATASET,
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
     )
-    assert_downstream_evidence(result, tmp_path / "store-sales-downstream")
+    assert_downstream_evidence(
+        result,
+        tmp_path / "store-sales-downstream",
+        datasets={"export": INPUTS, "evaluation": DATASET, "inference": INPUTS},
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
+    )

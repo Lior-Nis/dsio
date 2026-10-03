@@ -32,6 +32,7 @@ from reference_projects.kaggle.digit_recognizer.components import (
     AUTOENCODER,
     CLASSIFICATION_OBJECTIVE,
     CLASSIFIER,
+    COLLATOR,
     ENCODER,
     LABELLED_DATASET,
     RECONSTRUCTION_OBJECTIVE,
@@ -57,11 +58,8 @@ BATCH_SIZE = 4
 NUM_WORKERS = 0
 PRETRAIN_OPTIMIZER_PARAMETERS = {"lr": 0.001}
 CLASSIFIER_OPTIMIZER_PARAMETERS = {"lr": 0.002}
-# Raw 8-bit pixels become [0, 1] floats at inference, exactly as the dataset scales them.
-PREPROCESSOR: ComponentConfig = {
-    "reference": "dsio.experimental.model.standardization:Standardize",
-    "parameters": {"mean": [0.0], "scale": [255.0]},
-}
+# Pixel scaling is part of CLASSIFIER, shared by training and Predictor execution.
+PREPROCESSOR: ComponentConfig = {"reference": "torch.nn:Identity", "parameters": {}}
 
 
 def _data_module(
@@ -77,6 +75,7 @@ def _data_module(
         fold=FOLD,
         roles=ROLES,
         dataset_factory=dataset_factory,
+        collate_fn=resolve_component(COLLATOR),
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         seed=seed,
@@ -147,6 +146,7 @@ def pretrain_encoder(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
+                "collator": COLLATOR,
                 "dataset_factory": UNLABELLED_DATASET,
                 "model": AUTOENCODER,
                 "objective": RECONSTRUCTION_OBJECTIVE,
@@ -272,6 +272,7 @@ def train_classifier(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
+                "collator": COLLATOR,
                 "dataset_factory": LABELLED_DATASET,
                 "model": CLASSIFIER,
                 "objective": CLASSIFICATION_OBJECTIVE,

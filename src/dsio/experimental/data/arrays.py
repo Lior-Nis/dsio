@@ -7,11 +7,12 @@ from typing import Any
 
 import numpy as np
 from torch import Tensor
+from torch.utils.data import Dataset, IterableDataset
 
 from dsio.config.components import resolve_component
 from dsio.data.adapters import TableExamples
 from dsio.data.examples import Examples
-from dsio.data.loading import DatasetFactory, LoadingError
+from dsio.data.loading import DatasetFactory, IdentityDataset, LoadingError
 from dsio.data.loading.collation import Collate, collate_items
 from dsio.data.store import SignalStore
 
@@ -77,16 +78,34 @@ def collate_arrays(
         >>> arrays["sample_id"].tolist(), arrays["x"].tolist(), arrays["y"].tolist()
         (['b', 'a'], [[[2.0]], [[1.0]]], [1, 0])
     """
-    ids = list(sample_ids)
-    if not ids:
+    requested_ids = tuple(sample_ids)
+    if not requested_ids:
         raise LoadingError("collate_arrays needs at least one sample")
-    if len(set(ids)) != len(ids):
+    if len(set(requested_ids)) != len(requested_ids):
         raise LoadingError("collate_arrays sample ids must be unique")
     factory = resolve_component(dataset) if isinstance(dataset, Mapping) else dataset
     if not callable(factory):
         raise LoadingError("collate_arrays needs a dataset factory or its configuration")
-    built = factory(store, _identity_examples(store) if examples is None else examples, ids)
-    batch = collate_items([built[index] for index in range(len(ids))], collate_fn=collate_fn)
+    try:
+        built = factory(
+            store,
+            _identity_examples(store) if examples is None else examples,
+            list(requested_ids),
+        )
+    except LoadingError:
+        raise
+    except Exception as error:
+        raise LoadingError(f"dataset factory failed: {error}") from error
+    if not isinstance(built, Dataset):
+        raise LoadingError(
+            f"dataset factory must return a torch Dataset, got {type(built).__name__}"
+        )
+    if isinstance(built, IterableDataset):
+        raise LoadingError("dataset factory must return a map-style Dataset, not IterableDataset")
+    guarded = IdentityDataset(built, requested_ids)
+    batch = collate_items(
+        [guarded[index] for index in range(len(requested_ids))], collate_fn=collate_fn
+    )
     arrays: dict[str, np.ndarray[Any, Any]] = {
         "sample_id": np.asarray(batch["sample_id"], dtype=np.str_)
     }

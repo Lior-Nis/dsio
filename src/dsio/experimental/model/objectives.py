@@ -112,6 +112,11 @@ class SupervisedObjective(nn.Module):
         self.metric_stages = frozenset(stages)
         self.sample_weighted = sample_weighted
         self.loss = _build("loss", loss, sample_weighted)
+        # Native class-index losses may divide by class-weight or non-ignored-target sums,
+        # not batch size. Only opt into DsioModule's sample-count normalization when the
+        # objective owns a mean-over-samples reduction or the native mean is independent
+        # of target values.
+        self._sample_mean_loss = sample_weighted or not isinstance(self.loss, _CLASS_INDEX_LOSSES)
         self.metrics = nn.ModuleDict(
             {
                 name: _build(f"metric {name!r}", config, sample_weighted)

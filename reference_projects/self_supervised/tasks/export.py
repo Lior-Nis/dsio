@@ -17,7 +17,7 @@ from reference_projects.self_supervised.components import (
     EmbeddingNorm,
     validate_embedding_norm,
 )
-from reference_projects.supervised.components import INPUTS
+from reference_projects.supervised.components import COLLATOR, INPUTS
 
 
 @task(persist_result=False)
@@ -29,7 +29,10 @@ def export_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         inputs = collate_arrays(
-            INPUTS, SignalStore(data["store_path"]), split["assignments"]["test"]
+            INPUTS,
+            SignalStore(data["store_path"]),
+            split["assignments"]["test"],
+            collate_fn=resolve_component(COLLATOR),
         )
         reference = ArtifactRef.model_validate(training["checkpoint"])
         components = require_checkpoint_lineage(
@@ -53,6 +56,8 @@ def export_model(
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
+                "collator": COLLATOR,
+                "dataset_factory": INPUTS,
                 "model": components["model"],
                 "normalizer": "reference_projects.self_supervised.components:EmbeddingNorm",
                 "preprocessor": components["preprocessor"],

@@ -27,6 +27,7 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.titanic.components import (
+    COLLATOR,
     DATASET,
     FEATURES,
     OBJECTIVE,
@@ -76,6 +77,7 @@ def train(
             fold=FOLD,
             roles=ROLES,
             dataset_factory=resolve_component(DATASET, expected=StoredItems),
+            collate_fn=resolve_component(COLLATOR),
             batch_size=BATCH_SIZE,
             num_workers=NUM_WORKERS,
             seed=seed,
@@ -121,6 +123,7 @@ def train(
             components={
                 "module": "dsio.model.module:DsioModule",
                 "data_module": "dsio.data.loading.module:DsioDataModule",
+                "collator": COLLATOR,
                 "dataset_factory": DATASET,
                 "model": MODEL,
                 "objective": OBJECTIVE,

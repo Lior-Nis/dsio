@@ -41,7 +41,7 @@ Rules:
 - **Signal-sequence backbones** consume channel-first `[B, C, T]`.
 - **Datasets declare their layout** (`StoredItems` `layout`). Convert time-major data with the layout adapter *(from Story 8.3)*, not an ad hoc transpose inside a model.
 - **Output shapes.** Dense per-timestep outputs are `[B, T, K]`, and sequence-level outputs are `[B, K]`.
-- **Scalar regression** is `[B]` or `[B, 1]` as declared, and is never silently squeezed *(from Story 7.4; the legacy `bce_loss`/`mse_loss` factories still squeeze until then)*.
+- **Scalar regression** is `[B]` or `[B, 1]` as declared, and is never silently squeezed.
 - **Multiclass and ordinal targets** are zero-based int64 indices. An ordinal label offset is applied only by the output.
 - **Binary targets** are float in {0, 1}, with the output's shape.
 - **Transformed regression targets** (log1p, scale) are declared once on the dataset. The dataset side is recorded in provenance with the dataset configuration; the inverse is declared on the output *(from Story 7.5)*.

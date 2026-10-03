@@ -249,6 +249,10 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
                 "y": {"from": "attribute", "attribute": "target", "dtype": "float32", "shape": [1]},
             },
         }
+        assert provenance["components"]["collator"] == {
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        }
         execution = provenance["configuration"]["execution"]
         assert execution["requested_accelerator"] == "cpu"
         assert execution["resolved_device"] == "cpu"
@@ -275,6 +279,12 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
             str(tmp_path / result["export_run_id"]),
         )
         export_provenance = json.loads(Path(export_provenance_path).read_text())
+        from reference_projects.supervised.components import EVALUATION, INPUTS
+
+        collator = {
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        }
         assert (
             export_provenance["configuration"]["checkpoint_digest"] == result["checkpoint_digest"]
         )
@@ -300,6 +310,18 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
             "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
             "parameters": {"channels": 1, "time": 4},
         }
+        assert export_provenance["components"]["dataset_factory"] == INPUTS
+        assert export_provenance["components"]["collator"] == collator
+
+        for stage, dataset in (("evaluation", EVALUATION), ("inference", INPUTS)):
+            downstream_path = client.download_artifacts(
+                result[f"{stage}_run_id"],
+                "provenance.json",
+                str(tmp_path / f"{result[f'{stage}_run_id']}-components"),
+            )
+            downstream_components = json.loads(Path(downstream_path).read_text())["components"]
+            assert downstream_components["dataset_factory"] == dataset
+            assert downstream_components["collator"] == collator
 
         inference = client.get_run(result["inference_run_id"])
         assert (

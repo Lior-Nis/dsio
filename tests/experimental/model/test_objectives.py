@@ -34,6 +34,7 @@ def test_losses_and_metrics_match_the_consumer_objectives_bit_for_bit() -> None:
 
     labels = torch.tensor([0, 1, 1, 0, 1])
     classification = SupervisedObjective(loss={"reference": "torch.nn:CrossEntropyLoss"})
+    assert classification._sample_mean_loss is False
     assert torch.equal(
         classification(model, {"x": x, "y": labels}, "train")["loss"],
         F.cross_entropy(prediction, labels.long()),
@@ -65,6 +66,13 @@ def test_class_weights_keep_native_semantics() -> None:
         F.cross_entropy(logits, labels, weight=torch.tensor(weights)),
     )
     assert "loss.weight" in dict(objective.named_buffers())  # moves with the module
+    assert objective._sample_mean_loss is False
+
+    sample_weighted = SupervisedObjective(
+        loss={"reference": "torch.nn:CrossEntropyLoss", "parameters": {"weight": weights}},
+        sample_weighted=True,
+    )
+    assert sample_weighted._sample_mean_loss is True
 
 
 def test_a_target_is_never_silently_broadcast_or_squeezed() -> None:

@@ -138,6 +138,8 @@ class DsioModule(LightningModule):
         self.augmentation_seed = augmentation_seed
         self.augmentation_identity = augmentation_config
         self._metric_log_names: dict[int, str] = {}
+        self._accumulated_training_samples = 0
+        self._accumulation_factor: int | None = None
         self.save_hyperparameters(
             {
                 "optimizer": optimizer_config,
@@ -216,7 +218,75 @@ class DsioModule(LightningModule):
                 step=int(self.global_step),
                 identity=self.augmentation_identity,
             )
-        return self._common_step(batch, "train")
+        sample_count = len(_batch_ids(batch))
+        loss = self._common_step(batch, "train")
+        accumulation_factor = self._sample_accumulation_factor()
+        if accumulation_factor == 1:
+            return loss
+        if getattr(self.objective, "_sample_mean_loss", False) is not True:
+            raise ModuleError(
+                "sample-normalized accumulation requires an objective with sample-mean loss"
+            )
+        if self._accumulation_factor not in (None, accumulation_factor):
+            raise ModuleError(
+                "accumulate_grad_batches changed inside an unfinished accumulation window"
+            )
+        self._accumulation_factor = accumulation_factor
+        self._accumulated_training_samples += sample_count
+        return loss * sample_count
+
+    def on_before_optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
+        """Normalize an automatic accumulation window by its actual sample count."""
+        if self._accumulation_factor is None:
+            return
+        if self._accumulated_training_samples < 1:
+            raise ModuleError("automatic gradient accumulation has no recorded samples")
+        scale = self._accumulation_factor / self._accumulated_training_samples
+        seen: set[int] = set()
+        for group in optimizer.param_groups:
+            for parameter in group["params"]:
+                if id(parameter) in seen:
+                    continue
+                seen.add(id(parameter))
+                if parameter.grad is not None:
+                    parameter.grad.mul_(scale)
+        self._accumulated_training_samples = 0
+        self._accumulation_factor = None
+
+    def _sample_accumulation_factor(self) -> int:
+        trainer = getattr(self, "_trainer", None)
+        if trainer is None:
+            return 1
+        factor = trainer.accumulate_grad_batches
+        if isinstance(factor, bool) or not isinstance(factor, int) or factor < 1:
+            raise ModuleError("accumulate_grad_batches must resolve to a positive integer")
+        if factor == 1:
+            return factor
+        if not self.automatic_optimization:
+            raise ModuleError("sample-normalized accumulation requires automatic optimization")
+        if trainer.world_size != 1:
+            raise ModuleError(
+                "sample-normalized accumulation does not support distributed training"
+            )
+        if trainer.strategy.handles_gradient_accumulation:
+            raise ModuleError(
+                "sample-normalized accumulation requires Lightning-managed accumulation"
+            )
+        return factor
+
+    def on_train_start(self) -> None:
+        """Reject accumulation modes whose gradient semantics DSio cannot normalize."""
+        accumulation_factor = self._sample_accumulation_factor()
+        if accumulation_factor == 1:
+            return
+        if getattr(self.objective, "_sample_mean_loss", False) is not True:
+            raise ModuleError(
+                "sample-normalized accumulation requires an objective with sample-mean loss"
+            )
+        if any(isinstance(optimizer, torch.optim.LBFGS) for optimizer in self.trainer.optimizers):
+            raise ModuleError(
+                "sample-normalized accumulation does not support closure-replaying optimizers"
+            )
 
     def validation_step(self, batch: Batch, batch_idx: int) -> Tensor:
         del batch_idx

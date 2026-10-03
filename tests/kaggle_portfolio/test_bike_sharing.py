@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 from mlflow import MlflowClient
 from tests.golden import assert_golden_metrics
 from tests.kaggle_portfolio.assertions import (
@@ -17,6 +18,28 @@ from tests.replay import assert_same_identities
 from dsio.contracts import sha256_of_bytes
 from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
+
+
+def test_fitted_standardization_is_injected_at_model_resolution() -> None:
+    from reference_projects.kaggle.bike_sharing.components import FEATURES, MODEL
+
+    from dsio.config.components import resolve_component
+    from dsio.experimental.model import Stages
+
+    assert MODEL == {
+        "reference": "reference_projects.kaggle.bike_sharing.components:standardized_mlp",
+        "parameters": {"features": FEATURES},
+    }
+    model = resolve_component(
+        MODEL,
+        mean=[0.0] * FEATURES,
+        scale=[2.0] * FEATURES,
+        expected=Stages,
+    )
+    torch.testing.assert_close(
+        model(torch.full((1, 1, FEATURES), 2.0)),
+        model[1](torch.ones(1, 1, FEATURES)),
+    )
 
 
 def test_bike_csv_boundary_rejects_count_drift_and_preserves_datetime_order(
@@ -65,6 +88,7 @@ def test_bike_flow_has_one_causal_purged_holdout_and_nonnegative_ordered_submiss
     del kaggle_services
     from lightning import Trainer
     from prefect.testing.utilities import prefect_test_harness
+    from reference_projects.kaggle.bike_sharing.components import DATASET, INPUTS
     from reference_projects.kaggle.bike_sharing.flow import bike_sharing_flow
 
     observed: list[tuple[list[str], list[str]]] = []
@@ -121,7 +145,7 @@ def test_bike_flow_has_one_causal_purged_holdout_and_nonnegative_ordered_submiss
         ).read_text(encoding="utf-8")
     )
     assert fitted["sample_ids"] == result["standardization_sample_ids"]
-    assert (fitted["role"], fitted["fold"], fitted["observed"]) == ("train", 0, False)
+    assert (fitted["role"], fitted["partition"], fitted["observed"]) == ("train", 0, False)
     assert len(fitted["mean"]) == len(fitted["scale"]) == 9
     assert len(result["prediction"]) == 4
     assert all(value >= 0 for value in result["prediction"])
@@ -146,5 +170,18 @@ def test_bike_flow_has_one_causal_purged_holdout_and_nonnegative_ordered_submiss
         tmp_path / "bike-provenance",
         optimizer="torch.optim:SGD",
         optimizer_parameters={"lr": 0.005},
+        dataset=DATASET,
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
     )
-    assert_downstream_evidence(result, tmp_path / "bike-downstream")
+    assert_downstream_evidence(
+        result,
+        tmp_path / "bike-downstream",
+        datasets={"export": INPUTS, "evaluation": DATASET, "inference": INPUTS},
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
+    )

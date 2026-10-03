@@ -15,6 +15,11 @@ DATASET: ComponentConfig = {
     },
 }
 
+COLLATOR: ComponentConfig = {
+    "reference": "dsio.data.loading.collation:IdentityCollator",
+    "parameters": {},
+}
+
 # Predictor inputs, exactly as the exported model receives them.
 INPUTS: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",
@@ -23,14 +28,9 @@ INPUTS: ComponentConfig = {
     },
 }
 
-# Evaluation inputs and targets, assembled through the training collation.
-EVALUATION: ComponentConfig = {
-    "reference": "dsio.experimental.data.items:StoredItems",
-    "parameters": {
-        "x": {"from": "data", "dtype": "float32"},
-        "y": {"from": "attribute", "attribute": "target", "dtype": "int64"},
-    },
-}
+# Evaluation uses the training item mapping. BinaryOutput exposes one label per sample,
+# so the downstream task removes only the training loss's singleton target axis.
+EVALUATION: ComponentConfig = DATASET
 
 
 OBJECTIVE: ComponentConfig = {
