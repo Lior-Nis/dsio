@@ -94,7 +94,7 @@ development_status:
   7-2-fit-standardization-on-training-role-samples: done
   7-3-compose-mlp-models-from-backbones-and-heads: done
   7-4-train-with-dsio-objectives: done
-  7-5-declare-prediction-outputs-without-writing-validators: review
+  7-5-declare-prediction-outputs-without-writing-validators: done
   7-6-build-evaluation-arrays-from-the-training-collation: backlog
   7-7-record-tabular-migration-parity: backlog
   epic-7-retrospective: optional

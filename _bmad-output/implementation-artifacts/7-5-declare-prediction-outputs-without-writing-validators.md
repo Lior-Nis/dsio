@@ -1,6 +1,6 @@
 # Story 7.5: Declare prediction outputs without writing validators
 
-Status: review
+Status: done
 
 ## Story
 
