@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 from torch.utils.data import Dataset
 
 from dsio.config.components import ComponentConfig
@@ -40,6 +39,13 @@ INPUT_COLLATOR: ComponentConfig = {
         "padded_fields": {"x": 0.0},
         "fixed_fields": [],
         "emit_mask": False,
+    },
+}
+OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.masked_objective:MaskedObjective",
+    "parameters": {
+        "loss": {"reference": "torch.nn:BCEWithLogitsLoss"},
+        "target_dtype": "float32",
     },
 }
 
@@ -115,19 +121,6 @@ class FogDetector(nn.Module):
         if x.ndim != 3 or x.shape[2] != self.features:
             raise ValueError(f"expected [batch, points, {self.features}], got {tuple(x.shape)}")
         return self.network(x.float().transpose(1, 2)).transpose(1, 2)
-
-
-class FogObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        logits = model(batch["x"])
-        mask = batch["mask"].bool()
-        if not bool(mask.any()):
-            raise ValueError("a dense-prediction batch must contain at least one valid point")
-        loss = F.binary_cross_entropy_with_logits(logits[mask], batch["y"][mask].float())
-        return {"loss": loss}
 
 
 class FogOutput(nn.Module):

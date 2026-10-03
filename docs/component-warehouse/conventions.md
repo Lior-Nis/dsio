@@ -17,7 +17,7 @@ A batch is a flat mapping. These names are reserved:
 | `sample_id` | ordered identities | Required. `DsioDataModule` guards the order. |
 | `x` | tensor | The **only** model input. `predict_step`, the Predictor and exported models accept only `x`. |
 | `y` | tensor | Target. Absent for unlabelled items. |
-| `mask` | `bool` tensor | **`True` = valid** (observed/scoreable), never read by the model. `dsio.eval.evaluate(mask=...)` requires the target's exact shape, or every target axis except a final axis named by `target_names`; implicit broadcasting is rejected. DSio objectives read it *(from Story 8.2)*. |
+| `mask` | `bool` tensor | **`True` = valid** (observed/scoreable), never read by the model. `dsio.eval.evaluate(mask=...)` requires the target's exact shape, or every target axis except a final axis named by `target_names`; implicit broadcasting is rejected. DSio objectives read it. |
 | `hidden` | `bool` `[B, T]` | **`True` = hidden**: a self-supervised corruption tensor. Only masking strategies produce it. It is never called `mask`. |
 | `sample_weight` | float `[B]` | Per-sample loss weight (see the weighting rule). |
 | `group` | identities | Optional group membership, used for group-weight fitting. |

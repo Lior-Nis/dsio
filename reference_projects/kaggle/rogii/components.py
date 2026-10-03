@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from dsio.config.components import ComponentConfig
 
@@ -61,6 +60,19 @@ COLLATOR: ComponentConfig = {
         "emit_mask": True,
     },
 }
+OBJECTIVE: ComponentConfig = {
+    "reference": "dsio.experimental.model.masked_objective:MaskedObjective",
+    "parameters": {
+        "loss": {"reference": "torch.nn:MSELoss"},
+        "target_dtype": "float32",
+        "metrics": {
+            "rmse": {
+                "reference": "dsio.experimental.model.objectives:RootMeanSquaredError",
+                "parameters": {"scale": TARGET_SCALE},
+            }
+        },
+    },
+}
 
 
 class TvtRegressor(nn.Module):
@@ -80,17 +92,6 @@ class TvtRegressor(nn.Module):
         baseline = x[:, :, 6]
         correction = 0.01 * torch.tanh(self.residual(x.float()).squeeze(-1))
         return (baseline + correction) * valid
-
-
-class TvtObjective(nn.Module):
-    def forward(
-        self, model: nn.Module, batch: Mapping[str, Any], stage: str
-    ) -> Mapping[str, Tensor]:
-        del stage
-        prediction = model(batch["x"])
-        valid = batch["x"][:, :, -1].bool()
-        loss = F.mse_loss(prediction[valid], batch["y"][valid].float())
-        return {"loss": loss, "rmse": torch.sqrt(loss.detach()) * TARGET_SCALE}
 
 
 class TvtOutput(nn.Module):

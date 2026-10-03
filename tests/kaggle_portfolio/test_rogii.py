@@ -74,7 +74,7 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
     from prefect.testing.utilities import prefect_test_harness
     from reference_projects.kaggle.rogii.flow import rogii_flow
 
-    observed: list[tuple[type[object], type[object], bool]] = []
+    observed: list[tuple[type[object], type[object], bool, bool]] = []
     original = Trainer.fit
 
     def record(trainer: Trainer, model: object, *args: object, **kwargs: object) -> object:
@@ -86,6 +86,7 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
                 type(model),
                 type(datamodule),
                 bool(batch["x"][:, :, -1].eq(0).any()),
+                torch.equal(batch["mask"], batch["x"][:, :, -1].bool()),
             )
         )
         return result
@@ -104,8 +105,8 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
     ]
     assert not any("well00" in value or "well01" in value for value in assigned)
     assert observed == [
-        (DsioModule, DsioDataModule, True),
-        (DsioModule, DsioDataModule, True),
+        (DsioModule, DsioDataModule, True, True),
+        (DsioModule, DsioDataModule, True, True),
     ]
     assert result["prediction_count"] == 9
     assert np.isfinite(result["prediction"]).all()
@@ -132,7 +133,7 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         result["metrics"]["last_value_rmse"]
     )
     assert run.data.params["evaluation.masked"] == "true"
-    from reference_projects.kaggle.rogii.components import COLLATOR, DATASET
+    from reference_projects.kaggle.rogii.components import COLLATOR, DATASET, OBJECTIVE
 
     assert_execution_evidence(
         result["train_run_id"],
@@ -143,6 +144,7 @@ def test_rogii_flow_trains_masked_dense_regression_without_test_leakage(
         num_workers=2,
         dataset=DATASET,
         collator=COLLATOR,
+        objective=OBJECTIVE,
     )
     assert_downstream_evidence(
         result,

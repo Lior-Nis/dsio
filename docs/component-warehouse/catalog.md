@@ -608,15 +608,58 @@ inside a stage carries a note naming that stage's position and class.
 - real: `reference_projects/kaggle/bike_sharing` (test `tests/kaggle_portfolio/test_bike_sharing.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/60/runs/6c37805abd37412f99859815517ce85d)
 - real: `reference_projects/kaggle/digit_recognizer` (test `tests/kaggle_portfolio/test_digit_recognizer.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9)
 
+#### `dsio.experimental.model.masked_objective:MaskedObjective`
+
+Compute a native loss and metrics only over True positions of `batch['mask']`. — **experimental**; real uses: 2 (parkinsons_fog, rogii).
+
+**Consumes**: A batch with model input `x`, target `y`, and boolean True-is-valid `mask`.
+Prediction and target shapes must be identical. The mask is either that same shape
+or the shape without its final output axis.
+
+**Produces**: `{"loss": scalar}` plus detached configured scalar metrics for the current stage.
+
+**Parameters**: `loss`: component configuration of a native loss module. Native parameters are
+supported except reduction parameters, which the objective owns. `target_dtype`:
+optional target cast (`float32`, `float64`, or `int64`). `metrics`: named
+component configurations over selected prediction/target values. `metric_stages`:
+stages that compute metrics (default train, validate, and test).
+
+**Devices**: CPU and accelerators; prediction, target, and mask must share a device.
+
+**Limitations**: The reduction is a mean over selected values, not samples, so sample-normalized
+gradient accumulation is unsupported. Stateful TorchMetrics are refused. A
+full-shape mask cannot be combined with multi-value native `weight` or
+`pos_weight` tensors because selection would flatten their output axis. The
+mask cannot omit more than the final output axis.
+
+**Example**
+
+```python
+>>> import torch
+>>> objective = MaskedObjective(loss={"reference": "torch.nn:MSELoss"})
+>>> batch = {
+...     "x": torch.tensor([[1.0, 99.0], [3.0, 99.0]]),
+...     "y": torch.tensor([[2.0, 0.0], [1.0, 0.0]]),
+...     "mask": torch.tensor([[True, False], [True, False]]),
+... }
+>>> objective(torch.nn.Identity(), batch, "train")["loss"].item()
+2.5
+```
+
+**Evidence**:
+
+- real: `reference_projects/kaggle/parkinsons_fog` (test `tests/kaggle_portfolio/test_parkinsons_fog.py`; runs —)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
+
 #### `dsio.experimental.model.objectives:RootMeanSquaredError`
 
-Square root of the mean squared error, as an auxiliary metric. — **experimental**; real uses: 1 (store_sales).
+Square root of the mean squared error, as an auxiliary metric. — **experimental**; real uses: 2 (rogii, store_sales).
 
 **Consumes**: `(prediction, target)` tensors of the same shape.
 
 **Produces**: A scalar: `sqrt(mse(prediction, target))`; on log1p targets this is RMSLE.
 
-**Parameters**: None.
+**Parameters**: `scale`: finite positive multiplier applied after the square root (default 1).
 
 **Devices**: CPU and accelerators.
 
@@ -634,6 +677,7 @@ of that batch's mean, and epoch logging averages those roots.
 **Evidence**:
 
 - real: `reference_projects/kaggle/store_sales` (test `tests/kaggle_portfolio/test_store_sales.py`; runs https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f)
+- real: `reference_projects/kaggle/rogii` (test `tests/kaggle_portfolio/test_rogii.py`; runs —)
 
 #### `dsio.experimental.model.objectives:SupervisedObjective`
 
@@ -1112,7 +1156,7 @@ local on purpose.
 | Hash-bucket tokenizer | 1 | `reference_projects/kaggle/essay_scoring` | Stays local - one use; text preprocessing candidate. |
 | Labelled-example attribute filter | 8 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind` | Stays local - a one-line filter fails the depth test (cohort |
 | Local nn.Module models | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Sequence backbones, heads and adapters (#10-#13, |
-| Local objectives | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Masked dense objectives (#19), Story 8.2; essay and CMI move to SupervisedObjective (#18) with their sequence and weighting stories (8.3-8.5, 9.2-9.4). |
+| Local objectives | 3 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Essay and CMI move to SupervisedObjective (#18) with their sequence and weighting stories (8.3-8.5, 9.2-9.4). |
 | Prediction normalizers and validators | 5 | `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Dense binary (FoG) and scaled or per-step regression (ROGII) outputs, Story 8.6; essay and CMI move to MulticlassOutput (#25) with their sequence and weighting stories. |
 | Stored-sample Dataset classes | 1 | `reference_projects/kaggle/parkinsons_fog` | Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3. |
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |

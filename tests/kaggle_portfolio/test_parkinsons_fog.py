@@ -764,7 +764,11 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         assert run.data.metrics[name] == pytest.approx(value)
     assert run.data.params["evaluation.masked"] == "true"
     assert run.data.params["evaluation.target_names"] == ('["StartHesitation", "Turn", "Walking"]')
-    from reference_projects.kaggle.parkinsons_fog.components import COLLATOR, INPUT_COLLATOR
+    from reference_projects.kaggle.parkinsons_fog.components import (
+        COLLATOR,
+        INPUT_COLLATOR,
+        OBJECTIVE,
+    )
 
     assert_execution_evidence(
         result["train_run_id"],
@@ -775,6 +779,7 @@ def test_parkinsons_flow_trains_masked_dense_prediction_with_subject_split(
         num_workers=2,
         dataset="reference_projects.kaggle.parkinsons_fog.components:fog_windows",
         collator=COLLATOR,
+        objective=OBJECTIVE,
     )
     fog_dataset = "reference_projects.kaggle.parkinsons_fog.components:fog_windows"
     fog_inputs_dataset = "reference_projects.kaggle.parkinsons_fog.components:fog_inputs"

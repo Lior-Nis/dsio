@@ -357,6 +357,18 @@ dsio.experimental.model.objectives:RootMeanSquaredError:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/6df24c8d13a14d5bb1b73459f5d2d22f
+  - consumer: reference_projects/kaggle/rogii
+    test: tests/kaggle_portfolio/test_rogii.py
+    kind: real
+dsio.experimental.model.masked_objective:MaskedObjective:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
+  - consumer: reference_projects/kaggle/rogii
+    test: tests/kaggle_portfolio/test_rogii.py
+    kind: real
 dsio.experimental.inference.outputs:BinaryOutput:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:

@@ -19,6 +19,7 @@ from dsio.data.loading import DsioDataModule
 from dsio.data.splits.models import SplitFile
 from dsio.data.store import SignalStore
 from dsio.experimental.data import PadCollator
+from dsio.experimental.model import MaskedObjective
 from dsio.experimental.telemetry import log_phase_evidence, measure_phase
 from dsio.experimental.training import calibrate_training_execution, log_calibration
 from dsio.model.module import DsioModule
@@ -33,8 +34,8 @@ from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.kaggle.parkinsons_fog.components import (
     COLLATOR,
     FEATURE_COUNT,
+    OBJECTIVE,
     FogDetector,
-    FogObjective,
     fog_windows,
 )
 from reference_projects.kaggle.parkinsons_fog.tasks.data import labelled_examples
@@ -164,7 +165,7 @@ def train(
                 ),
                 "collator": COLLATOR,
                 "model": model_config,
-                "objective": ("reference_projects.kaggle.parkinsons_fog.components:FogObjective"),
+                "objective": OBJECTIVE,
                 "optimizer": "torch.optim:Adam",
                 "preprocessor": PREPROCESSOR,
             },
@@ -219,7 +220,7 @@ def train(
 
 
 def _constrain_fog_accumulation(evidence: dict[str, Any]) -> None:
-    """Reject calibrated modes that cannot preserve FogObjective's masked-point mean."""
+    """Reject calibrated modes that cannot preserve the masked-point mean."""
     admissible: list[dict[str, Any]] = []
     for trial in evidence["trials"]:
         if trial["candidate"]["accumulate_grad_batches"] != 1:
@@ -229,7 +230,7 @@ def _constrain_fog_accumulation(evidence: dict[str, Any]) -> None:
             admissible.append(trial)
     if not admissible:
         raise ValueError(
-            "FogObjective calibration needs an admissible candidate with accumulate_grad_batches=1"
+            "masked-point calibration needs an admissible candidate with accumulate_grad_batches=1"
         )
     selected = max(
         admissible,
@@ -237,7 +238,7 @@ def _constrain_fog_accumulation(evidence: dict[str, Any]) -> None:
     )
     evidence["selected"] = dict(selected["candidate"])
     evidence["policy"]["objective_constraint"] = (
-        "FogObjective masked-point mean requires accumulate_grad_batches=1"
+        "masked-point mean requires accumulate_grad_batches=1"
     )
 
 
@@ -250,7 +251,7 @@ def _unmeasured_phase() -> Any:
 def _module(model_config: ComponentConfig) -> DsioModule:
     return DsioModule(
         model=resolve_component(model_config, expected=FogDetector),
-        objective=FogObjective(),
+        objective=resolve_component(OBJECTIVE, expected=MaskedObjective),
         optimizer_factory=torch.optim.Adam,
         optimizer_parameters=OPTIMIZER_PARAMETERS,
     )
