@@ -80,6 +80,43 @@ def test_missing_declared_attribute_and_columns_fail_by_name(store: SignalStore)
         _item(store, x={"from": "data", "columns": [2, 5]})
 
 
+def test_declared_value_constraints_run_before_lossy_dtype_casts(tmp_path: Path) -> None:
+    path = tmp_path / "constrained"
+    with SignalStore.builder(path, channels=3) as builder:
+        builder.add(
+            "bad",
+            np.array([[1.0, np.nan, 0.5]], dtype=np.float32),
+            group="g",
+        )
+    constrained = SignalStore(path)
+    examples = entity_examples(constrained)
+    items = StoredItems(
+        x={"from": "data", "columns": [0, 1]},
+        y={"from": "data", "columns": [1, 2], "finite": True},
+        mask={
+            "from": "data",
+            "columns": [2, 3],
+            "dtype": "bool",
+            "allowed_values": [0, 1],
+        },
+    )(constrained, examples, ["bad"])
+
+    with pytest.raises(LoadingError, match="field 'y'.*finite"):
+        _ = items[0]
+
+    mask_only = StoredItems(
+        x={"from": "data", "columns": [0, 1]},
+        mask={
+            "from": "data",
+            "columns": [2, 3],
+            "dtype": "bool",
+            "allowed_values": [0, 1],
+        },
+    )(constrained, examples, ["bad"])
+    with pytest.raises(LoadingError, match="field 'mask'.*allowed values"):
+        _ = mask_only[0]
+
+
 @pytest.mark.parametrize(
     ("spec", "message"),
     [
@@ -91,6 +128,9 @@ def test_missing_declared_attribute_and_columns_fail_by_name(store: SignalStore)
         ({"from": "data", "columns": [2, 1]}, "columns must be"),
         ({"from": "data", "divide": 0}, "divide must be non-zero"),
         ({"from": "data", "log1p": "yes"}, "log1p must be"),
+        ({"from": "data", "finite": "yes"}, "finite must be"),
+        ({"from": "data", "allowed_values": []}, "allowed_values must be"),
+        ({"from": "data", "allowed_values": [float("nan")]}, "allowed_values must be"),
     ],
 )
 def test_invalid_field_specifications_fail_at_construction(

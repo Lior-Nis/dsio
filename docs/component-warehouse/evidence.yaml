@@ -44,6 +44,9 @@ dsio.experimental.data.items:StoredItems:
   - consumer: reference_projects/kaggle/child_mind
     test: tests/kaggle_portfolio/test_child_mind.py
     kind: real
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
   - consumer: reference_projects/supervised
     test: tests/reference_flows/test_supervised_flow.py
     kind: fixture
@@ -104,9 +107,6 @@ dsio.experimental.model.components:FixedStandardize:
   legacy: true
   uses: []
 dsio.experimental.model.components:IdentityAugmentation:
-  legacy: true
-  uses: []
-dsio.experimental.model.components:InstanceStandardize:
   legacy: true
   uses: []
 dsio.experimental.model.components:Jitter:
@@ -310,6 +310,9 @@ dsio.experimental.model.compositions:Chain:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
 dsio.experimental.model.compositions:Stages:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:
@@ -323,6 +326,39 @@ dsio.experimental.model.compositions:Stages:
     kind: real
     runs:
     - https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/990bcbd49b1147d0a04ecf0af98459e9
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
+dsio.experimental.model.convolution:DenseConv1d:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
+dsio.experimental.model.layout:ChannelFirstToTimeMajor:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
+dsio.experimental.model.layout:TimeMajorToChannelFirst:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
+  - consumer: reference_projects/supervised
+    test: tests/reference_flows/test_supervised_flow.py
+    kind: fixture
+  - consumer: reference_projects/self_supervised
+    test: tests/reference_flows/test_self_supervised_flow.py
+    kind: fixture
+dsio.experimental.model.standardization:InstanceStandardize:
+  approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
+  uses:
+  - consumer: reference_projects/kaggle/parkinsons_fog
+    test: tests/kaggle_portfolio/test_parkinsons_fog.py
+    kind: real
 dsio.experimental.model.objectives:SupervisedObjective:
   approval: owner standing approval for Component Warehouse v1 experimental entries (Epics 7-9), 2026-10-01
   uses:

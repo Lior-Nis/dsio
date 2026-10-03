@@ -134,7 +134,6 @@ LEGACY = frozenset(
         "dsio.experimental.model.components:EmbeddingEncoder",
         "dsio.experimental.model.components:FixedStandardize",
         "dsio.experimental.model.components:IdentityAugmentation",
-        "dsio.experimental.model.components:InstanceStandardize",
         "dsio.experimental.model.components:Jitter",
         "dsio.experimental.model.components:MLP1d",
         "dsio.experimental.model.components:MaskedMSE",

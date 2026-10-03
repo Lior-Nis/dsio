@@ -23,21 +23,21 @@ from dsio.model.module import DsioModule
 from dsio.tracking import canonical_dataset_digest
 
 
-def test_legacy_ssl_preprocessor_reference_remains_resolvable(
+def test_ssl_preprocessor_resolves_to_the_shared_layout_adapter(
     reference_services: None,
 ) -> None:
     del reference_services
-    from reference_projects.self_supervised.components import (
-        TimeMajorToChannelFirst as legacy_preprocessor,
-    )
-    from reference_projects.supervised.components import TimeMajorToChannelFirst
+    from reference_projects.self_supervised.tasks.training import _PREPROCESSOR
 
-    assert legacy_preprocessor is TimeMajorToChannelFirst
+    from dsio.config.components import resolve_component
+    from dsio.experimental.model import TimeMajorToChannelFirst
+
+    assert isinstance(resolve_component(_PREPROCESSOR), TimeMajorToChannelFirst)
 
 
 def test_time_major_preprocessor_preserves_values_and_input(reference_services: None) -> None:
     del reference_services
-    from reference_projects.supervised.components import TimeMajorToChannelFirst
+    from dsio.experimental.model import TimeMajorToChannelFirst
 
     source = torch.tensor(
         [
@@ -66,9 +66,9 @@ def test_time_major_preprocessor_preserves_values_and_input(reference_services: 
 @pytest.mark.parametrize(
     ("value", "message"),
     [
-        (torch.ones(3, 2), r"\[batch, time, channels\]"),
-        (torch.ones(1, 4, 2), "time extent 3"),
-        (torch.ones(1, 3, 1), "channel extent 2"),
+        (torch.ones(3, 2), "rank 3"),
+        (torch.ones(1, 4, 2), "time axis 1 expected 3"),
+        (torch.ones(1, 3, 1), "channel axis 2 expected 2"),
     ],
 )
 def test_time_major_preprocessor_rejects_wrong_external_shape(
@@ -77,7 +77,7 @@ def test_time_major_preprocessor_rejects_wrong_external_shape(
     reference_services: None,
 ) -> None:
     del reference_services
-    from reference_projects.supervised.components import TimeMajorToChannelFirst
+    from dsio.experimental.model import TimeMajorToChannelFirst
 
     with pytest.raises(ValueError, match=message):
         TimeMajorToChannelFirst(channels=2, time=3)(value)
@@ -98,7 +98,7 @@ def test_time_major_preprocessor_requires_positive_integer_extents(
     reference_services: None,
 ) -> None:
     del reference_services
-    from reference_projects.supervised.components import TimeMajorToChannelFirst
+    from dsio.experimental.model import TimeMajorToChannelFirst
 
     with pytest.raises(ValueError, match="positive integer"):
         TimeMajorToChannelFirst(**parameters)
@@ -110,9 +110,10 @@ def test_predictor_preprocessing_matches_the_training_dataset_tensor(
 ) -> None:
     del reference_services
     from reference_projects.self_supervised.components import DATASET
-    from reference_projects.supervised.components import INPUTS, TimeMajorToChannelFirst
+    from reference_projects.supervised.components import INPUTS
 
     from dsio.data.store import SignalStore
+    from dsio.experimental.model import TimeMajorToChannelFirst
 
     values = np.asarray(
         [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]],
@@ -375,11 +376,11 @@ def test_self_supervised_reference_replays_accelerator_views_and_evidence(
         }
         assert export_provenance["configuration"]["split_digest"] == result["split_digest"]
         assert export_provenance["components"]["preprocessor"] == {
-            "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+            "reference": "dsio.experimental.model.layout:TimeMajorToChannelFirst",
             "parameters": {"channels": 1, "time": 4},
         }
         assert export_provenance["configuration"]["preprocessor"] == {
-            "reference": ("reference_projects.supervised.components:TimeMajorToChannelFirst"),
+            "reference": "dsio.experimental.model.layout:TimeMajorToChannelFirst",
             "parameters": {"channels": 1, "time": 4},
         }
         assert export_provenance["components"]["dataset_factory"] == INPUTS

@@ -52,7 +52,7 @@ _MODEL: ComponentConfig = {
     "parameters": {"input_shape": list(INPUT_SHAPE), "output": 1},
 }
 _PREPROCESSOR: ComponentConfig = {
-    "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+    "reference": "dsio.experimental.model.layout:TimeMajorToChannelFirst",
     "parameters": {
         "channels": INPUT_SHAPE[0],
         "time": INPUT_SHAPE[1],

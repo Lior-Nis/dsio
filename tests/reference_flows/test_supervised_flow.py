@@ -29,7 +29,6 @@ def test_training_and_inference_share_channel_first_signal_layout(
     from reference_projects.supervised.components import (
         DATASET,
         INPUTS,
-        TimeMajorToChannelFirst,
     )
 
     from dsio.config.components import resolve_component
@@ -45,6 +44,8 @@ def test_training_and_inference_share_channel_first_signal_layout(
         builder.add("sample", values, group="group", attrs={"target": 0.0})
     store = SignalStore(path)
     raw = collate_arrays(INPUTS, store, ["sample"])
+
+    from dsio.experimental.model import TimeMajorToChannelFirst
 
     prepared = TimeMajorToChannelFirst(channels=2, time=3)(torch.from_numpy(raw["x"]))
 
@@ -303,11 +304,11 @@ def test_supervised_reference_flow_replays_and_reevaluates_without_training(
             "parameters": {"shape": [1]},
         }
         assert export_provenance["components"]["preprocessor"] == {
-            "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+            "reference": "dsio.experimental.model.layout:TimeMajorToChannelFirst",
             "parameters": {"channels": 1, "time": 4},
         }
         assert export_provenance["configuration"]["preprocessor"] == {
-            "reference": "reference_projects.supervised.components:TimeMajorToChannelFirst",
+            "reference": "dsio.experimental.model.layout:TimeMajorToChannelFirst",
             "parameters": {"channels": 1, "time": 4},
         }
         assert export_provenance["components"]["dataset_factory"] == INPUTS

@@ -2,27 +2,43 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
-import numpy as np
 import torch
 from torch import Tensor, nn
-from torch.utils.data import Dataset
 
 from dsio.config.components import ComponentConfig
-from dsio.data.store import SignalStore
 
 FEATURE_COUNT = 3
 TARGET_COUNT = 3
-CHANNEL_COUNT = FEATURE_COUNT + TARGET_COUNT + 1
+OBSERVED_CHANNEL = FEATURE_COUNT
+CHANNEL_COUNT = FEATURE_COUNT + 1 + TARGET_COUNT + 1
 
-
-def normalize_signal(values: np.ndarray) -> np.ndarray:
-    signal = np.asarray(values, dtype=np.float32)
-    mean = signal.mean(axis=0, keepdims=True)
-    scale = signal.std(axis=0, keepdims=True)
-    return (signal - mean) / np.maximum(scale, 1e-6)
+DATASET: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {
+        "x": {"from": "data", "columns": [0, FEATURE_COUNT + 1]},
+        "y": {
+            "from": "data",
+            "columns": [FEATURE_COUNT + 1, FEATURE_COUNT + 1 + TARGET_COUNT],
+            "finite": True,
+            "allowed_values": [0, 1],
+        },
+        "mask": {
+            "from": "data",
+            "columns": [CHANNEL_COUNT - 1, CHANNEL_COUNT],
+            "dtype": "bool",
+            "shape": [-1],
+            "finite": True,
+            "allowed_values": [0, 1],
+        },
+    },
+}
+INPUTS: ComponentConfig = {
+    "reference": "dsio.experimental.data.items:StoredItems",
+    "parameters": {"x": {"from": "data", "columns": [0, FEATURE_COUNT + 1]}},
+}
 
 
 COLLATOR: ComponentConfig = {
@@ -48,79 +64,42 @@ OBJECTIVE: ComponentConfig = {
         "target_dtype": "float32",
     },
 }
-
-
-class FogWindows(Dataset[Mapping[str, Any]]):
-    def __init__(
-        self,
-        store: SignalStore,
-        sample_ids: Sequence[str],
-        *,
-        include_targets: bool = True,
-    ) -> None:
-        self.store, self.sample_ids = store, tuple(sample_ids)
-        self.include_targets = include_targets
-
-    def __len__(self) -> int:
-        return len(self.sample_ids)
-
-    def __getitem__(self, position: int) -> Mapping[str, Any]:
-        sample = self.store.read_sample(self.sample_ids[position])
-        data = np.asarray(sample["data"], dtype=np.float32)
-        if data.ndim != 2 or data.shape[1] != CHANNEL_COUNT:
-            raise ValueError(
-                f"FoG sample {sample['sample_id']!r} must have shape "
-                f"[points, {CHANNEL_COUNT}], got {data.shape}"
-            )
-        item: dict[str, Any] = {
-            "sample_id": sample["sample_id"],
-            "x": torch.from_numpy(normalize_signal(data[:, :FEATURE_COUNT])),
-        }
-        if not self.include_targets:
-            return item
-        labels = data[:, FEATURE_COUNT:6]
-        valid = data[:, -1]
-        if not bool(np.isfinite(labels).all()) or not bool(((labels == 0) | (labels == 1)).all()):
-            raise ValueError(
-                f"FoG sample {sample['sample_id']!r} labels must be finite binary values"
-            )
-        if not bool(np.isfinite(valid).all()) or not bool(((valid == 0) | (valid == 1)).all()):
-            raise ValueError(
-                f"FoG sample {sample['sample_id']!r} mask must contain only zero or one"
-            )
-        item["y"] = torch.from_numpy(np.array(labels, copy=True))
-        item["mask"] = torch.from_numpy(np.array(valid, dtype=bool, copy=True))
-        return item
-
-
-def fog_windows(
-    store: SignalStore, examples: object, sample_ids: Sequence[str]
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return FogWindows(store, sample_ids)
-
-
-def fog_inputs(
-    store: SignalStore, examples: object, sample_ids: Sequence[str]
-) -> Dataset[Mapping[str, Any]]:
-    del examples
-    return FogWindows(store, sample_ids, include_targets=False)
-
-
-class FogDetector(nn.Module):
-    def __init__(self, features: int = FEATURE_COUNT, hidden: int = 16) -> None:
-        super().__init__()
-        self.features = features
-        self.network = nn.Sequential(
-            nn.Conv1d(features, hidden, kernel_size=5, padding=2),
-            nn.ReLU(),
-            nn.Conv1d(hidden, TARGET_COUNT, kernel_size=5, padding=2),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        if x.ndim != 3 or x.shape[2] != self.features:
-            raise ValueError(f"expected [batch, points, {self.features}], got {tuple(x.shape)}")
-        return self.network(x.float().transpose(1, 2)).transpose(1, 2)
+MODEL: ComponentConfig = {
+    "reference": "dsio.experimental.model.compositions:Chain",
+    "parameters": {
+        "preprocessor": {
+            "reference": "dsio.experimental.model.compositions:Stages",
+            "parameters": {
+                "stages": [
+                    {
+                        "reference": "dsio.experimental.model.layout:TimeMajorToChannelFirst",
+                        "parameters": {"channels": FEATURE_COUNT + 1},
+                    },
+                    {
+                        "reference": (
+                            "dsio.experimental.model.standardization:InstanceStandardize"
+                        ),
+                        "parameters": {"observed_channel": OBSERVED_CHANNEL},
+                    },
+                ]
+            },
+        },
+        "backbone": {
+            "reference": "dsio.experimental.model.convolution:DenseConv1d",
+            "parameters": {
+                "channels": FEATURE_COUNT,
+                "hidden": 16,
+                "output": TARGET_COUNT,
+                "kernel_size": 5,
+                "observed_channel": OBSERVED_CHANNEL,
+            },
+        },
+        "head": {
+            "reference": "dsio.experimental.model.layout:ChannelFirstToTimeMajor",
+            "parameters": {"channels": TARGET_COUNT},
+        },
+    },
+}
 
 
 class FogOutput(nn.Module):

@@ -2,10 +2,6 @@
 # Rendered into catalog.md by tools/catalog.py. Each entry shrinks as its story lands;
 # `reason` names the cohort block (#n in the spec) and story, or why it stays local.
 
-Stored-sample Dataset classes:
-  consumers:
-    - reference_projects/kaggle/parkinsons_fog
-  reason: Field-mapping dataset (#1) after per-instance standardization (#9b) lands, Story 8.3.
 Window Dataset class:
   consumers:
     - reference_projects/kaggle/child_mind/sequence
@@ -13,11 +9,10 @@ Window Dataset class:
 Local nn.Module models:
   consumers:
     - reference_projects/kaggle/essay_scoring
-    - reference_projects/kaggle/parkinsons_fog
     - reference_projects/kaggle/rogii
     - reference_projects/kaggle/child_mind
     - reference_projects/kaggle/child_mind/sequence
-  reason: Sequence backbones, heads and adapters (#10-#13, #15, #16), Stories 8.3-8.5, 9.4.
+  reason: Sequence backbones, heads and adapters (#10, #12, #15, #16), Stories 8.4-8.5, 9.4.
 Verified encoder handoff:
   consumers:
     - reference_projects/kaggle/digit_recognizer

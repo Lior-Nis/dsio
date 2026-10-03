@@ -435,26 +435,6 @@ def identity_transform() -> nn.Module:
     return nn.Identity()
 
 
-class InstanceStandardize(nn.Module):
-    """Per-window, per-channel standardisation.
-
-    Deliberately *not* a fitted preprocessor: its statistics come from the window itself,
-    so it cannot leak anything from the training set into a test window. Where corpus-level
-    statistics are wanted, they belong in a preprocessor fitted on the train fold — which
-    is a different slot on purpose.
-    """
-
-    def __init__(self, eps: float = 1e-6) -> None:
-        super().__init__()
-        self.eps = eps
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _check_3d(x, "InstanceStandardize")
-        mean = x.mean(dim=-1, keepdim=True)
-        std = x.std(dim=-1, keepdim=True)
-        return (x - mean) / (std + self.eps)
-
-
 class FixedStandardize(nn.Module):
     """Standardise by outside statistics; superseded by ``standardization.Standardize``."""
 
@@ -529,7 +509,6 @@ __all__ = [
     "EmbeddingEncoder",
     "FixedStandardize",
     "IdentityAugmentation",
-    "InstanceStandardize",
     "Jitter",
     "MLP1d",
     "MaskedMSE",

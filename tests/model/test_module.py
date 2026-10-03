@@ -9,12 +9,11 @@ pytest.importorskip("lightning")
 
 from torch import nn  # noqa: E402
 
-from dsio.experimental.model import export_encoder  # noqa: E402
+from dsio.experimental.model import InstanceStandardize, export_encoder  # noqa: E402
 from dsio.experimental.model.chain import ComponentChain, LossObjective  # noqa: E402
 from dsio.experimental.model.components import (  # noqa: E402
     Conv1dEncoder,
     CrossEntropy,
-    InstanceStandardize,
     Jitter,
     MaskedMSE,
     MLP1d,
@@ -283,7 +282,7 @@ def test_instance_standardize_cannot_leak_across_a_split() -> None:
     x = torch.randn(4, 2, 128) * 5 + 3
     out = standardize(x)
     assert torch.allclose(out.mean(dim=-1), torch.zeros(4, 2), atol=1e-5)
-    assert torch.allclose(out.std(dim=-1), torch.ones(4, 2), atol=1e-2)
+    assert torch.allclose(out.std(dim=-1, correction=0), torch.ones(4, 2), atol=1e-2)
 
 
 def test_cross_entropy_refuses_soft_targets_without_a_threshold() -> None:

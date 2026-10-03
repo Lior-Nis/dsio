@@ -17,7 +17,6 @@ from dsio.experimental.model.components import (
     EmbeddingEncoder,
     FixedStandardize,
     IdentityAugmentation,
-    InstanceStandardize,
     Jitter,
     MaskedMSE,
     MLP1d,
@@ -34,6 +33,8 @@ from dsio.experimental.model.components import (
     vicreg_projector_head,
 )
 from dsio.experimental.model.compositions import MLP, Chain, Stages
+from dsio.experimental.model.convolution import DenseConv1d
+from dsio.experimental.model.layout import ChannelFirstToTimeMajor, TimeMajorToChannelFirst
 from dsio.experimental.model.masked_objective import MaskedObjective
 from dsio.experimental.model.masking import (
     CausalMask,
@@ -43,15 +44,17 @@ from dsio.experimental.model.masking import (
     apply_mask,
 )
 from dsio.experimental.model.objectives import RootMeanSquaredError, SupervisedObjective
-from dsio.experimental.model.standardization import Standardize
+from dsio.experimental.model.standardization import InstanceStandardize, Standardize
 
 __all__ = [
     "MLP",
     "CausalMask",
     "Chain",
+    "ChannelFirstToTimeMajor",
     "ComponentChain",
     "Conv1dEncoder",
     "CrossEntropy",
+    "DenseConv1d",
     "EmbeddingEncoder",
     "FixedStandardize",
     "IdentityAugmentation",
@@ -70,6 +73,7 @@ __all__ = [
     "Stages",
     "Standardize",
     "SupervisedObjective",
+    "TimeMajorToChannelFirst",
     "VICReg",
     "apply_mask",
     "export_encoder",
