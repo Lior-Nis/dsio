@@ -108,8 +108,8 @@ GPT-5
   lines (Essay 502, FoG 736, ROGII 527), 75 fewer than the Story 8.1 baseline of 1,840.
   Repository residuals are 10 registered Epic 9 CMI candidates plus 3 explicit
   `self_supervised` fixtures.
-- Verification: 47 focused tests passed before the final boundary correction; final build
-  passed, 8 distribution/consumer-flow contracts passed, 1,319 main tests passed (1 live
+- Verification: 216 focused signal/representative/catalog/admission tests passed; final build
+  passed, 8 distribution/consumer-flow contracts passed, 1,327 main tests passed (1 live
   test deselected), Ruff lint/format passed, mypy passed for 124 source files, all 3 import
   contracts held, and catalog/admission checks passed. Golden metrics were unchanged;
   recovered baseline metric values were unchanged.
