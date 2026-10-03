@@ -15,23 +15,14 @@ from prefect import task
 from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
+from dsio.experimental.data import collate_arrays
 from dsio.experimental.inference import RegressionOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
-from reference_projects.kaggle.store_sales.components import OUTPUT
+from reference_projects.kaggle.store_sales.components import DATASET, INPUTS, OUTPUT
 from reference_projects.kaggle.store_sales.data import CONTEXT_DAYS, HORIZON_DAYS
 from reference_projects.kaggle.store_sales.tasks.training import TRAINING_FOLD
-
-
-def _arrays(store_path: str, sample_ids: list[str]) -> dict[str, np.ndarray[Any, Any]]:
-    store = SignalStore(store_path)
-    return {
-        "sample_id": np.asarray(sample_ids, dtype=np.str_),
-        "x": np.stack([store.read_sample(value)["data"] for value in sample_ids]).astype(
-            np.float32
-        ),
-    }
 
 
 @task(persist_result=False)
@@ -51,7 +42,7 @@ def export(
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         ids = list(split["fold_assignments"][TRAINING_FOLD]["validate"])
-        inputs = _arrays(data["store_path"], ids)
+        inputs = collate_arrays(INPUTS, SignalStore(data["store_path"]), ids)
         output = resolve_component(OUTPUT, expected=RegressionOutput)
         identity = record_provenance(
             run.info.run_id,
@@ -101,17 +92,15 @@ def evaluate_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         ids = list(split["fold_assignments"][TRAINING_FOLD]["validate"])
-        store = SignalStore(data["store_path"])
-        targets = np.asarray(
-            [store.read_sample(value)["attrs"]["target"] for value in ids], dtype=np.float32
-        )
-        inputs = _arrays(data["store_path"], ids)
+        # The training collation yields the training target: log1p of sales.
+        arrays = collate_arrays(DATASET, SignalStore(data["store_path"]), ids)
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        log_targets = arrays["y"]
         context_log_sales = inputs["x"][:, :CONTEXT_DAYS, 0]
         seasonal_log_prediction = np.stack(
             [context_log_sales[:, -7 + offset % 7] for offset in range(HORIZON_DAYS)],
             axis=1,
         )
-        log_targets = np.log1p(targets)
         seasonal_naive_rmsle = float(np.sqrt(np.mean((log_targets - seasonal_log_prediction) ** 2)))
         identity = record_provenance(
             run.info.run_id,
@@ -156,7 +145,10 @@ def infer_and_submit(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         sample_ids = list(data["test_sample_ids"])
-        outputs = predict(exported["model_uri"], _arrays(data["store_path"], sample_ids))
+        outputs = predict(
+            exported["model_uri"],
+            collate_arrays(INPUTS, SignalStore(data["store_path"]), sample_ids),
+        )
         forecasts = np.asarray(outputs["prediction"], dtype=float)
         store = SignalStore(data["store_path"])
         by_id: dict[int, float] = {}

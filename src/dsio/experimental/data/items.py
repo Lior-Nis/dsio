@@ -14,7 +14,13 @@ from dsio.data.examples import Examples
 from dsio.data.loading.datasets import LoadingError
 from dsio.data.store import SignalStore, StoreError
 
-_DTYPES = {"float32": np.float32, "float64": np.float64, "int64": np.int64, "bool": np.bool_}
+_DTYPES = {
+    "float32": np.float32,
+    "float64": np.float64,
+    "int64": np.int64,
+    "uint8": np.uint8,
+    "bool": np.bool_,
+}
 _LAYOUTS = ("time_major", "channel_first")
 _KEYS = {
     "data": {"from", "columns", "dtype", "layout", "offset", "log1p", "divide", "shape"},
@@ -47,10 +53,11 @@ class StoredItems:
         - ``from``: ``"data"`` or ``"attribute"``; ``attribute``: the entity attribute name.
         - ``columns``: ``[start, stop]`` of the data array; ``layout``: ``time_major``
           (default, as stored) or ``channel_first`` (transposed to ``[channels, rows]``).
-        - ``dtype``: ``float32`` (default), ``float64``, ``int64`` or ``bool``.
+        - ``dtype``: ``float32`` (default), ``float64``, ``int64``, ``uint8`` (raw
+          8-bit inputs, e.g. pixels a predictor scales itself) or ``bool``.
         - ``offset`` (added), ``log1p`` (``true``) and ``divide`` (divisor), applied in
           that order after the cast. Float fields accept all three, ``int64`` fields an
-          integer ``offset`` only, ``bool`` fields none, so the declared dtype is the
+          integer ``offset`` only, ``uint8`` and ``bool`` fields none, so the declared dtype is the
           produced dtype. ``shape``: final shape, e.g. ``[1]`` or ``[]`` (one ``-1`` at most).
 
     Devices:
@@ -189,8 +196,8 @@ def _field(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
     transforms = [
         key for key in ("offset", "log1p", "divide") if spec.get(key) not in (None, False)
     ]
-    if dtype == "bool" and transforms:
-        raise ValueError(f"field {name!r}: a bool field accepts no {transforms} transform")
+    if dtype in ("bool", "uint8") and transforms:
+        raise ValueError(f"field {name!r}: a {dtype} field accepts no {transforms} transform")
     if dtype == "int64" and (
         "log1p" in transforms
         or "divide" in transforms

@@ -8,6 +8,8 @@ import torch
 from prefect import task
 
 from dsio.config.components import resolve_component
+from dsio.data.store import SignalStore
+from dsio.experimental.data import collate_arrays
 from dsio.inference import build_predictor, log_predictor, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef
@@ -15,7 +17,7 @@ from reference_projects.self_supervised.components import (
     EmbeddingNorm,
     validate_embedding_norm,
 )
-from reference_projects.supervised.components import evaluation_arrays
+from reference_projects.supervised.components import INPUTS
 
 
 @task(persist_result=False)
@@ -26,7 +28,9 @@ def export_model(
     experiment_id: str,
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
-        inputs, _ = evaluation_arrays(data["store_path"], split["assignments"]["test"])
+        inputs = collate_arrays(
+            INPUTS, SignalStore(data["store_path"]), split["assignments"]["test"]
+        )
         reference = ArtifactRef.model_validate(training["checkpoint"])
         components = require_checkpoint_lineage(
             reference,

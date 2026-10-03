@@ -11,6 +11,7 @@ from prefect import task
 
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
+from dsio.experimental.data import collate_arrays
 from dsio.inference import predict
 from dsio.tracking import (
     attempt,
@@ -18,7 +19,7 @@ from dsio.tracking import (
     record_provenance,
     require_evidence,
 )
-from reference_projects.supervised.components import evaluation_arrays
+from reference_projects.supervised.components import EVALUATION, INPUTS
 
 
 def _sources(
@@ -79,7 +80,9 @@ def evaluate_model(
             model_uri=model_uri,
             checkpoint_digest=checkpoint_digest,
         )
-        inputs, targets = evaluation_arrays(store_path, sample_ids)
+        arrays = collate_arrays(EVALUATION, SignalStore(store_path), sample_ids)
+        inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
+        targets = arrays["y"]
         identity = record_provenance(
             run.info.run_id,
             {
@@ -133,7 +136,7 @@ def infer(
             model_uri=model_uri,
             checkpoint_digest=checkpoint_digest,
         )
-        inputs, _ = evaluation_arrays(store_path, sample_ids)
+        inputs = collate_arrays(INPUTS, SignalStore(store_path), sample_ids)
         identity = record_provenance(
             run.info.run_id,
             {
