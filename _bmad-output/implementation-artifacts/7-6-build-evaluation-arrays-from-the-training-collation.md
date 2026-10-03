@@ -33,6 +33,10 @@ so that I stop re-implementing batching in NumPy (cohort #5).
   - **self_supervised fixture:** exports through the supervised `INPUTS`.
   - The hand-written target loops over the store (`int(store.read_sample(...)["attrs"]["target"])`) are gone.
 - [x] Task 5: Catalog. `collate_arrays` has full sections, a doctested Example and evidence with six real uses. The "Evaluation array builders" candidate keeps essay, FoG, ROGII and CMI.
+- [x] Task 6: Review follow-ups. The review found nothing critical and confirmed dtype and shape parity with every deleted helper, including Store's `log1p` target, Digit's `uint8` inputs and Bike's `[N,1]` targets.
+  - [x] 6.1 (important) Collation now runs through the training guard (`collate_items`): mapping, row-count, CPU and ordered-identity checks, with collation failures wrapped as `LoadingError`. Array-valued fields are accepted as in training.
+  - [x] 6.2 The docstring says the arrays equal a training batch when given the training config, and that inference or evaluation may declare their own specs over the same factory. Limitations now cover unique ids, targetless inference, attribute-free default examples, memory and view semantics.
+  - [x] 6.3 The new mypy errors in the tests are fixed.
 
 ## Dev Notes
 

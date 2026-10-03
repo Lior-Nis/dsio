@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -51,7 +52,7 @@ def test_arrays_equal_the_training_collation_in_the_requested_order(tmp_path: Pa
 def test_a_factory_custom_collation_and_raw_pixels_are_supported(tmp_path: Path) -> None:
     store = _store(tmp_path / "store")
 
-    def collate(items: list[dict[str, object]]) -> dict[str, object]:
+    def collate(items: list[dict[str, Any]]) -> dict[str, Any]:
         batch = torch.utils.data.default_collate(items)
         return {**batch, "x": batch["x"] * 2}
 
@@ -72,14 +73,33 @@ def test_inputs_are_checked(tmp_path: Path) -> None:
     with pytest.raises(LoadingError, match="cannot resolve assigned sample"):
         collate_arrays(ITEMS, store, ["missing"])
 
-    def strings(items: list[dict[str, object]]) -> dict[str, object]:
+    def strings(items: list[dict[str, Any]]) -> dict[str, Any]:
         return {"sample_id": [item["sample_id"] for item in items], "x": ["not a tensor"]}
 
-    with pytest.raises(LoadingError, match="'x' is a list, not a tensor"):
+    with pytest.raises(LoadingError, match="mapping|cardinality|rows|'x'"):
         collate_arrays(ITEMS, store, ["s1"], collate_fn=strings)
 
-    def reordered(items: list[dict[str, object]]) -> dict[str, object]:
+    def reordered(items: list[dict[str, Any]]) -> dict[str, Any]:
         return torch.utils.data.default_collate(list(reversed(items)))
 
-    with pytest.raises(LoadingError, match="does not preserve the requested sample ids"):
+    with pytest.raises(LoadingError, match="changed sample_id order"):
         collate_arrays(ITEMS, store, ["s1", "s2"], collate_fn=reordered)
+
+
+def test_the_training_guard_applies_to_collation(tmp_path: Path) -> None:
+    store = _store(tmp_path / "store")
+
+    def arrays(items: list[dict[str, Any]]) -> dict[str, Any]:
+        batch = torch.utils.data.default_collate(items)
+        return {**batch, "x": batch["x"].numpy()}
+
+    assert isinstance(collate_arrays(ITEMS, store, ["s1"], collate_fn=arrays)["x"], np.ndarray)
+
+    def wrong_rows(items: list[dict[str, Any]]) -> dict[str, Any]:
+        batch = torch.utils.data.default_collate(items)
+        return {**batch, "y": batch["y"][:1]}
+
+    with pytest.raises(LoadingError):
+        collate_arrays(ITEMS, store, ["s1", "s2"], collate_fn=wrong_rows)
+    with pytest.raises(LoadingError, match="mapping"):
+        collate_arrays(ITEMS, store, ["s1"], collate_fn=lambda items: items)  # type: ignore[arg-type,return-value]

@@ -25,11 +25,15 @@ each with the samples along the first axis, in the requested order.
 **Parameters**: `examples`: the store's `Examples` (default: its identity without attributes);
 `collate_fn`: the training collation (default: PyTorch's `default_collate`).
 
-**Devices**: CPU; arrays are NumPy copies of the collated CPU tensors.
+**Devices**: CPU; arrays are NumPy views of the collated CPU tensors.
 
 **Limitations**: All samples are collated as one batch, so a padding collation pads to the longest
 requested sample, which can differ from the training batches' padding. Collated
-values must be tensors (or the `sample_id` strings).
+values must be tensors or arrays. Sample ids must be unique. A training dataset
+that declares `y` cannot serve inference on samples without that target; declare
+an inputs-only config. The default examples carry no attributes, so a factory that
+reads them needs `examples=`. The whole roster is held in memory as one batch,
+and arrays from tensors share their memory.
 
 **Example**
 

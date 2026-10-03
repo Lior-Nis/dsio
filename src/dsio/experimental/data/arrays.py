@@ -7,13 +7,12 @@ from typing import Any
 
 import numpy as np
 from torch import Tensor
-from torch.utils.data import default_collate
 
 from dsio.config.components import resolve_component
 from dsio.data.adapters import TableExamples
 from dsio.data.examples import Examples
 from dsio.data.loading import DatasetFactory, LoadingError
-from dsio.data.loading.collation import Collate
+from dsio.data.loading.collation import Collate, collate_items
 from dsio.data.store import SignalStore
 
 
@@ -27,10 +26,11 @@ def collate_arrays(
 ) -> dict[str, np.ndarray[Any, Any]]:
     """Collate the given samples, in order, into NumPy arrays as training would batch them.
 
-    The dataset factory and collation are the ones ``DsioDataModule`` uses (``None`` is
-    PyTorch's default collation, as there), so evaluation and inference inputs, targets
-    and masks are exactly what a training batch of the same samples holds, and no consumer
-    re-implements batching in NumPy.
+    The factory and collation run behind the same guard ``DsioDataModule`` applies
+    (``None`` is PyTorch's default collation), so with the training dataset configuration
+    the arrays are exactly what a training batch of the same samples holds, and no
+    consumer re-implements batching in NumPy. Evaluation and inference may declare their
+    own field specs (e.g. raw ``uint8`` inputs, or no target) over the same factory.
 
     Consumes:
         A dataset factory called as ``(store, examples, sample_ids)``, or its component
@@ -46,12 +46,16 @@ def collate_arrays(
         ``collate_fn``: the training collation (default: PyTorch's ``default_collate``).
 
     Devices:
-        CPU; arrays are NumPy copies of the collated CPU tensors.
+        CPU; arrays are NumPy views of the collated CPU tensors.
 
     Limitations:
         All samples are collated as one batch, so a padding collation pads to the longest
         requested sample, which can differ from the training batches' padding. Collated
-        values must be tensors (or the ``sample_id`` strings).
+        values must be tensors or arrays. Sample ids must be unique. A training dataset
+        that declares ``y`` cannot serve inference on samples without that target; declare
+        an inputs-only config. The default examples carry no attributes, so a factory that
+        reads them needs ``examples=``. The whole roster is held in memory as one batch,
+        and arrays from tensors share their memory.
 
     Example:
         >>> from pathlib import Path
@@ -82,17 +86,19 @@ def collate_arrays(
     if not callable(factory):
         raise LoadingError("collate_arrays needs a dataset factory or its configuration")
     built = factory(store, _identity_examples(store) if examples is None else examples, ids)
-    batch = (collate_fn or default_collate)([built[index] for index in range(len(ids))])
-    arrays: dict[str, np.ndarray[Any, Any]] = {}
+    batch = collate_items([built[index] for index in range(len(ids))], collate_fn=collate_fn)
+    arrays: dict[str, np.ndarray[Any, Any]] = {
+        "sample_id": np.asarray(batch["sample_id"], dtype=np.str_)
+    }
     for name, value in batch.items():
+        if name == "sample_id":
+            continue
         if isinstance(value, Tensor):
             arrays[name] = value.numpy()
-        elif name == "sample_id":
-            arrays[name] = np.asarray(value, dtype=np.str_)
+        elif isinstance(value, np.ndarray):
+            arrays[name] = value
         else:
-            raise LoadingError(f"collated field {name!r} is a {type(value).__name__}, not a tensor")
-    if arrays.get("sample_id") is None or arrays["sample_id"].tolist() != ids:
-        raise LoadingError("the collated batch does not preserve the requested sample ids")
+            raise LoadingError(f"collated field {name!r} is a {type(value).__name__}, not an array")
     return arrays
 
 
