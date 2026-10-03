@@ -89,6 +89,7 @@ MODEL: ComponentConfig = {
                 "output": TARGET_COUNT,
                 "kernel_size": 5,
                 "observed_channel": OBSERVED_CHANNEL,
+                "isolate_padding": False,
             },
         },
         "head": {

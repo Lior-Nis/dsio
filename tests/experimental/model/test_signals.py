@@ -140,6 +140,29 @@ def test_dense_conv_real_outputs_do_not_depend_on_cobatch_padding() -> None:
     assert torch.equal(model(padded)[0, :, 3:], torch.zeros(3, 4))
 
 
+def test_dense_conv_can_preserve_legacy_unmasked_boundary_arithmetic() -> None:
+    torch.manual_seed(19)
+    reference = nn.Sequential(
+        nn.Conv1d(3, 16, kernel_size=5, padding=2),
+        nn.ReLU(),
+        nn.Conv1d(16, 3, kernel_size=5, padding=2),
+    )
+    torch.manual_seed(19)
+    dense = DenseConv1d(
+        channels=3,
+        hidden=16,
+        output=3,
+        kernel_size=5,
+        observed_channel=3,
+        isolate_padding=False,
+    )
+    values = torch.randn(2, 4, 11)
+    values[:, 3] = 1
+    values[0, :, 7:] = 0
+
+    assert torch.equal(dense(values), reference(values[:, :3]))
+
+
 def test_instance_standardization_is_fullgraph_compilable() -> None:
     compiled = torch.compile(
         InstanceStandardize(observed_channel=1),
