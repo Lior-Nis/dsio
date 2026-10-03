@@ -97,20 +97,50 @@ def test_single_and_multi_model_results_flatten_to_one_record(tmp_path: Path) ->
     }
 
     resolved: list[str] = []
+    metrics = {"e": {"score": 1.0}, "ef": {"accuracy": 0.25}, "et": {"accuracy": 0.5}}
 
     def download(run_id: str, artifact: str, destination: str) -> str:
         assert artifact == "provenance.json"
         path = Path(destination) / run_id / artifact
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"execution": {"git": {"dirty": False}}}))
+        path.write_text(
+            json.dumps(
+                {
+                    "execution": {
+                        "git": {"dirty": False, "sha": "before"},
+                        "environment": {"python": "3.12.3", "torch": "2.13.0+cpu"},
+                    }
+                }
+            )
+        )
         return str(path)
 
+    def get_run(run_id: str) -> SimpleNamespace:
+        resolved.append(run_id)
+        return SimpleNamespace(
+            info=SimpleNamespace(status="FINISHED"),
+            data=SimpleNamespace(metrics=metrics[run_id]),
+        )
+
     client = SimpleNamespace(
-        get_run=lambda run_id: resolved.append(run_id),
+        get_run=get_run,
         download_artifacts=download,
     )
     representative._require_baseline_runs(
-        [{"runs": representative._run_ids(single)}, {"runs": representative._run_ids(multi)}],
+        [
+            {
+                "commit": "before",
+                "hardware": {"python": "3.12.3", "torch": "2.13.0+cpu"},
+                "metrics": {"score": 1.0},
+                "runs": representative._run_ids(single),
+            },
+            {
+                "commit": "before",
+                "hardware": {"python": "3.12.3", "torch": "2.13.0+cpu"},
+                "metrics": {"fused.accuracy": 0.25, "tabular.accuracy": 0.5},
+                "runs": representative._run_ids(multi),
+            },
+        ],
         client,
     )
     assert resolved == ["e", "ef", "et"]
@@ -122,19 +152,84 @@ def test_baseline_preflight_rejects_dirty_mlflow_provenance(tmp_path: Path) -> N
     def download(_: str, artifact: str, destination: str) -> str:
         path = Path(destination) / artifact
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"execution": {"git": {"dirty": True}}}))
+        path.write_text(
+            json.dumps(
+                {
+                    "execution": {
+                        "git": {"dirty": True, "sha": "before"},
+                        "environment": {"python": "3.12.3", "torch": "2.13.0+cpu"},
+                    }
+                }
+            )
+        )
         return str(path)
 
     client = SimpleNamespace(
-        get_run=lambda _: None,
+        get_run=lambda _: SimpleNamespace(
+            info=SimpleNamespace(status="FINISHED"),
+            data=SimpleNamespace(metrics={"score": 1.0}),
+        ),
         download_artifacts=download,
     )
 
     with pytest.raises(ValueError, match=f"baseline evaluation run {run_id}.*dirty"):
         representative._require_baseline_runs(
-            [{"runs": {"evaluation_run_id": run_id}}],
+            [
+                {
+                    "commit": "before",
+                    "hardware": {"python": "3.12.3", "torch": "2.13.0+cpu"},
+                    "metrics": {"score": 1.0},
+                    "runs": {"evaluation_run_id": run_id},
+                }
+            ],
             client,
         )
+
+
+@pytest.mark.parametrize(
+    ("status", "sha", "python", "torch_version", "metrics", "message"),
+    [
+        ("FAILED", "before", "3.12.3", "2.13.0+cpu", {"score": 1.0}, "FINISHED"),
+        ("FINISHED", "other", "3.12.3", "2.13.0+cpu", {"score": 1.0}, "commit"),
+        ("FINISHED", "before", "3.11.0", "2.13.0+cpu", {"score": 1.0}, "runtime"),
+        ("FINISHED", "before", "3.12.3", "2.12.0+cpu", {"score": 1.0}, "runtime"),
+        ("FINISHED", "before", "3.12.3", "2.13.0+cpu", {"score": 2.0}, "metrics"),
+    ],
+)
+def test_baseline_preflight_rejects_mismatched_run_evidence(
+    tmp_path: Path,
+    status: str,
+    sha: str,
+    python: str,
+    torch_version: str,
+    metrics: dict[str, float],
+    message: str,
+) -> None:
+    run_id = "a" * 32
+    provenance = {
+        "execution": {
+            "git": {"dirty": False, "sha": sha},
+            "environment": {"python": python, "torch": torch_version},
+        }
+    }
+    path = tmp_path / "provenance.json"
+    path.write_text(json.dumps(provenance))
+    client = SimpleNamespace(
+        get_run=lambda _: SimpleNamespace(
+            info=SimpleNamespace(status=status),
+            data=SimpleNamespace(metrics=metrics),
+        ),
+        download_artifacts=lambda *_: str(path),
+    )
+    record = {
+        "commit": "before",
+        "hardware": {"python": "3.12.3", "torch": "2.13.0+cpu"},
+        "metrics": {"score": 1.0},
+        "runs": {"evaluation_run_id": run_id},
+    }
+
+    with pytest.raises(ValueError, match=message):
+        representative._require_baseline_runs([record], client)
 
 
 def test_tracking_requires_a_reachable_http_server(

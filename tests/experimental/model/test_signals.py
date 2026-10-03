@@ -173,12 +173,13 @@ def test_instance_standardization_is_fullgraph_compilable() -> None:
     assert torch.equal(compiled(source), InstanceStandardize(observed_channel=1)(source))
 
 
+@pytest.mark.parametrize("reduction", ["torch", "numpy"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
 def test_instance_standardization_keeps_tiny_eps_zero_variance_finite(
-    dtype: torch.dtype,
+    dtype: torch.dtype, reduction: str
 ) -> None:
     source = torch.full((2, 3, 5), 65_000.0, dtype=dtype)
-    result = InstanceStandardize(eps=1e-100)(source)
+    result = InstanceStandardize(eps=1e-100, reduction=reduction)(source)  # type: ignore[arg-type]
     assert result.dtype == dtype
     assert torch.equal(result, torch.zeros_like(source))
 

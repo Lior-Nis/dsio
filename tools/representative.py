@@ -290,12 +290,17 @@ def _require_baseline_runs(records: Sequence[Mapping[str, Any]], client: Any | N
 
         client = MlflowClient(_require_live_tracking())
     for record in records:
-        for run_id in _evaluation_run_ids(record).values():
-            client.get_run(run_id)
+        for run_name, run_id in _evaluation_run_ids(record).items():
+            run = client.get_run(run_id)
+            if run.info.status != "FINISHED":
+                raise ValueError(
+                    f"baseline evaluation run {run_id} must be FINISHED, got {run.info.status}"
+                )
             with tempfile.TemporaryDirectory(prefix="dsio-baseline-provenance-") as directory:
                 artifact = client.download_artifacts(run_id, "provenance.json", directory)
                 provenance = json.loads(Path(artifact).read_text(encoding="utf-8"))
-            git = provenance.get("execution", {}).get("git", {})
+            execution = provenance.get("execution", {})
+            git = execution.get("git", {})
             if git.get("dirty") is not False:
                 raise ValueError(f"baseline evaluation run {run_id} has dirty provenance")
             expected_commit = record.get("commit")
@@ -303,6 +308,29 @@ def _require_baseline_runs(records: Sequence[Mapping[str, Any]], client: Any | N
                 raise ValueError(
                     f"baseline evaluation run {run_id} provenance commit "
                     f"{git.get('sha')!r} != {expected_commit!r}"
+                )
+            environment = execution.get("environment", {})
+            hardware = record.get("hardware", {})
+            expected_runtime = {
+                name: hardware.get(name) for name in ("python", "torch") if hardware.get(name)
+            }
+            actual_runtime = {name: environment.get(name) for name in expected_runtime}
+            if actual_runtime != expected_runtime:
+                raise ValueError(
+                    f"baseline evaluation run {run_id} runtime {actual_runtime} "
+                    f"!= {expected_runtime}"
+                )
+            prefix = run_name.removesuffix("evaluation_run_id").rstrip(".")
+            expected_metrics = {
+                name.removeprefix(f"{prefix}.") if prefix else name: float(value)
+                for name, value in record.get("metrics", {}).items()
+                if not prefix or name.startswith(f"{prefix}.")
+            }
+            actual_metrics = {name: float(value) for name, value in run.data.metrics.items()}
+            if actual_metrics != expected_metrics:
+                raise ValueError(
+                    f"baseline evaluation run {run_id} metrics {actual_metrics} "
+                    f"!= {expected_metrics}"
                 )
 
 

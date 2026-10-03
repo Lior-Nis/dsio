@@ -28,11 +28,12 @@ def _numpy_instance_standardize(
     source = signal.detach().to(device="cpu", dtype=torch.float32).numpy()
     validity = observed.detach().to(device="cpu").numpy()
     result = np.zeros_like(source)
+    minimum = max(eps, np.finfo(source.dtype).tiny)
     for index in range(len(source)):
         selected = source[index].T[validity[index, 0]]
         mean = selected.mean(axis=0, keepdims=True)
         scale = selected.std(axis=0, keepdims=True)
-        result[index].T[validity[index, 0]] = (selected - mean) / np.maximum(scale, eps)
+        result[index].T[validity[index, 0]] = (selected - mean) / np.maximum(scale, minimum)
     return torch.from_numpy(result).to(device=signal.device, dtype=output_dtype)
 
 
