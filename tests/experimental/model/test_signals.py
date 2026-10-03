@@ -107,6 +107,21 @@ def test_instance_standardization_matches_numpy_float32_reduction(batch_size: in
     )
 
 
+def test_instance_standardization_can_reproduce_numpy_float32_exactly() -> None:
+    rng = np.random.default_rng(0)
+    signal = (
+        rng.normal(size=(512, 3)) * np.array([0.01, 1.0, 100.0]) + np.array([1_000.0, 10.0, -50.0])
+    ).astype(np.float32)
+    expected = (signal - signal.mean(axis=0, keepdims=True)) / np.maximum(
+        signal.std(axis=0, keepdims=True), 1e-6
+    )
+    source = torch.cat((torch.from_numpy(signal).T, torch.ones(1, len(signal))), dim=0)
+
+    actual = InstanceStandardize(observed_channel=3, reduction="numpy")(source[None])
+
+    assert torch.equal(actual[0, :3].T, torch.from_numpy(expected))
+
+
 def test_dense_conv_real_outputs_do_not_depend_on_cobatch_padding() -> None:
     torch.manual_seed(19)
     model = nn.Sequential(

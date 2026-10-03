@@ -73,7 +73,10 @@ MODEL: ComponentConfig = {
                         "reference": (
                             "dsio.experimental.model.standardization:InstanceStandardize"
                         ),
-                        "parameters": {"observed_channel": OBSERVED_CHANNEL},
+                        "parameters": {
+                            "observed_channel": OBSERVED_CHANNEL,
+                            "reduction": "numpy",
+                        },
                     },
                 ]
             },

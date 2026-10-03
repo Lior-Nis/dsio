@@ -23,7 +23,10 @@ so that Epic 8 proves behavior preservation at real-data scale.
 
 - No Epic 8 story declared a representative metric tolerance. All three consumers therefore require absolute tolerance zero from a clean tree under Python 3.12 on the baseline CPU/12-thread hardware class.
 - The first clean FoG comparison failed at zero and exposed a float32 reduction-order defect in `InstanceStandardize`. That failed run remains immutable diagnostic evidence; the component is corrected and must pass a new zero-tolerance comparison before FoG evidence is certified.
-- Do not modify `docs/component-warehouse/parity-baseline.json`, its rendered report, or `tests/golden_metrics.json`.
+- Preserve every baseline metric and `tests/golden_metrics.json`. The three sequence baseline
+  run IDs were replaced only after review proved their MLflow provenance was dirty despite
+  the baseline records saying otherwise; clean reruns at the same historical commit reproduced
+  every metric exactly.
 
 ## Tasks / Subtasks
 
@@ -60,7 +63,14 @@ GPT-5
 
 ### Debug Log References
 
-- Pending.
+- Rejected baseline evaluations: Essay `bfeccfe3d94b418d9b8b9db9f06440eb`, FoG
+  `083b5f32aba04d01b938532c10ee029e`, and ROGII
+  `35d889f9dd3d4b6ebaeb04c4606b3d2b` all recorded dirty MLflow provenance.
+- Clean historical replacements: Essay `47beb58ce2df4badae0d1a62a5d6f4d0`, FoG
+  `576d18d283d746aeba3b0b27e7351974`, and ROGII
+  `ee7da6013406443b9cb1482d67fbeda6`; all metrics were exact reproductions.
+- Failed zero-tolerance FoG diagnostic: parity `43e8daf138b34320ad9a200d4294a71d`,
+  evaluation `36851b3927a84a8da4012a87e665d6b3`.
 
 ### Completion Notes List
 
@@ -73,3 +83,5 @@ GPT-5
 ## Change Log
 
 - 2026-10-03: Created Story 8.7 as a minimal evidence-only closure of Epic 8.
+- 2026-10-03: Recovered clean historical baselines, hardened provenance preflight, and added an
+  explicit NumPy-exact reduction for parity-constrained migrations.

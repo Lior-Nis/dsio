@@ -70,7 +70,7 @@ def test_ui_uri_is_explicit_and_cannot_persist_credentials(
         representative._ui_uri("http://localhost:5000")
 
 
-def test_single_and_multi_model_results_flatten_to_one_record() -> None:
+def test_single_and_multi_model_results_flatten_to_one_record(tmp_path: Path) -> None:
     single = {"metrics": {"rmse": 2}, "train_run_id": "t", "evaluation_run_id": "e", "seed": 19}
     multi = {
         "data_run_id": "d",
@@ -97,12 +97,44 @@ def test_single_and_multi_model_results_flatten_to_one_record() -> None:
     }
 
     resolved: list[str] = []
-    client = SimpleNamespace(get_run=lambda run_id: resolved.append(run_id))
+
+    def download(run_id: str, artifact: str, destination: str) -> str:
+        assert artifact == "provenance.json"
+        path = Path(destination) / run_id / artifact
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"execution": {"git": {"dirty": False}}}))
+        return str(path)
+
+    client = SimpleNamespace(
+        get_run=lambda run_id: resolved.append(run_id),
+        download_artifacts=download,
+    )
     representative._require_baseline_runs(
         [{"runs": representative._run_ids(single)}, {"runs": representative._run_ids(multi)}],
         client,
     )
     assert resolved == ["e", "ef", "et"]
+
+
+def test_baseline_preflight_rejects_dirty_mlflow_provenance(tmp_path: Path) -> None:
+    run_id = "a" * 32
+
+    def download(_: str, artifact: str, destination: str) -> str:
+        path = Path(destination) / artifact
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"execution": {"git": {"dirty": True}}}))
+        return str(path)
+
+    client = SimpleNamespace(
+        get_run=lambda _: None,
+        download_artifacts=download,
+    )
+
+    with pytest.raises(ValueError, match=f"baseline evaluation run {run_id}.*dirty"):
+        representative._require_baseline_runs(
+            [{"runs": {"evaluation_run_id": run_id}}],
+            client,
+        )
 
 
 def test_tracking_requires_a_reachable_http_server(

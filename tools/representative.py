@@ -284,7 +284,7 @@ def _tag_run_ids(runs: Mapping[str, str]) -> str:
 
 
 def _require_baseline_runs(records: Sequence[Mapping[str, Any]], client: Any | None = None) -> None:
-    """Resolve every baseline evaluation before starting an expensive consumer."""
+    """Resolve clean baseline evaluations before starting an expensive consumer."""
     if client is None:
         from mlflow.tracking import MlflowClient
 
@@ -292,6 +292,18 @@ def _require_baseline_runs(records: Sequence[Mapping[str, Any]], client: Any | N
     for record in records:
         for run_id in _evaluation_run_ids(record).values():
             client.get_run(run_id)
+            with tempfile.TemporaryDirectory(prefix="dsio-baseline-provenance-") as directory:
+                artifact = client.download_artifacts(run_id, "provenance.json", directory)
+                provenance = json.loads(Path(artifact).read_text(encoding="utf-8"))
+            git = provenance.get("execution", {}).get("git", {})
+            if git.get("dirty") is not False:
+                raise ValueError(f"baseline evaluation run {run_id} has dirty provenance")
+            expected_commit = record.get("commit")
+            if expected_commit and git.get("sha") != expected_commit:
+                raise ValueError(
+                    f"baseline evaluation run {run_id} provenance commit "
+                    f"{git.get('sha')!r} != {expected_commit!r}"
+                )
 
 
 def _runs(

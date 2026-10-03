@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from typing import Literal
 
+import numpy as np
 import torch
 from torch import Tensor, nn
 
@@ -17,6 +19,21 @@ def _weighted_time_sum(values: Tensor, observed: Tensor) -> Tensor:
         values = values.expand(2, -1, -1)
         weights = weights.expand(2, -1)
     return torch.vmap(torch.mv)(values, weights)[:batch].unsqueeze(2)
+
+
+def _numpy_instance_standardize(
+    signal: Tensor, observed: Tensor, *, eps: float, output_dtype: torch.dtype
+) -> Tensor:
+    """Reproduce NumPy float32 per-instance statistics for migration parity."""
+    source = signal.detach().to(device="cpu", dtype=torch.float32).numpy()
+    validity = observed.detach().to(device="cpu").numpy()
+    result = np.zeros_like(source)
+    for index in range(len(source)):
+        selected = source[index].T[validity[index, 0]]
+        mean = selected.mean(axis=0, keepdims=True)
+        scale = selected.std(axis=0, keepdims=True)
+        result[index].T[validity[index, 0]] = (selected - mean) / np.maximum(scale, eps)
+    return torch.from_numpy(result).to(device=signal.device, dtype=output_dtype)
 
 
 class Standardize(nn.Module):
@@ -107,15 +124,19 @@ class InstanceStandardize(nn.Module):
         ``eps``: finite positive minimum scale (default ``1e-6``).
         ``observed_channel``: optional channel-axis index containing shared timestep
         validity; negative indexes are accepted. With no channel, every timestep is used.
+        ``reduction``: ``"torch"`` keeps statistics native and compilable; ``"numpy"``
+        reproduces NumPy float32 reduction exactly for audited migrations.
 
     Devices:
         CPU and accelerators. Floating dtype/device are preserved; integer inputs become
-        float32.
+        float32. The NumPy reduction copies through CPU and is intended only for explicit
+        parity constraints.
 
     Limitations:
         Rank-three channel-first signals only. One validity channel is shared by every
         value channel; feature-specific missingness needs a different declared block. Half
-        and bfloat16 statistics are accumulated in float32, then cast back.
+        and bfloat16 statistics are accumulated in float32, then cast back. NumPy reduction
+        is non-differentiable.
 
     Example:
         >>> import torch
@@ -124,7 +145,12 @@ class InstanceStandardize(nn.Module):
         [[[-1.0, 1.0, 0.0], [1.0, 1.0, 0.0]]]
     """
 
-    def __init__(self, eps: float = 1e-6, observed_channel: int | None = None) -> None:
+    def __init__(
+        self,
+        eps: float = 1e-6,
+        observed_channel: int | None = None,
+        reduction: Literal["torch", "numpy"] = "torch",
+    ) -> None:
         super().__init__()
         if isinstance(eps, bool) or not isinstance(eps, int | float):
             raise ValueError("eps must be finite and positive")
@@ -138,8 +164,11 @@ class InstanceStandardize(nn.Module):
             isinstance(observed_channel, bool) or not isinstance(observed_channel, int)
         ):
             raise ValueError("observed_channel must be an integer or None")
+        if reduction not in {"torch", "numpy"}:
+            raise ValueError("reduction must be 'torch' or 'numpy'")
         self.eps = normalized_eps
         self.observed_channel = observed_channel
+        self.reduction = reduction
 
     def forward(self, x: Tensor) -> Tensor:
         if x.ndim != 3:
@@ -180,6 +209,13 @@ class InstanceStandardize(nn.Module):
             torch.isfinite(safe),
             lambda: "observed values must be finite",
         )
+        if self.reduction == "numpy":
+            normalized = _numpy_instance_standardize(
+                signal, observed, eps=self.eps, output_dtype=values.dtype
+            )
+            if self.observed_channel is None:
+                return normalized
+            return torch.cat((normalized[:, :index], validity, normalized[:, index:]), dim=1)
         stats_dtype = (
             torch.float32 if signal.dtype in (torch.float16, torch.bfloat16) else signal.dtype
         )
