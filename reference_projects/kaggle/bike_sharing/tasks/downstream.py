@@ -18,9 +18,10 @@ from dsio.eval import evaluate
 from dsio.experimental.data import collate_arrays
 from dsio.experimental.inference import RegressionOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
-from dsio.tracking import attempt, record_provenance
+from dsio.tracking import attempt, record_provenance, require_evidence
 from dsio.train.artifacts import ArtifactRef, save_artifact
 from reference_projects.kaggle.bike_sharing.components import (
+    COLLATOR,
     DATASET,
     INPUTS,
     OUTPUT,
@@ -41,10 +42,25 @@ def export(
             split_digest=split["split_digest"],
             components=("model", "preprocessor"),
         )
-        model = resolve_component(components["model"], expected=torch.nn.Module)
+        standardization = training["standardization"]
+        require_evidence(
+            training["train_run_id"],
+            identity=training["identity"],
+            required_artifacts={reference.path, standardization["artifact"]},
+            expected_configuration={"standardization": standardization},
+        )
+        model = resolve_component(
+            components["model"],
+            mean=standardization["mean"],
+            scale=standardization["scale"],
+            expected=torch.nn.Module,
+        )
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         inputs = collate_arrays(
-            INPUTS, SignalStore(data["store_path"]), list(split["assignments"]["validate"])
+            INPUTS,
+            SignalStore(data["store_path"]),
+            list(split["assignments"]["validate"]),
+            collate_fn=resolve_component(COLLATOR),
         )
         output = resolve_component(OUTPUT, expected=RegressionOutput)
         identity = record_provenance(
@@ -53,11 +69,14 @@ def export(
                 "checkpoint_digest": reference.digest,
                 "dataset_digest": data["dataset_digest"],
                 "split_digest": split["split_digest"],
+                "standardization": standardization,
                 "standardization_sample_ids": training["standardization_sample_ids"],
                 "export_form": "pyfunc",
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
+                "collator": COLLATOR,
+                "dataset_factory": INPUTS,
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
                 "output": OUTPUT,
@@ -96,7 +115,12 @@ def evaluate_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         ids = list(split["assignments"]["validate"])
-        arrays = collate_arrays(DATASET, SignalStore(data["store_path"]), ids)
+        arrays = collate_arrays(
+            DATASET,
+            SignalStore(data["store_path"]),
+            ids,
+            collate_fn=resolve_component(COLLATOR),
+        )
         inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
         targets = arrays["y"]
         identity = record_provenance(
@@ -108,7 +132,11 @@ def evaluate_model(
                 "metrics": ["rmse"],
                 "sample_ids": ids,
             },
-            components={"evaluation": "dsio.eval.execution:evaluate"},
+            components={
+                "collator": COLLATOR,
+                "dataset_factory": DATASET,
+                "evaluation": "dsio.eval.execution:evaluate",
+            },
         )
         metrics = evaluate(
             run_id=run.info.run_id,
@@ -128,7 +156,13 @@ def infer_and_submit(
     with attempt(experiment_id) as run:
         ids = list(data["test_ids"])
         outputs = predict(
-            exported["model_uri"], collate_arrays(INPUTS, SignalStore(data["store_path"]), ids)
+            exported["model_uri"],
+            collate_arrays(
+                INPUTS,
+                SignalStore(data["store_path"]),
+                ids,
+                collate_fn=resolve_component(COLLATOR),
+            ),
         )
         values = np.asarray(outputs["prediction"], dtype=float).reshape(-1).tolist()
         identity = record_provenance(
@@ -139,7 +173,11 @@ def infer_and_submit(
                 "export_identity": exported["identity"],
                 "sample_ids": ids,
             },
-            components={"inference": "dsio.inference.loading:predict"},
+            components={
+                "collator": COLLATOR,
+                "dataset_factory": INPUTS,
+                "inference": "dsio.inference.loading:predict",
+            },
         )
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer, lineterminator="\n")

@@ -9,6 +9,7 @@ from mlflow import MlflowClient
 from mlflow.entities import DatasetInput, InputTag, LoggedModelInput
 from prefect import task
 
+from dsio.config.components import resolve_component
 from dsio.data.store import SignalStore
 from dsio.eval import evaluate
 from dsio.experimental.data import collate_arrays
@@ -19,7 +20,7 @@ from dsio.tracking import (
     record_provenance,
     require_evidence,
 )
-from reference_projects.supervised.components import EVALUATION, INPUTS
+from reference_projects.supervised.components import COLLATOR, EVALUATION, INPUTS
 
 
 def _sources(
@@ -80,7 +81,12 @@ def evaluate_model(
             model_uri=model_uri,
             checkpoint_digest=checkpoint_digest,
         )
-        arrays = collate_arrays(EVALUATION, SignalStore(store_path), sample_ids)
+        arrays = collate_arrays(
+            EVALUATION,
+            SignalStore(store_path),
+            sample_ids,
+            collate_fn=resolve_component(COLLATOR),
+        )
         inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
         targets = arrays["y"]
         identity = record_provenance(
@@ -93,7 +99,11 @@ def evaluate_model(
                 "model_evidence_identity": model_identity,
                 "sample_ids": sample_ids,
             },
-            components={"evaluation": "dsio.eval.execution:evaluate"},
+            components={
+                "collator": COLLATOR,
+                "dataset_factory": EVALUATION,
+                "evaluation": "dsio.eval.execution:evaluate",
+            },
         )
         values = evaluate(
             run_id=run.info.run_id,
@@ -136,7 +146,12 @@ def infer(
             model_uri=model_uri,
             checkpoint_digest=checkpoint_digest,
         )
-        inputs = collate_arrays(INPUTS, SignalStore(store_path), sample_ids)
+        inputs = collate_arrays(
+            INPUTS,
+            SignalStore(store_path),
+            sample_ids,
+            collate_fn=resolve_component(COLLATOR),
+        )
         identity = record_provenance(
             run.info.run_id,
             {
@@ -146,7 +161,11 @@ def infer(
                 "input_sample_ids": sample_ids,
                 "model_evidence_identity": model_identity,
             },
-            components={"inference": "dsio.inference.loading:predict"},
+            components={
+                "collator": COLLATOR,
+                "dataset_factory": INPUTS,
+                "inference": "dsio.inference.loading:predict",
+            },
         )
         outputs = predict(model_uri, inputs)
         client = MlflowClient()

@@ -18,7 +18,7 @@ from dsio.inference import (
 )
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef
-from reference_projects.supervised.components import INPUTS, OUTPUT
+from reference_projects.supervised.components import COLLATOR, INPUTS, OUTPUT
 
 
 @task(persist_result=False)
@@ -30,7 +30,10 @@ def export_model(
 ) -> dict[str, Any]:
     with attempt(experiment_id) as run:
         inputs = collate_arrays(
-            INPUTS, SignalStore(data["store_path"]), split["assignments"]["test"]
+            INPUTS,
+            SignalStore(data["store_path"]),
+            split["assignments"]["test"],
+            collate_fn=resolve_component(COLLATOR),
         )
         reference = ArtifactRef.model_validate(training["checkpoint"])
         components = require_checkpoint_lineage(
@@ -55,6 +58,8 @@ def export_model(
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
+                "collator": COLLATOR,
+                "dataset_factory": INPUTS,
                 "model": components["model"],
                 "output": OUTPUT,
                 "preprocessor": components["preprocessor"],

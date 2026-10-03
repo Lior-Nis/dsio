@@ -23,7 +23,8 @@ Verified encoder handoff:
     - reference_projects/kaggle/digit_recognizer
   reason: >-
     Loading a pretrained backbone only after its run, identity, digest and label-free lineage
-    verify (#17) has one consumer; a DSio load-and-freeze path waits for pretrained weights (v2).
+    verify (#17) has one consumer, so it stays local; a DSio load-and-freeze path waits for
+    pretrained weights (v2).
 Local objectives:
   consumers:
     - reference_projects/kaggle/essay_scoring
@@ -84,10 +85,6 @@ Well feature engineering:
   consumers:
     - reference_projects/kaggle/rogii
   reason: Stays local - domain feature mapping.
-Verified encoder handoff:
-  consumers:
-    - reference_projects/kaggle/digit_recognizer
-  reason: Stays local - pretrained-weights path is deferred to v2.
 Streaming evaluation with participant aggregation:
   consumers:
     - reference_projects/kaggle/child_mind/sequence

@@ -69,16 +69,16 @@ and arrays from tensors share their memory.
 
 #### `dsio.experimental.data.fitting:fit_standardization`
 
-Fit per-feature mean and scale over the samples one split role assigns. — **experimental**; real uses: 1 (bike_sharing).
+Fit per-feature mean and scale over the samples assigned to training. — **experimental**; real uses: 1 (bike_sharing).
 
 **Consumes**: A `SignalStore` of `[rows, features]` samples and the replayed split manifest.
 
-**Produces**: `{"mean", "scale", "role", "fold", "sample_ids", "observed"}`: float64 statistics
-over every row of the role's samples (`scale` is the population standard
+**Produces**: `{"mean", "scale", "role", "partition", "sample_ids", "observed"}`: float64
+statistics over every row of the training samples (`scale` is the population standard
 deviation, with zero-variance features mapped to 1) and the exact identities used.
 
-**Parameters**: `fold`; `role` (default `"train"`); `observed` (default `false`): ignore
-NaN values per feature instead of propagating them.
+**Parameters**: `partition`: split partition index; `observed` (default `false`): ignore NaN
+values per feature instead of propagating them.
 
 **Devices**: CPU (NumPy); fitted once before training.
 
@@ -103,8 +103,9 @@ raises rather than inventing statistics.
 ...     examples, "group_shuffle", name="demo", seed=1,
 ...     parameters={"test_size": 0.25},
 ... )
->>> fitted = fit_standardization(store, manifest, fold=0)
->>> sorted(fitted["sample_ids"]) == sorted(manifest.fold(0).assignments["train"])
+>>> fitted = fit_standardization(store, manifest, partition=0)
+>>> role = manifest.required_roles[0]
+>>> sorted(fitted["sample_ids"]) == sorted(manifest.fold(0).assignments[role])
 True
 ```
 
@@ -901,13 +902,11 @@ needs them; full sections arrive with that first use.
 | `dsio.experimental.model.components:NTXent` | SimCLR's contrastive loss over a batch built by :class:`~dsio.experimental.train.augmentation.TwoView`. | self_supervised |
 | `dsio.experimental.model.components:RandomScale` | Multiply each channel by a random gain, for amplitude-invariant features. | — |
 | `dsio.experimental.model.components:VICReg` | Variance-Invariance-Covariance regularisation: no negatives, no momentum encoder — collapse is prevented by an explicit variance term instead. | — |
-| `dsio.experimental.model.components:bce_loss` |  | — |
 | `dsio.experimental.model.components:identity_head` | For pretraining, where the loss consumes features directly. | — |
 | `dsio.experimental.model.components:identity_transform` |  | — |
 | `dsio.experimental.model.components:linear_head` |  | — |
 | `dsio.experimental.model.components:mae_decoder_head` | MAE's reconstruction head: predict every position of the original window, back in the ``[channels, length]`` shape the input arrived in. | — |
 | `dsio.experimental.model.components:mlp_head` |  | — |
-| `dsio.experimental.model.components:mse_loss` |  | — |
 | `dsio.experimental.model.components:no_augmentation` |  | — |
 | `dsio.experimental.model.components:simclr_projector_head` | SimCLR's projection head: NT-Xent compares windows in this space, not the encoder's own feature space — moved here from the deleted ``ssl.methods.SimCLR.build_head``. | — |
 | `dsio.experimental.model.components:vicreg_projector_head` | VICReg's projection head, moved here from the deleted ``ssl.methods.VICReg. build_head``. The ``BatchNorm1d`` matters: :class:`VICReg`'s variance term assumes a projector that does not itself normalise away the collapse it exists to detect. | — |
@@ -1077,6 +1076,6 @@ local on purpose.
 | Streaming evaluation with participant aggregation | 1 | `reference_projects/kaggle/child_mind/sequence` | Stays local - bounded-memory streaming evaluation is on the roadmap. |
 | Train and export task wiring | 9 | `reference_projects/kaggle/titanic`, `reference_projects/kaggle/bike_sharing`, `reference_projects/kaggle/digit_recognizer`, `reference_projects/kaggle/essay_scoring`, `reference_projects/kaggle/parkinsons_fog`, `reference_projects/kaggle/rogii`, `reference_projects/kaggle/store_sales`, `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Fit and export spine functions (CAP-7), Epic 10. |
 | Train-fold statistics and weight fitting | 2 | `reference_projects/kaggle/child_mind`, `reference_projects/kaggle/child_mind/sequence` | Observed-only statistics and class/group weights (#4a-#4c), Stories 9.2, 9.3. |
-| Verified encoder handoff | 1 | `reference_projects/kaggle/digit_recognizer` | Stays local - pretrained-weights path is deferred to v2. |
+| Verified encoder handoff | 1 | `reference_projects/kaggle/digit_recognizer` | Loading a pretrained backbone only after its run, identity, digest and label-free lineage verify (#17) has one consumer, so it stays local; a DSio load-and-freeze path waits for pretrained weights (v2). |
 | Well feature engineering | 1 | `reference_projects/kaggle/rogii` | Stays local - domain feature mapping. |
 | Window Dataset class | 1 | `reference_projects/kaggle/child_mind/sequence` | Window dataset with weights and groups (#2), Story 9.1. |

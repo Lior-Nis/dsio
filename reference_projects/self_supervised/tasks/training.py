@@ -30,6 +30,7 @@ from reference_projects.self_supervised.components import (
     DATASET,
     ContrastiveObjective,
 )
+from reference_projects.supervised.components import COLLATOR
 
 _AUGMENTOR: ComponentConfig = {
     "reference": "dsio.experimental.model.components:Jitter",
@@ -75,6 +76,7 @@ _COMPONENTS = {
     "augmentation": _AUGMENTATION_WRAPPER["reference"],
     "augmentor": _AUGMENTOR["reference"],
     "data_module": "dsio.data.loading.module:DsioDataModule",
+    "collator": COLLATOR,
     "dataset_factory": DATASET,
     "model": _MODEL,
     "module": "dsio.model.module:DsioModule",
@@ -120,6 +122,7 @@ def train_model(
             fold=_TRAINING["fold"],
             roles=_TRAINING["roles"],
             dataset_factory=resolve_component(DATASET, expected=StoredItems),
+            collate_fn=resolve_component(COLLATOR),
             batch_size=_TRAINING["batch_size"],
             num_workers=_TRAINING["num_workers"],
             seed=seed,

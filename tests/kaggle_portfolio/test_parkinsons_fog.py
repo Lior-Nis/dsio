@@ -578,12 +578,20 @@ def test_parkinsons_scale_flow_tracks_scan_and_explicit_training_configuration(
     assert result["ingest_telemetry"]["elapsed_seconds"] > 0
     assert result["training_telemetry"]["elapsed_seconds"] > 0
     calibration = result["execution_calibration"]
-    assert calibration["selected"]["batch_size"] in {1, 2}
+    assert calibration["selected"]["batch_size"] == 2
+    assert calibration["selected"]["accumulate_grad_batches"] == 1
     assert (
         calibration["selected"]["batch_size"] * calibration["selected"]["accumulate_grad_batches"]
         == 2
     )
     assert len(calibration["trials"]) == 2
+    rejected = next(
+        trial
+        for trial in calibration["trials"]
+        if trial["candidate"]["accumulate_grad_batches"] == 2
+    )
+    assert rejected["status"] == "rejected"
+    assert rejected["reason"] == "objective_accumulation_unsupported"
     run = MlflowClient().get_run(result["scale"]["scan_run_id"])
     assert run.data.metrics["scale.scan.files"] == 2
     assert run.data.metrics["scale.scan.rows"] == 5

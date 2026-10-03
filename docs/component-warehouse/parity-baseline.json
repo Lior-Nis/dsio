@@ -26,18 +26,28 @@
     "recorded": "20261001T203147Z",
     "runs": {
       "data_run_id": "f4a7adff91f14998a9f48d6ee11bb715",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/f4a7adff91f14998a9f48d6ee11bb715",
       "fused.evaluation_run_id": "dbc483ed18b046a29acad31931b7c131",
+      "fused.evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/dbc483ed18b046a29acad31931b7c131",
       "fused.export_run_id": "c361ad67c9c04a26b0c4c9510aff19c5",
+      "fused.export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/c361ad67c9c04a26b0c4c9510aff19c5",
       "fused.inference_run_id": "49d052c4f3824155904231bfd966ead6",
+      "fused.inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/49d052c4f3824155904231bfd966ead6",
       "fused.train_run_id": "3b310f972f394d2fa46a54adfcc44cad",
+      "fused.train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/3b310f972f394d2fa46a54adfcc44cad",
       "split_run_id": "40a36b5c1f2d4d1c997ece08c0f3748b",
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/40a36b5c1f2d4d1c997ece08c0f3748b",
       "tabular.evaluation_run_id": "054ff4f568c24b42a0be91265269c0f5",
+      "tabular.evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/054ff4f568c24b42a0be91265269c0f5",
       "tabular.export_run_id": "6154faba9ca643399f7386f71ebc8c4d",
+      "tabular.export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/6154faba9ca643399f7386f71ebc8c4d",
       "tabular.inference_run_id": "9516a935b1ea4c0b90871dfc3def3c0a",
-      "tabular.train_run_id": "8310253e056144c89dc4f5a2d22b1d20"
+      "tabular.inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/9516a935b1ea4c0b90871dfc3def3c0a",
+      "tabular.train_run_id": "8310253e056144c89dc4f5a2d22b1d20",
+      "tabular.train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/58/runs/8310253e056144c89dc4f5a2d22b1d20"
     },
     "seconds": 89.3,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   },
   "child_mind_sequence": {
     "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
@@ -60,13 +70,18 @@
     "recorded": "20261002T011322Z",
     "runs": {
       "data_run_id": "14b3fdd922d34a64a72ab501aead9a25",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/14b3fdd922d34a64a72ab501aead9a25",
       "evaluation_run_id": "9eb0fe3346f244908747ebcaf1ee4434",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/9eb0fe3346f244908747ebcaf1ee4434",
       "export_run_id": "629bc06b7c43487f81040b2688524b78",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/629bc06b7c43487f81040b2688524b78",
       "split_run_id": "4bf6c5979d5348d19d474814e72361a3",
-      "train_run_id": "024d25a0ba7640d9a2bf1764b289bef7"
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/4bf6c5979d5348d19d474814e72361a3",
+      "train_run_id": "024d25a0ba7640d9a2bf1764b289bef7",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/59/runs/024d25a0ba7640d9a2bf1764b289bef7"
     },
     "seconds": 268.5,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   },
   "digit_recognizer": {
     "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
@@ -84,15 +99,22 @@
     "recorded": "20261001T201340Z",
     "runs": {
       "data_run_id": "e1e5441b7a634929a141aa308b5f607e",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/e1e5441b7a634929a141aa308b5f607e",
       "evaluation_run_id": "05644844db1f457abf75b62e6560329a",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/05644844db1f457abf75b62e6560329a",
       "export_run_id": "264dbd8dffd74e54971a6a1e30bab7b5",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/264dbd8dffd74e54971a6a1e30bab7b5",
       "inference_run_id": "99ac89e02a164188a4cadc5251b02428",
+      "inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/99ac89e02a164188a4cadc5251b02428",
       "pretrain_run_id": "e0f1337b5fb64683bd9eb0188350de19",
+      "pretrain_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/e0f1337b5fb64683bd9eb0188350de19",
       "split_run_id": "b9ec0e88d6a046a09d27eb6c4689d0d0",
-      "train_run_id": "56507cec465c4e3cb216c0c5f495c332"
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/b9ec0e88d6a046a09d27eb6c4689d0d0",
+      "train_run_id": "56507cec465c4e3cb216c0c5f495c332",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/53/runs/56507cec465c4e3cb216c0c5f495c332"
     },
     "seconds": 902.1,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   },
   "essay_scoring": {
     "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
@@ -111,14 +133,20 @@
     "recorded": "20261001T202842Z",
     "runs": {
       "data_run_id": "15add80371bd4e71b81353795db61a87",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/15add80371bd4e71b81353795db61a87",
       "evaluation_run_id": "bfeccfe3d94b418d9b8b9db9f06440eb",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/bfeccfe3d94b418d9b8b9db9f06440eb",
       "export_run_id": "e8a9823efd964f92823db4de93f1cee4",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/e8a9823efd964f92823db4de93f1cee4",
       "inference_run_id": "a837551e525d49918744e5f552785e08",
+      "inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/a837551e525d49918744e5f552785e08",
       "split_run_id": "577002efcf2a44d9b85b3b56249f3879",
-      "train_run_id": "bf9aa7b98e9b48c887f342a790f09d61"
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/577002efcf2a44d9b85b3b56249f3879",
+      "train_run_id": "bf9aa7b98e9b48c887f342a790f09d61",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/55/runs/bf9aa7b98e9b48c887f342a790f09d61"
     },
     "seconds": 73.0,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   },
   "parkinsons_fog": {
     "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
@@ -143,14 +171,20 @@
     "recorded": "20261001T203316Z",
     "runs": {
       "data_run_id": "af463f0c7a1b48718b31d3e39c92723a",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/af463f0c7a1b48718b31d3e39c92723a",
       "evaluation_run_id": "083b5f32aba04d01b938532c10ee029e",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/083b5f32aba04d01b938532c10ee029e",
       "export_run_id": "6695c4526c144ac88b5b7242577beffd",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/6695c4526c144ac88b5b7242577beffd",
       "inference_run_id": "0cec8bc100e24d678b42d58396f22521",
+      "inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/0cec8bc100e24d678b42d58396f22521",
       "split_run_id": "61b6049952544887bba75e913b9cbeae",
-      "train_run_id": "0bbaa36b9d734f33a204f717cb23a982"
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/61b6049952544887bba75e913b9cbeae",
+      "train_run_id": "0bbaa36b9d734f33a204f717cb23a982",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/57/runs/0bbaa36b9d734f33a204f717cb23a982"
     },
     "seconds": 35.1,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   },
   "rogii": {
     "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
@@ -169,14 +203,20 @@
     "recorded": "20261001T202955Z",
     "runs": {
       "data_run_id": "61f34ee077254c628c214e77396125cb",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/61f34ee077254c628c214e77396125cb",
       "evaluation_run_id": "35d889f9dd3d4b6ebaeb04c4606b3d2b",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/35d889f9dd3d4b6ebaeb04c4606b3d2b",
       "export_run_id": "d175aa8fc84a402bab0e26e49ce4c208",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/d175aa8fc84a402bab0e26e49ce4c208",
       "inference_run_id": "f749cda372744ba18dcffba6a0fef346",
+      "inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/f749cda372744ba18dcffba6a0fef346",
       "split_run_id": "fcf5ef0b635046f6bfe5912274080408",
-      "train_run_id": "61cba5fae2b542969c39af8d9a1bde1b"
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/fcf5ef0b635046f6bfe5912274080408",
+      "train_run_id": "61cba5fae2b542969c39af8d9a1bde1b",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/56/runs/61cba5fae2b542969c39af8d9a1bde1b"
     },
     "seconds": 79.1,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   },
   "store_sales": {
     "commit": "fe37300c844de7db0c54189ec0c45b9c16cdd101",
@@ -195,14 +235,20 @@
     "recorded": "20261001T203114Z",
     "runs": {
       "data_run_id": "824bd9823b444e6ba12e24526788545f",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/824bd9823b444e6ba12e24526788545f",
       "evaluation_run_id": "26ca9ccfa07b4cafa12caa16c87cdde9",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/26ca9ccfa07b4cafa12caa16c87cdde9",
       "export_run_id": "331af66498d843849fcc9ff4d889453c",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/331af66498d843849fcc9ff4d889453c",
       "inference_run_id": "fcb230f2b6d343439ec3800bd7d14c25",
+      "inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/fcb230f2b6d343439ec3800bd7d14c25",
       "split_run_id": "3112f86c39334c199d50e1971bf70238",
-      "train_run_id": "07461a01ca954db1807df156d88d9b59"
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/3112f86c39334c199d50e1971bf70238",
+      "train_run_id": "07461a01ca954db1807df156d88d9b59",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/54/runs/07461a01ca954db1807df156d88d9b59"
     },
     "seconds": 32.5,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   },
   "titanic": {
     "commit": "38845c45060f66379d4d0c347a0fa81428a91c2f",
@@ -220,13 +266,19 @@
     "recorded": "20261001T144341Z",
     "runs": {
       "data_run_id": "b35b348cf3da4c3c8c04b9726d2e9b6e",
+      "data_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/b35b348cf3da4c3c8c04b9726d2e9b6e",
       "evaluation_run_id": "865a9dd5eb4d42518f766e98a34c771a",
+      "evaluation_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/865a9dd5eb4d42518f766e98a34c771a",
       "export_run_id": "ecc01db6679740108a996f9e43571289",
+      "export_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/ecc01db6679740108a996f9e43571289",
       "inference_run_id": "0d9e4dacdd804aabad2ec173419947e7",
+      "inference_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/0d9e4dacdd804aabad2ec173419947e7",
       "split_run_id": "066dc3e2654941bbbc9ec6c7d0f0c1fa",
-      "train_run_id": "530642cbfe8843009b73d4da797645ca"
+      "split_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/066dc3e2654941bbbc9ec6c7d0f0c1fa",
+      "train_run_id": "530642cbfe8843009b73d4da797645ca",
+      "train_run_uri": "https://pop.tailee691f.ts.net:8443/#/experiments/52/runs/530642cbfe8843009b73d4da797645ca"
     },
     "seconds": 28.1,
-    "tracking_uri": "http://localhost:5000"
+    "tracking_uri": "https://pop.tailee691f.ts.net:8443"
   }
 }

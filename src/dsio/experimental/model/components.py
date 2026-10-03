@@ -247,24 +247,6 @@ class CrossEntropy(nn.Module):
         return nn.functional.cross_entropy(prediction, target.long(), weight=self.weight)
 
 
-def bce_loss() -> nn.Module:
-    class _BCE(nn.Module):
-        def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-            return nn.functional.binary_cross_entropy_with_logits(
-                prediction.squeeze(-1), target.float()
-            )
-
-    return _BCE()
-
-
-def mse_loss() -> nn.Module:
-    class _MSE(nn.Module):
-        def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-            return nn.functional.mse_loss(prediction.squeeze(-1), target.float())
-
-    return _MSE()
-
-
 class MaskedMSE(nn.Module):
     """Reconstruction loss for a target that carries NaN outside masked positions.
 
@@ -554,13 +536,11 @@ __all__ = [
     "NTXent",
     "RandomScale",
     "VICReg",
-    "bce_loss",
     "identity_head",
     "identity_transform",
     "linear_head",
     "mae_decoder_head",
     "mlp_head",
-    "mse_loss",
     "no_augmentation",
     "simclr_projector_head",
     "vicreg_projector_head",

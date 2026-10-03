@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from mlflow import MlflowClient
 
@@ -17,6 +19,8 @@ def assert_execution_evidence(
     fold: int = 0,
     batch_size: int = 4,
     num_workers: int = 0,
+    dataset: Mapping[str, Any] | None = None,
+    collator: Mapping[str, Any] | None = None,
 ) -> None:
     client = MlflowClient()
     run = client.get_run(run_id)
@@ -38,6 +42,10 @@ def assert_execution_evidence(
     assert configuration["num_workers"] == num_workers
     assert configuration["optimizer_parameters"] == optimizer_parameters
     assert provenance["components"]["optimizer"] == optimizer
+    if dataset is not None:
+        assert collator is not None
+        assert provenance["components"]["dataset_factory"] == dataset
+        assert provenance["components"]["collator"] == collator
 
 
 def assert_replay_run_ids_differ(first: dict[str, object], second: dict[str, object]) -> None:
@@ -48,7 +56,13 @@ def assert_replay_run_ids_differ(first: dict[str, object], second: dict[str, obj
         assert first[key] != second[key]
 
 
-def assert_downstream_evidence(result: dict[str, object], destination: Path) -> None:
+def assert_downstream_evidence(
+    result: dict[str, object],
+    destination: Path,
+    *,
+    datasets: Mapping[str, Mapping[str, Any]] | None = None,
+    collator: Mapping[str, Any] | None = None,
+) -> None:
     client = MlflowClient()
     identities = result["identities"]
     assert isinstance(identities, dict)
@@ -58,6 +72,21 @@ def assert_downstream_evidence(result: dict[str, object], destination: Path) -> 
         artifact = client.download_artifacts(run_id, "provenance.json", str(destination / stage))
         configuration = json.loads(Path(artifact).read_text())["configuration"]
         assert configuration["export_identity"] == identities["export"]
+
+    if datasets is not None:
+        assert collator is not None
+        assert set(datasets) == {"export", "evaluation", "inference"}
+        for stage, dataset in datasets.items():
+            run_id = result[f"{stage}_run_id"]
+            assert isinstance(run_id, str)
+            artifact = client.download_artifacts(
+                run_id,
+                "provenance.json",
+                str(destination / f"{stage}-components"),
+            )
+            components = json.loads(Path(artifact).read_text())["components"]
+            assert components["dataset_factory"] == dataset
+            assert components["collator"] == collator
 
     inference_run_id = result["inference_run_id"]
     assert isinstance(inference_run_id, str)

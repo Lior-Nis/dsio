@@ -11,6 +11,16 @@ UNLABELLED_DATASET: ComponentConfig = {
     },
 }
 
+COLLATOR: ComponentConfig = {
+    "reference": "dsio.data.loading.collation:IdentityCollator",
+    "parameters": {},
+}
+
+PIXEL_STANDARDIZER: ComponentConfig = {
+    "reference": "dsio.experimental.model.standardization:Standardize",
+    "parameters": {"mean": [0.0], "scale": [255.0]},
+}
+
 # Predictor inputs, exactly as the exported model receives them.
 INPUTS: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",
@@ -19,8 +29,7 @@ INPUTS: ComponentConfig = {
     },
 }
 
-# Evaluation inputs and targets, assembled through the training collation.
-EVALUATION: ComponentConfig = {
+LABELLED_DATASET: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",
     "parameters": {
         "x": {"from": "data", "dtype": "uint8"},
@@ -28,13 +37,9 @@ EVALUATION: ComponentConfig = {
     },
 }
 
-LABELLED_DATASET: ComponentConfig = {
-    "reference": "dsio.experimental.data.items:StoredItems",
-    "parameters": {
-        "x": {"from": "data", "dtype": "float32", "divide": 255.0},
-        "y": {"from": "attribute", "attribute": "target", "dtype": "int64"},
-    },
-}
+# Evaluation uses the classifier training item mapping. The classifier composition owns
+# the deterministic pixel scaling, so training and Predictor execution each apply it once.
+EVALUATION: ComponentConfig = LABELLED_DATASET
 
 
 # The encoder pretrains inside the autoencoder and transfers, frozen, into the classifier.
@@ -79,6 +84,7 @@ CLASSIFIER: ComponentConfig = {
             "reference": "torch.nn:Linear",
             "parameters": {"in_features": 16, "out_features": 10},
         },
+        "preprocessor": PIXEL_STANDARDIZER,
         "frozen_backbone": True,
     },
 }

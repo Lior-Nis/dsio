@@ -28,6 +28,7 @@ from dsio.train.capabilities import (
 )
 from dsio.train.trainer import TrainerConfig, build_callbacks, build_trainer
 from reference_projects.supervised.components import (
+    COLLATOR,
     DATASET,
     OBJECTIVE,
 )
@@ -61,6 +62,7 @@ _PREPROCESSOR: ComponentConfig = {
 _COMPONENTS = {
     "module": "dsio.model.module:DsioModule",
     "data_module": "dsio.data.loading.module:DsioDataModule",
+    "collator": COLLATOR,
     "dataset_factory": DATASET,
     "model": _MODEL,
     "objective": OBJECTIVE,
@@ -104,6 +106,7 @@ def train_model(
             fold=_TRAINING["fold"],
             roles=_TRAINING["roles"],
             dataset_factory=resolve_component(DATASET, expected=StoredItems),
+            collate_fn=resolve_component(COLLATOR),
             batch_size=_TRAINING["batch_size"],
             num_workers=_TRAINING["num_workers"],
             seed=seed,

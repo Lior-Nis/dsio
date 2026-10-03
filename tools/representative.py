@@ -7,8 +7,9 @@ stories (7.7, 8.7, 9.6, 10.6) rerun the same consumers and compare against it:
     uv run python tools/representative.py titanic essay_scoring --record
     uv run python tools/representative.py titanic --compare --tolerance 0
 
-Each run uses an isolated ``PREFECT_HOME`` and a fresh workspace under ``--runs-root``.
-Results (metrics, MLflow run IDs and URIs, commit, hardware, duration) land in
+Each run starts a fresh process with an isolated ``PREFECT_HOME`` and a fresh workspace
+under ``--runs-root``. Results (metrics, immutable MLflow run URIs, commit, hardware,
+duration) land in
 ``docs/component-warehouse/parity-baseline.json`` and its rendered ``.md``. Repository
 tooling, not part of the wheel.
 """
@@ -30,6 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "docs" / "component-warehouse" / "parity-baseline.json"
@@ -96,26 +98,51 @@ CONSUMERS: dict[str, Consumer] = {
 
 def run(name: str, runs_root: Path) -> dict[str, Any]:
     """Execute one consumer's representative flow and return its parity record."""
+    tracking_uri = _require_live_tracking()
     consumer = CONSUMERS[name]
     if not consumer.data.exists():
         raise FileNotFoundError(f"{name}: data directory {consumer.data} does not exist")
-    module, _, function = consumer.flow.partition(":")
-    flow: Callable[..., Mapping[str, Any]] = getattr(importlib.import_module(module), function)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     workspace = runs_root / f"{name}-{stamp}"
     workspace.mkdir(parents=True)
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="dsio-prefect-") as prefect_home:
-        os.environ["PREFECT_HOME"] = prefect_home
-        result = flow(str(consumer.data), str(workspace), seed=19, **consumer.options)
+        result_path = Path(prefect_home) / "result.json"
+        environment = {
+            name: value for name, value in os.environ.items() if not name.startswith("PREFECT_")
+        }
+        environment["PREFECT_HOME"] = prefect_home
+        environment["MLFLOW_TRACKING_URI"] = tracking_uri
+        subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "_worker",
+                "--flow",
+                consumer.flow,
+                "--data",
+                str(consumer.data),
+                "--workspace",
+                str(workspace),
+                "--options",
+                json.dumps(consumer.options),
+                "--result",
+                str(result_path),
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+        )
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
     seconds = time.perf_counter() - started
+    result = payload["result"]
     return {
         "metrics": _metrics(result),
-        "runs": _runs(result),
+        "runs": _runs(result, tracking_uri),
         "commit": _git("rev-parse", "HEAD"),
         "dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
-        "hardware": _hardware(),
-        "tracking_uri": _tracking_uri(),
+        "hardware": payload["hardware"],
+        "tracking_uri": tracking_uri,
         "seconds": round(seconds, 1),
         "recorded": stamp,
     }
@@ -147,7 +174,7 @@ def _metrics(result: Mapping[str, Any]) -> dict[str, float]:
     }
 
 
-def _runs(result: Mapping[str, Any]) -> dict[str, str]:
+def _run_ids(result: Mapping[str, Any]) -> dict[str, str]:
     runs = {key: value for key, value in result.items() if key.endswith("_run_id")}
     for mode, model in (result.get("models") or {}).items():
         runs.update(
@@ -156,10 +183,46 @@ def _runs(result: Mapping[str, Any]) -> dict[str, str]:
     return dict(sorted(runs.items()))
 
 
+def _runs(
+    result: Mapping[str, Any], tracking_uri: str, client: Any | None = None
+) -> dict[str, str]:
+    """Keep result Run IDs and add immutable links on their tracking server."""
+    if client is None:
+        from mlflow.tracking import MlflowClient
+
+        client = MlflowClient(tracking_uri)
+    base = tracking_uri.rstrip("/")
+    runs: dict[str, str] = {}
+    for name, run_id in _run_ids(result).items():
+        runs[name] = run_id
+        uri_name = f"{name.removesuffix('_run_id')}_run_uri"
+        runs[uri_name] = (
+            f"{base}/#/experiments/{client.get_run(run_id).info.experiment_id}/runs/{run_id}"
+        )
+    return runs
+
+
 def _tracking_uri() -> str:
     import mlflow
 
     return str(mlflow.get_tracking_uri())
+
+
+def _require_live_tracking(tracking_uri: str | None = None) -> str:
+    """Return a reachable HTTP(S) MLflow URI, rejecting local or offline stores."""
+    uri = _tracking_uri() if tracking_uri is None else tracking_uri
+    parsed = urlsplit(uri)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(
+            f"representative evidence requires an HTTP(S) MLflow tracking URI, got {uri!r}"
+        )
+    from mlflow.tracking import MlflowClient
+
+    try:
+        MlflowClient(uri).search_experiments(max_results=1)
+    except Exception as error:
+        raise RuntimeError(f"MLflow tracking server {uri!r} is not reachable: {error}") from error
+    return uri.rstrip("/")
 
 
 def _hardware() -> dict[str, Any]:
@@ -206,7 +269,11 @@ def render(baseline: Mapping[str, Any]) -> str:
         hardware = record["hardware"]
         device = hardware["cuda"] or f"CPU x{hardware['threads']}"
         metrics = ", ".join(f"{key}={value:.6g}" for key, value in record["metrics"].items())
-        evaluation = [value for key, value in record["runs"].items() if "evaluation" in key]
+        evaluation = [
+            value
+            for key, value in record["runs"].items()
+            if "evaluation" in key and key.endswith("_run_uri")
+        ]
         dirty = " (dirty)" if record["dirty"] else ""
         lines.append(
             f"| `{name}` | `{record['commit'][:12]}`{dirty} | {device} | {record['seconds']} | "
@@ -223,7 +290,34 @@ def render(baseline: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _worker_main(argv: Sequence[str]) -> int:
+    """Import and execute one consumer after process-level isolation is established."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--flow", required=True)
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--options", required=True)
+    parser.add_argument("--result", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    module, separator, function = args.flow.partition(":")
+    if not separator:
+        raise ValueError(f"consumer flow must be module:function, got {args.flow!r}")
+    flow: Callable[..., Mapping[str, Any]] = getattr(importlib.import_module(module), function)
+    result = flow(args.data, args.workspace, seed=19, **json.loads(args.options))
+    representative_result = {"metrics": _metrics(result), **_run_ids(result)}
+    args.result.write_text(
+        json.dumps({"result": representative_result, "hardware": _hardware()}),
+        encoding="utf-8",
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    arguments = list(argv) if argv is not None else sys.argv[1:]
+    if arguments[:1] == ["_worker"]:
+        return _worker_main(arguments[1:])
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("consumers", nargs="+", choices=sorted(CONSUMERS))
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -231,7 +325,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--compare", action="store_true", help="compare with the baseline")
     parser.add_argument("--tolerance", type=float, default=0.0, help="absolute, per metric")
     parser.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))  # consumers import as reference_projects.*
     # Evidence belongs on the live MLflow server, never in a local file store.

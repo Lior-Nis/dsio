@@ -18,6 +18,11 @@ DATASET: ComponentConfig = {
     },
 }
 
+COLLATOR: ComponentConfig = {
+    "reference": "dsio.data.loading.collation:IdentityCollator",
+    "parameters": {},
+}
+
 # Predictor inputs: raw time-major signals, exactly as the exported model receives them.
 INPUTS: ComponentConfig = {
     "reference": "dsio.experimental.data.items:StoredItems",

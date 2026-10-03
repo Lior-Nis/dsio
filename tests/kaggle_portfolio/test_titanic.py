@@ -17,6 +17,12 @@ from dsio.data.loading import DsioDataModule
 from dsio.model.module import DsioModule
 
 
+def test_titanic_evaluation_uses_the_training_dataset_mapping() -> None:
+    from reference_projects.kaggle.titanic.components import DATASET, EVALUATION
+
+    assert EVALUATION == DATASET
+
+
 def test_titanic_csv_boundary_preserves_ids_and_rejects_duplicate_passengers(
     titanic_csvs: Path,
 ) -> None:
@@ -58,6 +64,11 @@ def test_titanic_flow_is_replayable_and_ticket_groups_do_not_leak(
     del kaggle_services
     from lightning import Trainer
     from prefect.testing.utilities import prefect_test_harness
+    from reference_projects.kaggle.titanic.components import (
+        DATASET,
+        EVALUATION,
+        INPUTS,
+    )
     from reference_projects.kaggle.titanic.flow import titanic_flow
 
     observed: list[tuple[type[object], type[object], list[str], list[str]]] = []
@@ -114,5 +125,18 @@ def test_titanic_flow_is_replayable_and_ticket_groups_do_not_leak(
         tmp_path / "titanic-provenance",
         optimizer="torch.optim:SGD",
         optimizer_parameters={"lr": 0.02},
+        dataset=DATASET,
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
     )
-    assert_downstream_evidence(first, tmp_path / "titanic-downstream")
+    assert_downstream_evidence(
+        first,
+        tmp_path / "titanic-downstream",
+        datasets={"export": INPUTS, "evaluation": EVALUATION, "inference": INPUTS},
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
+    )

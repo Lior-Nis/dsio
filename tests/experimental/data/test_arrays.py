@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
+from torch.utils.data import Dataset, IterableDataset
 
 from dsio.data.adapters import entity_examples
 from dsio.data.loading import LoadingError
@@ -103,3 +104,58 @@ def test_the_training_guard_applies_to_collation(tmp_path: Path) -> None:
         collate_arrays(ITEMS, store, ["s1", "s2"], collate_fn=wrong_rows)
     with pytest.raises(LoadingError, match="mapping"):
         collate_arrays(ITEMS, store, ["s1"], collate_fn=lambda items: items)  # type: ignore[arg-type,return-value]
+
+
+def test_the_training_identity_guard_applies_before_collation(tmp_path: Path) -> None:
+    store = _store(tmp_path / "store")
+
+    class Items(Dataset[dict[str, Any]]):
+        def __init__(self, items: list[Any]) -> None:
+            self.items = items
+
+        def __len__(self) -> int:
+            return len(self.items)
+
+        def __getitem__(self, position: int) -> Any:
+            return self.items[position]
+
+    def reversed_factory(store, examples, sample_ids):  # type: ignore[no-untyped-def]
+        del store, examples
+        return Items([{"sample_id": value, "x": torch.ones(1)} for value in reversed(sample_ids)])
+
+    with pytest.raises(LoadingError, match="changed sample_id"):
+        collate_arrays(reversed_factory, store, ["s1", "s2"])
+
+    def mutating_factory(store, examples, sample_ids):  # type: ignore[no-untyped-def]
+        del store, examples
+        requested = list(sample_ids)
+        sample_ids.reverse()
+        return Items([{"sample_id": value, "x": torch.ones(1)} for value in reversed(requested)])
+
+    with pytest.raises(LoadingError, match="changed sample_id"):
+        collate_arrays(mutating_factory, store, ["s1", "s2"])
+
+    def short_factory(store, examples, sample_ids):  # type: ignore[no-untyped-def]
+        del store, examples, sample_ids
+        return Items([{"sample_id": "s1", "x": torch.ones(1)}])
+
+    with pytest.raises(LoadingError, match="returned 1 items"):
+        collate_arrays(short_factory, store, ["s1", "s2"])
+
+    def non_mapping_factory(store, examples, sample_ids):  # type: ignore[no-untyped-def]
+        del store, examples, sample_ids
+        return Items(["not a mapping"])
+
+    with pytest.raises(LoadingError, match="must be a mapping"):
+        collate_arrays(non_mapping_factory, store, ["s1"])
+
+    class Stream(IterableDataset[dict[str, Any]]):
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            yield {"sample_id": "s1", "x": torch.ones(1)}
+
+    def iterable_factory(store, examples, sample_ids):  # type: ignore[no-untyped-def]
+        del store, examples, sample_ids
+        return Stream()
+
+    with pytest.raises(LoadingError, match="map-style Dataset"):
+        collate_arrays(iterable_factory, store, ["s1"])

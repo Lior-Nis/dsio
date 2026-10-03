@@ -35,7 +35,7 @@ def test_statistics_use_only_the_training_role(tmp_path: Path) -> None:
     manifest = _manifest(store)
     held_out = list(manifest.fold(0).assignments["test"])
 
-    fitted = fit_standardization(store, manifest, fold=0)
+    fitted = fit_standardization(store, manifest, partition=0)
     rows = np.concatenate(
         [store.read_sample(sample_id)["data"] for sample_id in fitted["sample_ids"]]
     ).astype(np.float64)
@@ -47,8 +47,78 @@ def test_statistics_use_only_the_training_role(tmp_path: Path) -> None:
     tampered = _store(tmp_path / "tampered", {sample_id: 1000.0 for sample_id in held_out})
     tampered_manifest = _manifest(tampered)
     assert tampered_manifest.fold(0).assignments == manifest.fold(0).assignments
-    refitted = fit_standardization(tampered, tampered_manifest, fold=0)
+    refitted = fit_standardization(tampered, tampered_manifest, partition=0)
     assert (refitted["mean"], refitted["scale"]) == (fitted["mean"], fitted["scale"])
+
+
+def test_fitting_refuses_a_held_out_role_and_a_different_store(tmp_path: Path) -> None:
+    store = _store(tmp_path / "original" / "store")
+    manifest = _manifest(store)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'role'"):
+        fit_standardization(store, manifest, partition=0, role="test")  # type: ignore[call-arg]
+
+    other = _store(tmp_path / "different" / "store", {"s0": 99.0})
+    with pytest.raises(ValueError, match="dataset digest"):
+        fit_standardization(other, manifest, partition=0)
+
+
+def test_fitting_uses_the_manifests_declared_training_role(tmp_path: Path) -> None:
+    store = _store(tmp_path / "store")
+    manifest = generate(
+        entity_examples(store),
+        "group_shuffle",
+        name="custom-roles",
+        seed=3,
+        roles=("fit", "calibrate"),
+        parameters={"test_size": 0.25},
+    )
+
+    fitted = fit_standardization(store, manifest, partition=0)
+
+    assert fitted["role"] == "fit"
+    assert fitted["sample_ids"] == manifest.fold(0).assignments["fit"]
+
+
+@pytest.mark.parametrize("missing", [False, True], ids=["empty", "missing"])
+def test_fitting_rejects_an_invalid_training_assignment_before_reading_samples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    missing: bool,
+) -> None:
+    store = _store(tmp_path / "store")
+    manifest = _manifest(store)
+    fold = manifest.fold(0)
+    assignments = dict(fold.assignments)
+    if missing:
+        assignments.pop("train")
+    else:
+        assignments["train"] = []
+    invalid_fold = fold.model_copy(update={"assignments": assignments})
+    invalid_manifest = manifest.model_copy(update={"folds": [invalid_fold]})
+
+    def forbidden_read(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("sample data was read before the manifest boundary was validated")
+
+    monkeypatch.setattr(SignalStore, "read_sample", forbidden_read)
+    with pytest.raises(ValueError, match="missing declared training role|assigns no samples"):
+        fit_standardization(store, invalid_manifest, partition=0)
+
+
+def test_fitting_requires_the_manifest_to_declare_a_training_role_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path / "store")
+    manifest = _manifest(store).model_copy(update={"required_roles": ()})
+
+    def forbidden_read(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("sample data was read before the manifest boundary was validated")
+
+    monkeypatch.setattr(SignalStore, "read_sample", forbidden_read)
+    with pytest.raises(ValueError, match="declares no training role"):
+        fit_standardization(store, manifest, partition=0)
 
 
 def test_observed_statistics_ignore_missing_values_and_refuse_empty_features(
@@ -61,8 +131,8 @@ def test_observed_statistics_ignore_missing_values_and_refuse_empty_features(
     manifest = _manifest(store)
 
     with pytest.raises(ValueError, match=r"features \[1\] have no observed value"):
-        fit_standardization(store, manifest, fold=0, observed=True)
-    assert np.isnan(fit_standardization(store, manifest, fold=0)["mean"][1])
+        fit_standardization(store, manifest, partition=0, observed=True)
+    assert np.isnan(fit_standardization(store, manifest, partition=0)["mean"][1])
 
 
 def test_standardize_matches_the_consumer_arithmetic_bit_for_bit() -> None:

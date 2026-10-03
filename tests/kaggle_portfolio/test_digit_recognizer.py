@@ -27,6 +27,20 @@ from dsio.tracking import TrackingError, record_provenance
 from dsio.train.artifacts import ArtifactIntegrityError, save_artifact
 
 
+def test_digit_classifier_and_evaluation_share_raw_pixel_mapping() -> None:
+    from reference_projects.kaggle.digit_recognizer.components import (
+        CLASSIFIER,
+        EVALUATION,
+        LABELLED_DATASET,
+        PIXEL_STANDARDIZER,
+    )
+    from reference_projects.kaggle.digit_recognizer.tasks.training import PREPROCESSOR
+
+    assert EVALUATION == LABELLED_DATASET
+    assert CLASSIFIER["parameters"]["preprocessor"] == PIXEL_STANDARDIZER
+    assert PREPROCESSOR == {"reference": "torch.nn:Identity", "parameters": {}}
+
+
 def test_digit_csv_boundary_requires_all_784_bounded_pixels(digit_csvs: Path) -> None:
     from reference_projects.kaggle.digit_recognizer.data import load_competition_data
 
@@ -175,6 +189,12 @@ def test_digit_flow_verifies_label_free_encoder_then_trains_a_frozen_classifier(
     del kaggle_services
     from lightning import Trainer
     from prefect.testing.utilities import prefect_test_harness
+    from reference_projects.kaggle.digit_recognizer.components import (
+        EVALUATION,
+        INPUTS,
+        LABELLED_DATASET,
+        UNLABELLED_DATASET,
+    )
     from reference_projects.kaggle.digit_recognizer.flow import digit_recognizer_flow
 
     observed: list[tuple[bool, list[bool], list[str], list[str], frozenset[str]]] = []
@@ -251,12 +271,22 @@ def test_digit_flow_verifies_label_free_encoder_then_trains_a_frozen_classifier(
         tmp_path / "digit-pretrain-provenance",
         optimizer="torch.optim:Adam",
         optimizer_parameters={"lr": 0.001},
+        dataset=UNLABELLED_DATASET,
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
     )
     assert_execution_evidence(
         result["train_run_id"],
         tmp_path / "digit-train-provenance",
         optimizer="torch.optim:Adam",
         optimizer_parameters={"lr": 0.002},
+        dataset=LABELLED_DATASET,
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
     )
     client = MlflowClient()
     provenance_path = client.download_artifacts(
@@ -272,4 +302,12 @@ def test_digit_flow_verifies_label_free_encoder_then_trains_a_frozen_classifier(
     assert encoder["run_id"] == result["pretrain_run_id"]
     assert encoder["digest"] == result["encoder_digest"]
     assert encoder["path"].endswith("/artifact.bin")
-    assert_downstream_evidence(result, tmp_path / "digit-downstream")
+    assert_downstream_evidence(
+        result,
+        tmp_path / "digit-downstream",
+        datasets={"export": INPUTS, "evaluation": EVALUATION, "inference": INPUTS},
+        collator={
+            "reference": "dsio.data.loading.collation:IdentityCollator",
+            "parameters": {},
+        },
+    )

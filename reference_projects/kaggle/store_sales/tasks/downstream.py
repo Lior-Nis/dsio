@@ -20,7 +20,7 @@ from dsio.experimental.inference import RegressionOutput
 from dsio.inference import build_predictor, log_predictor, predict, require_checkpoint_lineage
 from dsio.tracking import attempt, record_provenance
 from dsio.train.artifacts import ArtifactRef, save_artifact
-from reference_projects.kaggle.store_sales.components import DATASET, INPUTS, OUTPUT
+from reference_projects.kaggle.store_sales.components import COLLATOR, DATASET, INPUTS, OUTPUT
 from reference_projects.kaggle.store_sales.data import CONTEXT_DAYS, HORIZON_DAYS
 from reference_projects.kaggle.store_sales.tasks.training import TRAINING_FOLD
 
@@ -42,7 +42,12 @@ def export(
         model = resolve_component(components["model"], expected=torch.nn.Module)
         preprocessor = resolve_component(components["preprocessor"], expected=torch.nn.Module)
         ids = list(split["fold_assignments"][TRAINING_FOLD]["validate"])
-        inputs = collate_arrays(INPUTS, SignalStore(data["store_path"]), ids)
+        inputs = collate_arrays(
+            INPUTS,
+            SignalStore(data["store_path"]),
+            ids,
+            collate_fn=resolve_component(COLLATOR),
+        )
         output = resolve_component(OUTPUT, expected=RegressionOutput)
         identity = record_provenance(
             run.info.run_id,
@@ -54,6 +59,8 @@ def export(
             },
             components={
                 "builder": "dsio.inference.predictor:build_predictor",
+                "collator": COLLATOR,
+                "dataset_factory": INPUTS,
                 "model": components["model"],
                 "preprocessor": components["preprocessor"],
                 "output": OUTPUT,
@@ -93,7 +100,12 @@ def evaluate_model(
     with attempt(experiment_id) as run:
         ids = list(split["fold_assignments"][TRAINING_FOLD]["validate"])
         # The training collation yields the training target: log1p of sales.
-        arrays = collate_arrays(DATASET, SignalStore(data["store_path"]), ids)
+        arrays = collate_arrays(
+            DATASET,
+            SignalStore(data["store_path"]),
+            ids,
+            collate_fn=resolve_component(COLLATOR),
+        )
         inputs = {"sample_id": arrays["sample_id"], "x": arrays["x"]}
         log_targets = arrays["y"]
         context_log_sales = inputs["x"][:, :CONTEXT_DAYS, 0]
@@ -114,7 +126,11 @@ def evaluate_model(
                 ],
                 "sample_ids": ids,
             },
-            components={"evaluation": "dsio.eval.execution:evaluate"},
+            components={
+                "collator": COLLATOR,
+                "dataset_factory": DATASET,
+                "evaluation": "dsio.eval.execution:evaluate",
+            },
         )
         values = evaluate(
             run_id=run.info.run_id,
@@ -147,7 +163,12 @@ def infer_and_submit(
         sample_ids = list(data["test_sample_ids"])
         outputs = predict(
             exported["model_uri"],
-            collate_arrays(INPUTS, SignalStore(data["store_path"]), sample_ids),
+            collate_arrays(
+                INPUTS,
+                SignalStore(data["store_path"]),
+                sample_ids,
+                collate_fn=resolve_component(COLLATOR),
+            ),
         )
         forecasts = np.asarray(outputs["prediction"], dtype=float)
         store = SignalStore(data["store_path"])
@@ -170,7 +191,11 @@ def infer_and_submit(
                 "sample_ids": sample_ids,
                 "submission_ids": data["test_ids"],
             },
-            components={"inference": "dsio.inference.loading:predict"},
+            components={
+                "collator": COLLATOR,
+                "dataset_factory": INPUTS,
+                "inference": "dsio.inference.loading:predict",
+            },
         )
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer, lineterminator="\n")
